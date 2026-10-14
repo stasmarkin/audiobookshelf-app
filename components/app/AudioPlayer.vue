@@ -98,8 +98,12 @@
 
       <!-- Playback controls - jump buttons, play/pause, chapter navigation -->
       <div id="playerControls" class="absolute right-0 bottom-0 mx-auto" style="max-width: 414px">
-        <div class="flex items-center max-w-full" :class="playerSettings.lockUi ? 'justify-center' : 'justify-between'">
+        <div class="flex items-center max-w-full" :class="[playerSettings.lockUi ? 'justify-center' : 'justify-between', { 'long-jumps': showLongJumpBackwards || showLongJumpForward }]">
           <span v-show="showFullscreen && !playerSettings.lockUi" class="player-key material-symbols next-icon text-fg cursor-pointer" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="jumpChapterStart">first_page</span>
+          <div v-if="showLongJumpBackwards" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="longJumpBackwards">
+            <span class="material-symbols text-3xl leading-none">fast_rewind</span>
+            <span class="jump-label text-[10px] font-semibold leading-tight">{{ longJumpBackwardsLabel }}</span>
+          </div>
           <div v-show="!playerSettings.lockUi" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="jumpBackwards">
             <span class="material-symbols text-3xl leading-none">replay</span>
             <span v-if="showFullscreen" class="jump-label text-[10px] font-semibold leading-tight">{{ jumpBackwardsLabel }}</span>
@@ -113,6 +117,10 @@
           <div v-show="!playerSettings.lockUi" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="jumpForward">
             <span class="material-symbols text-3xl leading-none">forward_media</span>
             <span v-if="showFullscreen" class="jump-label text-[10px] font-semibold leading-tight">{{ jumpForwardLabel }}</span>
+          </div>
+          <div v-if="showLongJumpForward" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="longJumpForward">
+            <span class="material-symbols text-3xl leading-none">fast_forward</span>
+            <span class="jump-label text-[10px] font-semibold leading-tight">{{ longJumpForwardLabel }}</span>
           </div>
           <span v-show="showFullscreen && !playerSettings.lockUi" class="player-key material-symbols next-icon text-fg cursor-pointer" :class="nextChapter && !showLoadingState ? 'text-opacity-75' : 'text-opacity-10 key-disabled'" @click.stop="jumpNextChapter">last_page</span>
         </div>
@@ -325,6 +333,25 @@ export default {
     },
     jumpBackwardsTime() {
       return this.$store.getters['getJumpBackwardsTime']
+    },
+    longJumpForwardTime() {
+      return this.$store.getters['getLongJumpForwardTime']
+    },
+    longJumpBackwardsTime() {
+      return this.$store.getters['getLongJumpBackwardsTime']
+    },
+    longJumpForwardLabel() {
+      return this.getJumpLabel(this.longJumpForwardTime)
+    },
+    longJumpBackwardsLabel() {
+      return this.getJumpLabel(this.longJumpBackwardsTime)
+    },
+    // Long jump keys exist only in the full player, and only for a direction whose long jump is on
+    showLongJumpBackwards() {
+      return this.showFullscreen && !this.playerSettings.lockUi && this.longJumpBackwardsTime > 0
+    },
+    showLongJumpForward() {
+      return this.showFullscreen && !this.playerSettings.lockUi && this.longJumpForwardTime > 0
     },
     bookCoverAspectRatio() {
       return this.$store.getters['libraries/getBookCoverAspectRatio']
@@ -603,6 +630,16 @@ export default {
       await this.$hapticsImpact()
       if (this.showLoadingState) return
       AbsAudioPlayer.seekForward({ value: this.jumpForwardTime })
+    },
+    async longJumpBackwards() {
+      await this.$hapticsImpact()
+      if (this.showLoadingState) return
+      AbsAudioPlayer.seekBackward({ value: this.longJumpBackwardsTime })
+    },
+    async longJumpForward() {
+      await this.$hapticsImpact()
+      if (this.showLoadingState) return
+      AbsAudioPlayer.seekForward({ value: this.longJumpForwardTime })
     },
     setStreamReady() {
       this.readyTrackWidth = this.trackWidth
@@ -1393,6 +1430,12 @@ export default {
 }
 .fullscreen #playerControls .play-btn .material-symbols {
   font-size: 2.1rem;
+}
+/* With seven keys a narrow screen at a large font scale would push chapter end off screen: keys shrink and clip their glyph instead */
+.fullscreen #playerControls .long-jumps .player-key {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /*

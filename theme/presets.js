@@ -255,6 +255,8 @@ const keyBox = ({ width, height }) => Object.freeze({ width: `${width}px`, heigh
 const KEY_BOX = Object.freeze({ transport: keyBox(DECK.transport), utility: keyBox(DECK.utility), mini: keyBox(DECK.mini) })
 const TRANSPORT_BANK = Object.freeze({ 'justify-content': 'center', gap: `${DECK.transport.gap}px` })
 const PRIMARY_IN_BANK = Object.freeze({ margin: '0', top: `-${DECK.primaryLift}px` })
+const LONG_JUMPS_BANK = Object.freeze({ gap: `${DECK.transport.gap / 2}px` })
+const LONG_JUMPS_KEY = Object.freeze({ flex: `0 1 ${DECK.transport.width}px`, 'min-width': '0' })
 const TRANSPORT_SECTION = Object.freeze({ bottom: `${DECK.seam.base - DECK.seam.drop}px`, 'padding-bottom': `${DECK.seam.drop}px` })
 // The utility keys sit centered in the section under the seam (the odd px above them): no padding, the row's own offset
 const UTILITY_SECTION_DEPTH = DECK.seam.base - DECK.seam.drop
@@ -826,6 +828,9 @@ const EQUIPMENT_RULES = [
   ['.fullscreen #playerControls .jump-icon > .material-symbols', JUMP_GLYPH],
   ['.fullscreen #playerControls .jump-label', JUMP_DURATION],
   ['.fullscreen #playerControls .next-icon', CHAPTER_GLYPH],
+  // With the long jump keys the row holds seven keys: the secondary keys shrink to share it, the primary keeps its box
+  ['.fullscreen #playerControls > div.long-jumps', LONG_JUMPS_BANK],
+  ['.fullscreen #playerControls .long-jumps .player-key', LONG_JUMPS_KEY],
   // Collapsed player transport: both jumps, deeper face on the darker deck
   ['#streamContainer:not(.fullscreen) #playerControls .player-key', { ...KEY_BOX.mini, ...TRANSPORT_KEY_MINI }],
   ['#streamContainer:not(.fullscreen) #playerControls .player-key:not(.key-disabled):active', TRANSPORT_KEY_PRESSED_MINI],

@@ -173,7 +173,10 @@ data class DeviceSettings(
         var streamingUsingCellular: StreamingUsingCellularSetting,
         var androidAutoBrowseLimitForGrouping: Int,
         var androidAutoBrowseSeriesSequenceOrder: AndroidAutoBrowseSeriesSequenceOrderSetting,
-        var askBeforeStreamingIncomplete: Boolean = false
+        var askBeforeStreamingIncomplete: Boolean = false,
+        // Seconds, 0 = Off. Only the in-app player reads them; they live here so a settings save keeps them
+        var longJumpBackwardsTime: Int = 0,
+        var longJumpForwardTime: Int = 0
 ) {
   companion object {
     // Static method to get default device settings
