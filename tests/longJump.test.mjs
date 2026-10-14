@@ -52,9 +52,10 @@ test('Store getters read the long jumps from device settings, Off for settings s
 test('Full player row: chapter start, long back, short back, play, short forward, long forward, chapter end', async () => {
   const { template } = await playerComponent()
   const row = template.slice(template.indexOf('id="playerControls"'), template.indexOf('<!-- Chapter progress bar -->'))
-  const glyphs = [...row.matchAll(/>(first_page|fast_rewind|replay|play_arrow|forward_media|fast_forward|last_page)</g)].map((m) => m[1])
-  assert.deepEqual(glyphs, ['first_page', 'fast_rewind', 'replay', 'forward_media', 'fast_forward', 'last_page'])
-  assert.ok(row.indexOf('play-btn') > row.indexOf('>replay<') && row.indexOf('play-btn') < row.indexOf('>forward_media<'))
+  // One chevron family in the full player; the collapsed keys have no duration label and keep the circular arrows
+  const glyphs = [...row.matchAll(/>(first_page|keyboard_double_arrow_left|\{\{ showFullscreen \? 'chevron_left' : 'replay' \}\}|\{\{ showFullscreen \? 'chevron_right' : 'forward_media' \}\}|keyboard_double_arrow_right|last_page)</g)].map((m) => m[1])
+  assert.deepEqual(glyphs, ['first_page', 'keyboard_double_arrow_left', "{{ showFullscreen ? 'chevron_left' : 'replay' }}", "{{ showFullscreen ? 'chevron_right' : 'forward_media' }}", 'keyboard_double_arrow_right', 'last_page'])
+  assert.ok(row.indexOf('play-btn') > row.indexOf("'chevron_left'") && row.indexOf('play-btn') < row.indexOf("'chevron_right'"))
   // Long keys are transport keys (same theme paint and disabled state) with their own dynamic duration
   assert.match(row, /<div v-if="showLongJumpBackwards" class="player-key jump-icon [^"]*"[^>]*@click\.stop="longJumpBackwards">/)
   assert.match(row, /<div v-if="showLongJumpForward" class="player-key jump-icon [^"]*"[^>]*@click\.stop="longJumpForward">/)
@@ -66,9 +67,28 @@ test('Full player row: chapter start, long back, short back, play, short forward
 test('With seven keys every transport key may shrink, so none is pushed off a narrow screen; the primary keeps its box', async () => {
   const player = await read('../components/app/AudioPlayer.vue')
   const style = player.slice(player.indexOf('<style>'))
-  assert.match(style, /\.fullscreen #playerControls \.long-jumps \.player-key \{\s*flex: 0 1 auto;\s*min-width: 0;\s*overflow: hidden;\s*\}/)
+  assert.match(style, /\.fullscreen #playerControls \.long-jumps \.player-key \{\s*flex: 0 1 auto;\s*min-width: 0;\s*\}/)
   assert.doesNotMatch(style, /\.long-jumps \.play-btn/)
   assert.match(style, /\.fullscreen #playerControls \.play-btn \{\s*height: 65px;\s*width: 65px;\s*min-width: 65px;/)
+})
+
+test('Every full-player glyph has one size and centers on Play: room for the duration above it, none on LLAMA', async () => {
+  const player = await read('../components/app/AudioPlayer.vue')
+  const style = player.slice(player.indexOf('<style>'))
+  assert.match(style, /\.fullscreen #playerControls \.jump-icon > \.material-symbols \{\s*font-size: 2rem;\s*\}/)
+  assert.match(style, /\.fullscreen #playerControls \.next-icon \{\s*font-size: 2rem;\s*\}/)
+  // The top padding mirrors the duration's box (text-[10px] leading-tight = 12.5px, 2px gap), so the glyph sits mid-key
+  assert.match(player, /class="jump-label text-\[10px\] font-semibold leading-tight"/)
+  assert.match(style, /#playerControls \.jump-label \{\s*margin-top: 2px;\s*\}/)
+  assert.match(style, /\.fullscreen #playerControls \.jump-icon \{\s*font-size: 2\.4rem;\s*padding-top: 14\.5px;\s*\}/)
+  assert.equal(10 * 1.25 + 2, 14.5)
+  // The duration stays in the layout: never taken out of flow, never clipped
+  assert.doesNotMatch(style, /\.jump-label \{[^}]*position: absolute/)
+  assert.doesNotMatch(style, /\.player-key \{[^}]*overflow/)
+  const root = engine.themeSelector('llama')
+  const rules = presets.presentationRules([engine.getTheme('llama')])
+  assert.deepEqual({ ...rules[`${root} .fullscreen #playerControls .jump-icon`] }, { 'padding-top': '0' })
+  assert.deepEqual({ ...rules[`${root} .fullscreen #playerControls .jump-label`] }, { 'font-weight': '700' })
 })
 
 test('Long jump keys show only in the unlocked full player, per direction, when that long jump is on', async () => {
@@ -112,7 +132,7 @@ test('Seven keys fit a 360px-wide LLAMA full player: the secondary keys shrink, 
   assert.deepEqual({ ...bank }, { gap: '4px' })
   assert.deepEqual({ ...key }, { flex: '0 1 60px', 'min-width': '0' })
   // 360px viewport minus the row's 24px side padding; the 65px primary and six gaps leave each key room for its 2rem glyph.
-  // Narrower screens still keep all seven keys on screen (they shrink further and clip the glyph)
+  // Narrower screens still keep all seven keys on screen (they shrink further; the glyph may overflow its key)
   const keyWidth = (360 - 48 - 65 - 6 * 4) / 6
   assert.ok(keyWidth >= 32, String(keyWidth))
 })

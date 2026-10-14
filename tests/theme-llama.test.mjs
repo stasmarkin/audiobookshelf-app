@@ -1146,6 +1146,7 @@ const READOUT_LAYOUT_PROPERTIES = {
   '.fullscreen #playerControls .player-key': KEY_BOX_GEOMETRY,
   '.fullscreen #playerControls .jump-icon > .material-symbols': ['font-size', 'transform'],
   '.fullscreen #playerControls .jump-label': ['font-weight'],
+  '.fullscreen #playerControls .jump-icon': ['padding-top'],
   '.fullscreen #playerControls .next-icon': ['font-size'],
   '.fullscreen #playerControls > div.long-jumps': ['gap'],
   '.fullscreen #playerControls .long-jumps .player-key': ['flex', 'min-width'],

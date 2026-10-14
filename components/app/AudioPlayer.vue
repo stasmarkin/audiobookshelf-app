@@ -101,11 +101,11 @@
         <div class="flex items-center max-w-full" :class="[playerSettings.lockUi ? 'justify-center' : 'justify-between', { 'long-jumps': showLongJumpBackwards || showLongJumpForward }]">
           <span v-show="showFullscreen && !playerSettings.lockUi" class="player-key material-symbols next-icon text-fg cursor-pointer" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="jumpChapterStart">first_page</span>
           <div v-if="showLongJumpBackwards" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="longJumpBackwards">
-            <span class="material-symbols text-3xl leading-none">fast_rewind</span>
+            <span class="material-symbols text-3xl leading-none">keyboard_double_arrow_left</span>
             <span class="jump-label text-[10px] font-semibold leading-tight">{{ longJumpBackwardsLabel }}</span>
           </div>
           <div v-show="!playerSettings.lockUi" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="jumpBackwards">
-            <span class="material-symbols text-3xl leading-none">replay</span>
+            <span class="material-symbols text-3xl leading-none">{{ showFullscreen ? 'chevron_left' : 'replay' }}</span>
             <span v-if="showFullscreen" class="jump-label text-[10px] font-semibold leading-tight">{{ jumpBackwardsLabel }}</span>
           </div>
           <div class="play-btn cursor-pointer shadow-sm flex items-center justify-center rounded-full text-primary mx-4 relative overflow-hidden" :style="{ backgroundColor: coverChrome.control }" @mousedown.prevent @mouseup.prevent @click.stop="playPauseClick">
@@ -115,11 +115,11 @@
             <widgets-spinner-icon v-else class="h-8 w-8" />
           </div>
           <div v-show="!playerSettings.lockUi" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="jumpForward">
-            <span class="material-symbols text-3xl leading-none">forward_media</span>
+            <span class="material-symbols text-3xl leading-none">{{ showFullscreen ? 'chevron_right' : 'forward_media' }}</span>
             <span v-if="showFullscreen" class="jump-label text-[10px] font-semibold leading-tight">{{ jumpForwardLabel }}</span>
           </div>
           <div v-if="showLongJumpForward" class="player-key jump-icon text-fg cursor-pointer flex flex-col items-center" :class="showLoadingState ? 'text-opacity-10 key-disabled' : 'text-opacity-75'" @click.stop="longJumpForward">
-            <span class="material-symbols text-3xl leading-none">fast_forward</span>
+            <span class="material-symbols text-3xl leading-none">keyboard_double_arrow_right</span>
             <span class="jump-label text-[10px] font-semibold leading-tight">{{ longJumpForwardLabel }}</span>
           </div>
           <span v-show="showFullscreen && !playerSettings.lockUi" class="player-key material-symbols next-icon text-fg cursor-pointer" :class="nextChapter && !showLoadingState ? 'text-opacity-75' : 'text-opacity-10 key-disabled'" @click.stop="jumpNextChapter">last_page</span>
@@ -1416,8 +1416,17 @@ export default {
   bottom: 78px;
   left: 0;
 }
+/* Top padding as tall as the duration below (10px at leading-tight, 2px gap) centers the glyph on Play, like the chapter
+   keys, while the duration keeps its place in the layout */
 .fullscreen #playerControls .jump-icon {
   font-size: 2.4rem;
+  padding-top: 14.5px;
+}
+.fullscreen #playerControls .jump-icon > .material-symbols {
+  font-size: 2rem;
+}
+.fullscreen #playerControls .jump-label {
+  text-align: center;
 }
 .fullscreen #playerControls .next-icon {
   font-size: 2rem;
@@ -1431,11 +1440,11 @@ export default {
 .fullscreen #playerControls .play-btn .material-symbols {
   font-size: 2.1rem;
 }
-/* With seven keys a narrow screen at a large font scale would push chapter end off screen: keys shrink and clip their glyph instead */
+/* With seven keys a narrow screen at a large font scale would push chapter end off screen: keys shrink instead, and there
+   the glyphs may overlap */
 .fullscreen #playerControls .long-jumps .player-key {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
 }
 
 /*

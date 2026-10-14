@@ -340,6 +340,8 @@ const READOUT_BOX = Object.freeze({
 // every computed font size, so a legend cannot be capped by font size)
 const JUMP_GLYPH = Object.freeze({ 'font-size': DECK.jumpGlyph, transform: 'translateY(2px)' })
 const JUMP_DURATION = Object.freeze({ 'font-weight': '700' })
+// The faceplate key centers glyph and duration together, without the base player's room above the glyph
+const JUMP_KEY_NO_SPACER = Object.freeze({ 'padding-top': '0' })
 const CHAPTER_GLYPH = Object.freeze({ 'font-size': '2.25rem' })
 const MINI_JUMP_GLYPH = Object.freeze({ transform: 'translateY(1px) scale(0.78)' })
 // Selected equipment key: pressed in (inset bevel and inner shade, so it reads as a different physical state,
@@ -827,6 +829,7 @@ const EQUIPMENT_RULES = [
   ['.fullscreen #playerControls .player-key.key-disabled', { ...KEY_SOCKET, ...KEY_SOCKET_LEGEND }],
   ['.fullscreen #playerControls .jump-icon > .material-symbols', JUMP_GLYPH],
   ['.fullscreen #playerControls .jump-label', JUMP_DURATION],
+  ['.fullscreen #playerControls .jump-icon', JUMP_KEY_NO_SPACER],
   ['.fullscreen #playerControls .next-icon', CHAPTER_GLYPH],
   // With the long jump keys the row holds seven keys: the secondary keys shrink to share it, the primary keeps its box
   ['.fullscreen #playerControls > div.long-jumps', LONG_JUMPS_BANK],
