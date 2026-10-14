@@ -18,6 +18,9 @@ Merged into `plus`, not yet in a published release.
   after a restart.
 - **Download reliability:** fixed a crash when the download list subscribed while downloads were starting or finishing,
   and made Retry and new download requests safe while other downloads change the queue.
+- **Long jumps** (Settings → Long jump backwards / forwards time): an optional second jump in each direction, from 15
+  seconds to 30 minutes, Off by default. When on, the full player shows it outside the short jump. The notification,
+  headset, widget and Android Auto keep the short jumps.
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 
