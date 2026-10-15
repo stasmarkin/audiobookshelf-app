@@ -170,13 +170,6 @@ export default {
         ...queueItemPayload(nextItem),
         queueSource: { sourceType: 'playlist', sourceId: this.playlist.id, items: this.playableItems }
       }
-      // Local playback only resumes from local progress; pass an explicit override when this
-      // item's real progress is server-side (e.g. listened elsewhere before downloading), so it
-      // doesn't silently restart at 0:00 despite the UI showing it as partially listened.
-      if (nextItem.localLibraryItem) {
-        const progress = resolveItemProgress(this, nextItem)
-        if (progress?.currentTime) payload.startTime = progress.currentTime
-      }
       this.$eventBus.$emit('play-item', payload)
     },
     onDownloadOrStreamPlay() {

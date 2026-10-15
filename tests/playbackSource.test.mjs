@@ -111,3 +111,31 @@ test('casting a downloaded book asks native to stream it', async () => {
   assert.equal(calls.prepared[0].libraryItemId, 'li1')
   assert.equal(calls.prepared[0].forceStream, true)
 })
+
+// Native picks the start of a downloaded book (the newer of the device's media_progress and its copy's progress), so a
+// seek while paused survives. A Play on the playlist page must not override it with the Vuex progress.
+test('playlist Play of a downloaded book leaves the start position to native', async () => {
+  const strip = (source) => source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component =')
+  const vuexProgress = () => ({ currentTime: 235.295, isFinished: false })
+  const emitted = []
+  const bus = { $emit: (name, payload) => emitted.push([name, payload]) }
+  const item = { libraryItemId: 'li1', episodeId: null, libraryItem: { id: 'li1', media: { numTracks: 1 } }, localLibraryItem: { id: 'local_1' } }
+
+  const pageSandbox = { ...helpers, resolveItemProgress: vuexProgress, downloadMissingItems: () => {} }
+  vm.runInNewContext(strip(await read('../pages/playlist/_id.vue')), pageSandbox)
+  const page = { playlist: { id: 'pl1' }, playableItems: [item], $store: { commit: () => {} }, $eventBus: bus }
+  pageSandbox.component.methods.startPlaylistPlayback.call(page, item)
+
+  const rowSandbox = { resolveItemProgress: vuexProgress }
+  vm.runInNewContext(strip(await read('../components/tables/playlist/ItemTableRow.vue')), rowSandbox)
+  const row = { playerIsStartingPlayback: false, streamIsPlaying: false, episodeId: null, libraryItem: { id: 'li1' }, localLibraryItem: { id: 'local_1' }, localEpisode: null, playlistId: 'pl1', playlistPlayableItems: [item], item, $hapticsImpact: async () => {}, $store: { commit: () => {} }, $eventBus: bus }
+  await rowSandbox.component.methods.playClick.call(row)
+
+  assert.equal(emitted.length, 2)
+  for (const [name, payload] of emitted) {
+    assert.equal(name, 'play-item')
+    assert.equal(payload.startTime, undefined)
+  }
+  assert.equal(emitted[0][1].libraryItemId, 'local_1')
+  assert.equal(emitted[1][1].serverLibraryItemId, 'li1')
+})

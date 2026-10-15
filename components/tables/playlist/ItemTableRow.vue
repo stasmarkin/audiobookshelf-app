@@ -32,7 +32,6 @@
 </template>
 
 <script>
-import { resolveItemProgress } from '@/utils/playbackQueue'
 
 export default {
   props: {
@@ -179,11 +178,6 @@ export default {
             serverLibraryItemId: this.libraryItem.id,
             serverEpisodeId: this.episodeId
           }
-          // Local playback only resumes from local progress; pass an explicit override when this
-          // item's real progress is server-side (e.g. listened elsewhere before downloading), so
-          // it doesn't silently restart at 0:00 despite the progress bar showing it as started.
-          const progress = resolveItemProgress(this, this.item)
-          if (progress?.currentTime) payload.startTime = progress.currentTime
           this.$eventBus.$emit('play-item', payload)
         } else {
           this.$store.commit('setPlayerIsStartingPlayback', mediaId)
