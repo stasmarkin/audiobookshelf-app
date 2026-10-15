@@ -98,7 +98,10 @@ fun coalesce(existing: List<OutboxEntity>, incoming: OutboxEntity, inFlightId: L
       val lastDelete = existing.filter { it.matches(incoming) && it.kind == OutboxKind.PROGRESS_DELETE }.maxOfOrNull { it.id }
       val patches = queued.filter { it.kind == OutboxKind.PROGRESS_PATCH && (lastDelete == null || it.id > lastDelete) }
       val fields = (patches + incoming).flatMap { OutboxPayload.progressPatchFields(it.payload).orEmpty() }
-      OutboxPlan(patches.map { it.id }, incoming.copy(payload = OutboxPayload.progressPatch(fields)), null)
+      // An explicit "finished" survives the fold unless the new change overrides it (false)
+      val mark = OutboxPayload.finishedMark(incoming.payload)
+              ?: if (patches.any { OutboxPayload.finishedMark(it.payload) == true }) true else null
+      OutboxPlan(patches.map { it.id }, incoming.copy(payload = OutboxPayload.progressPatch(fields, mark)), null)
     }
     // The reset makes queued changes of the same progress pointless
     OutboxKind.PROGRESS_DELETE -> OutboxPlan(queued.filter { it.kind == OutboxKind.PROGRESS_PATCH }.map { it.id }, incoming, null)

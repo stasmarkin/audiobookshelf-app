@@ -131,7 +131,8 @@ class UserDataStore(
               source = PROGRESS_SOURCE_DEVICE, pending = true)
       progress.upsert(updated)
       // Only the flag: the server resets the position itself when a finished item is unmarked
-      enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, progressItemKey(libraryItemId, episodeId), OutboxPayload.progressPatch(listOf("isFinished")))
+      enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, progressItemKey(libraryItemId, episodeId),
+              OutboxPayload.progressPatch(listOf("isFinished"), finishedMark = true))
       updated
     }
     mirror.mirror(listOf(row), PaperProgressMirror.MARK_FINISHED_FIELDS)
@@ -166,7 +167,7 @@ class UserDataStore(
       val key = progressItemKey(libraryItemId, episodeId)
       val serverProgressId = row.serverProgressId
       if (serverProgressId != null) enqueue(serverConfigId, OutboxKind.PROGRESS_DELETE, key, OutboxPayload.progressDelete(serverProgressId, now))
-      else enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, key, OutboxPayload.progressPatch(RESET_FIELDS))
+      else enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, key, OutboxPayload.progressPatch(RESET_FIELDS, finishedMark = false))
       row
     } ?: return
     mirror.remove(listOf(reset))
@@ -189,12 +190,8 @@ class UserDataStore(
       if (existing != null && existing.pending && lastUpdate <= existing.lastUpdate) return@withTransaction null
       val row = existing ?: newRow(serverConfigId, libraryItemId, episodeId, lastUpdate).copy(pending = queued.isNotEmpty())
       // An unsent "finished" mark stays as the user set it, even while playing on: the PATCH sends the row's value.
-      // Such a mark is a PATCH with isFinished but no position; one that also sends the position (a reset without the
-      // record's id, an import, listening after a reset) sends isFinished as playback leaves it
-      val keepFinished = queued.any {
-        val fields = OutboxPayload.progressPatchFields(it.payload).orEmpty()
-        it.kind == OutboxKind.PROGRESS_PATCH && "isFinished" in fields && "currentTime" !in fields
-      }
+      // Only the user's mark: a reset, an import or listening after a reset send isFinished as playback leaves it
+      val keepFinished = queued.any { it.kind == OutboxKind.PROGRESS_PATCH && OutboxPayload.finishedMark(it.payload) == true }
       val finished = if (keepFinished) row.isFinished else progressValue >= FINISHED_PROGRESS
       var updated = row.copy(currentTime = currentTime, duration = duration, progress = progressValue,
               isFinished = finished, finishedAt = if (keepFinished) row.finishedAt else if (finished) lastUpdate else null,

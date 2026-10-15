@@ -51,12 +51,21 @@ object OutboxPayload {
   private val mapper = jacksonObjectMapper()
   private val nodes = JsonNodeFactory.instance
 
-  /** `{"fields":[…]}`: unknown names are left out, the rest are kept in [PROGRESS_PATCH_FIELDS] order. */
-  fun progressPatch(fields: Collection<String>): String {
+  /**
+   * `{"fields":[…]}`: unknown names are left out, the rest are kept in [PROGRESS_PATCH_FIELDS] order. [finishedMark]:
+   * true for the user's explicit "finished"/"not finished" (playback keeps it until sent), false for a change that
+   * overrides one (a reset), null for neither.
+   */
+  fun progressPatch(fields: Collection<String>, finishedMark: Boolean? = null): String {
     val array = nodes.arrayNode()
     PROGRESS_PATCH_FIELDS.filter { it in fields }.forEach { array.add(it) }
-    return mapper.writeValueAsString(nodes.objectNode().set<JsonNode>("fields", array))
+    val node = nodes.objectNode().set<ObjectNode>("fields", array)
+    if (finishedMark != null) node.put("finishedMark", finishedMark)
+    return mapper.writeValueAsString(node)
   }
+
+  /** The `finishedMark` of a `progress_patch` payload; null when it has none. */
+  fun finishedMark(payload: String): Boolean? = parse(payload)?.get("finishedMark")?.takeIf { it.isBoolean }?.asBoolean()
 
   /** The fields of a `progress_patch` payload, or null when it is not one. */
   fun progressPatchFields(payload: String): List<String>? {

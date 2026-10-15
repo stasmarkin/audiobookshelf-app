@@ -126,4 +126,18 @@ class OutboxCoalescerTest {
 
     assertEquals(OutboxPlan(emptyList(), remove(0), null), coalesce(listOf(otherItem, otherServer), remove(0), inFlightId = null))
   }
+
+  @Test
+  fun finishedMarkSurvivesFoldingUntilAResetOverridesIt() {
+    fun patch(id: Long, fields: List<String>, mark: Boolean?) =
+            OutboxEntity(id = id, serverConfigId = "srv", kind = OutboxKind.PROGRESS_PATCH, itemKey = "li1|",
+                    payload = OutboxPayload.progressPatch(fields, mark), createdAt = id)
+    val marked = coalesce(listOf(patch(1, listOf("isFinished"), true)), patch(0, listOf("ebookLocation"), null), null)
+    assertEquals(true, OutboxPayload.finishedMark(marked.insert!!.payload))
+
+    val reset = coalesce(listOf(patch(1, listOf("isFinished"), true)), patch(0, listOf("currentTime", "isFinished"), false), null)
+    assertEquals(false, OutboxPayload.finishedMark(reset.insert!!.payload))
+
+    assertEquals(null, OutboxPayload.finishedMark(coalesce(emptyList(), patch(0, listOf("currentTime"), null), null).insert!!.payload))
+  }
 }

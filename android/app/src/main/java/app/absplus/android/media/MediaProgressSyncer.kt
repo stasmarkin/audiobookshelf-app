@@ -229,7 +229,7 @@ class MediaProgressSyncer(
 
     // The widget shows the confirmed seek position right away (also while paused, e.g. its own jump keys)
     playerNotificationService.showWidgetPosition(currentPlaybackSession?.id, currentPlaybackSession?.currentTime)
-    currentPlaybackSession?.let { recordSeek(it, it.currentTime) }
+    currentPlaybackSession?.let { recordSeek(it, it.currentTime, playerNotificationService.currentPlaybackSession?.id) }
 
     MediaEventManager.seekEvent(currentPlaybackSession!!, null)
   }
@@ -417,7 +417,10 @@ class MediaProgressSyncer(
    * A seek is where the user put the player, also while paused, when no tick follows: without it the next refocus
    * would take the last tick's position as the device's and move the player back.
    */
-  internal fun recordSeek(session: PlaybackSession, currentTime: Double) {
+  internal fun recordSeek(session: PlaybackSession, currentTime: Double, playerSessionId: String?) {
+    // While the player prepares the next item (queue, restore, a switch to the downloaded file) its seek to the start
+    // position arrives before this syncer moves on: that position is not this session's
+    if (playerSessionId != session.id) return
     val serverConfigId = session.serverConnectionConfigId?.takeIf { it.isNotEmpty() } ?: return
     val libraryItemId = session.libraryItemId?.takeIf { it.isNotEmpty() } ?: return
     val episodeId = session.episodeId
@@ -425,8 +428,10 @@ class MediaProgressSyncer(
     if (duration <= 0) return
     val progress = currentTime / duration
     val lastUpdate = System.currentTimeMillis()
+    // A downloaded copy's Paper progress is the player's own (saveLocalProgress); a late mirror could undo a newer tick
+    val mirror = !session.isLocal
     SyncEngine.launchWrite { store ->
-      store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate)
+      store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate, mirror)
     }
   }
 

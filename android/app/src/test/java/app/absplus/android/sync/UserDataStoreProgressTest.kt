@@ -514,6 +514,23 @@ class UserDataStoreProgressTest {
   }
 
   @Test
+  fun finishedMarkAfterAResetWithoutTheServerIdIsKeptWhilePlaying() = runBlocking {
+    db.mediaProgress().upsert(progressRow(500.0, lastUpdate = 5L, pending = false).copy(serverProgressId = null))
+    store.resetProgress("srv", "li1", null)
+    now += 1
+    // Folded into the reset's PATCH, which also sends the position
+    store.markFinished("srv", "li1", null, true)
+    store.recordPlayback("srv", "li1", null, 300.0, 1000.0, 0.3, lastUpdate = now + 1)
+
+    assertEquals(1, outbox().size)
+    assertTrue(row()!!.isFinished)
+    pusher.pushAll(config)
+    val body = json(api.requests.single().body)
+    assertTrue(body.getBoolean("isFinished"))
+    assertEquals(300.0, body.getDouble("currentTime"), 0.0)
+  }
+
+  @Test
   fun resetWithoutTheServerIdThenListeningToTheEndIsFinished() = runBlocking {
     db.mediaProgress().upsert(progressRow(500.0, lastUpdate = 5L, pending = false).copy(serverProgressId = null))
     store.resetProgress("srv", "li1", null)

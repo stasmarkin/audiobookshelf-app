@@ -87,8 +87,12 @@ class MediaProgressSyncerWriteTest {
                   0.0, null, localItem, null, serverConfigId, null, null)
 
   /** One tick as `sync` stores it: the session moves on, then everything is saved. */
+  private var lastStamp = 0L
+
   private fun tick(session: PlaybackSession, time: Double) {
     session.syncData(MediaProgressSyncData(15, session.duration, time))
+    // Real ticks are 15 s apart; these run within a millisecond, and a tick no newer than a pending row is dropped
+    session.updatedAt = maxOf(session.updatedAt, lastStamp + 1).also { lastStamp = it }
     syncer.saveTick(session, time)
   }
 
@@ -162,12 +166,41 @@ class MediaProgressSyncerWriteTest {
     eventually("the tick") { row()?.currentTime == 100.0 }
 
     // Paused, the user moves the player on: no tick follows
-    syncer.recordSeek(session, 300.0)
+    syncer.recordSeek(session, 300.0, session.id)
     eventually("the seek") { row()?.currentTime == 300.0 }
 
     // Refocus asks native for the row after merging an older server value: it is where the user put the player
     val result = SyncEngine.store!!.mergeServerProgress("srv",
             app.absplus.android.sync.ServerProgress("mp1", "li1", null, 1000.0, 0.1, 100.0, false, false, null, null, 2L, 1L, null))
     assertEquals(300.0, result.row!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun theNextItemsStartSeekIsNotWrittenToThePreviousItem() = runBlocking {
+    val first = session(PLAYMETHOD_DIRECTPLAY, null)
+    tick(first, 100.0)
+    eventually("the tick") { row()?.currentTime == 100.0 }
+
+    // The queue moved to B, whose start position the player seeks to while this syncer still holds A
+    syncer.recordSeek(first, 2500.0, playerSessionId = "session-of-B")
+    // Writes run in order: once this one ran, a write of that seek would have too
+    SyncEngine.write { }
+    assertEquals("A keeps its own position", 100.0, row()!!.currentTime, 0.0)
+
+    syncer.recordSeek(first, 120.0, playerSessionId = first.id)
+    eventually("a seek of A itself") { row()?.currentTime == 120.0 }
+  }
+
+  @Test
+  fun aSeekOfADownloadedCopyLeavesItsPaperProgressToThePlayer() = runBlocking {
+    DeviceManager.dbManager.saveLocalLibraryItem(copy)
+    val session = session(PLAYMETHOD_LOCAL, copy)
+    tick(session, 100.0)
+    eventually("the tick") { row()?.currentTime == 100.0 }
+
+    syncer.recordSeek(session, 300.0, session.id)
+    eventually("the seek in Room") { row()?.currentTime == 300.0 }
+    SyncEngine.write { } // the write, with any mirror of it, is over
+    assertEquals("the player writes the copy's progress itself", 100.0, DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!.currentTime, 0.0)
   }
 }
