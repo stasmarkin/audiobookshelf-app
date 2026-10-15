@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -143,8 +144,8 @@ object SyncEngine {
   }
 
   /**
-   * Runs [block] with the store on the sync scope, off the caller's thread; false before [init]. For writes that must
-   * not hold up their caller, such as playback ticks.
+   * Queues [block] to run with the store on the sync scope, off the caller's thread and after the writes queued before
+   * it; false before [init]. For writes that must not hold up their caller, such as playback ticks.
    */
   fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = core?.launchWrite(block) ?: false
 
@@ -196,12 +197,25 @@ object SyncEngine {
     private var backoffJob: Job? = null
     private var snapshotFollowUp: Job? = null
     private val jobs = mutableListOf<Job>()
+    /** Writes run one at a time in the order they were requested: a later tick must not be overwritten by an earlier one. */
+    private val writes = Channel<suspend (UserDataStore) -> Unit>(Channel.UNLIMITED)
 
     init {
       pusher = OutboxPusher(deps.db, deps.http, store, deps.clock, deps.log)
     }
 
     fun start() {
+      jobs += scope.launch {
+        for (write in writes) {
+          try {
+            write(store)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            deps.logError("Write failed: $e")
+          }
+        }
+      }
       jobs += scope.launch {
         deps.serverState.collect { state -> if (state == ServerState.ONLINE) syncNow(SyncReason.ONLINE) }
       }
@@ -246,10 +260,7 @@ object SyncEngine {
       job.start()
     }
 
-    fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean {
-      scope.launch { block(store) }
-      return true
-    }
+    fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = writes.trySend(block).isSuccess
 
     fun onLocalWrite() {
       refreshPendingCount()

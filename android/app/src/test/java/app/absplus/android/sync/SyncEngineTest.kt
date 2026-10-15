@@ -473,4 +473,16 @@ class SyncEngineTest {
     assertEquals(120.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)
     assertEquals("an older value is not applied", false, SyncEngine.applyEvent("user_item_progress_updated", event, "srv"))
   }
+
+  @Test
+  fun queuedWritesRunInTheirOrder() = runBlocking {
+    start()
+    val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+    // A slow first write (a tick waiting for the database) must not be overtaken by the next one
+    SyncEngine.launchWrite { delay(100); order.add("earlier") }
+    SyncEngine.launchWrite { order.add("later") }
+
+    eventually("both writes ran") { order.size == 2 }
+    assertEquals(listOf("earlier", "later"), order)
+  }
 }
