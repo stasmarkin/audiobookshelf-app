@@ -90,6 +90,11 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 10. **Update from the previous version, online:** after installing over the previous version, all bookmarks from the server are in the list.
 11. **No full sync on a short trip to the background:** play, switch to another app for a minute and come back. The Diagnostics log has no new `SyncEngine` `Reconcile` entry for this return.
 12. **Sync after a long server outage in the background:** put the app in the background, stop the server for 20 minutes, start it, then open the app. The Diagnostics log shows exactly one new `SyncEngine` `Reconcile` entry.
+13. **Finished and reset in airplane mode:** with airplane mode on, mark a book that is not downloaded finished, mark a downloaded book and a downloaded podcast episode finished, and reset the progress of a third book. No toast appears, each change shows at once (also on the downloaded item's own page), and the indicator counts the waiting changes. Turn airplane mode off: the server's web client and a second device show the same values.
+14. **Listening on another device:** later, listen to one of those books on the second device. Back on the phone (Sync now or reopening the app), its progress follows the second device.
+15. **Offline listening is kept:** in airplane mode, listen to a downloaded book for a few minutes, then turn airplane mode off. Its position is not moved back by an older position on the server, and the server's web client shows the phone's position after the sync.
+16. **E-book position offline:** in airplane mode, read a few pages of a downloaded e-book, then turn airplane mode off. The server's web client opens it at that page.
+17. **Revoked session:** with the app open, revoke its session on the server (change the password in the web client). The app stays on the same page with the selected library, bookmarks and progress; the indicator says "sign in again". Mark something finished: it waits. Tap the indicator: the sign-in form opens for that server with the "session expired" message; after signing in, the waiting change reaches the server.
 
 ## Emulator baseline (for comparison)
 

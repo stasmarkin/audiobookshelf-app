@@ -33,6 +33,24 @@ Merged into `plus`, not yet in a published release.
   on the next sync. A bookmark made on a downloaded copy of another saved server is sent to that server when it is
   the active one again. Rolling back to the previous version keeps unsent offline bookmarks on the device; they are
   not shown or sent by that version and go out after updating again.
+- **Finished and progress work offline:** marking a book or episode finished or not finished, resetting progress and
+  the e-book reading position no longer fail without the server. They are saved on the device at once, show as
+  waiting changes in the indicator and reach the server when it is reachable, also for a downloaded copy of another
+  saved server (sent when that server is active again). Progress, finished marks and your permissions are shown after
+  a cold start without a network. One rule decides between the device and the server: the later change wins, and an
+  unsent change on the device, including unsent listening to a downloaded book, is never overwritten by the server.
+  A value from another device moves a paused player only when it wins. Progress deleted on another device or in the
+  web client disappears here on the next sync. The previous separate sync of downloaded-book progress is replaced by
+  this rule; progress saved by an older version (or after rolling back) is brought in on every start and sent if the
+  server does not have it or has an older value.
+- **A refused sign-in no longer throws you out:** when the server refuses the session (for example after a password
+  change), the app stays where it was with the selected library, progress and bookmarks; downloaded books keep
+  playing, changes keep waiting, and the indicator asks to sign in again (it opens the sign-in form for that server).
+  Until you sign in, the library tabs stay empty as they do offline. An explicit sign-out is unchanged.
+- **Rollback and a known limit:** rolling back to the previous version is safe: the downloaded-book progress it reads
+  is kept up to date alongside, and it sends unsent "finished" and resets itself. Until a later release, a listening
+  session the server accepts without taking its position (its own progress is newer) no longer protects the offline
+  position of that item.
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 

@@ -58,7 +58,9 @@ New in v0.16.0 ([announcement](https://github.com/ADD-OCD/audiobookshelfplus-app
 - Playback restoration: a paused book resumes from the widget, notification or a headset after Android closed the
   player, and reopening the app reconnects to what's playing. (Android's *Force stop* is still a hard stop.)
 - Fixed progress being saved to the wrong book during continuous playback.
-- Fixed offline listening progress being overwritten when reconnecting.
+- Fixed offline listening progress being overwritten when reconnecting: the later change wins, and unsent changes and
+  unsent listening to a downloaded book are never overwritten by the server.
+- "Finished", reset progress and e-book position work offline and are sent when the server is back.
 - Fixed playlist items restarting from 0:00 when their progress was only on the server.
 
 **Downloads and local files**
@@ -85,9 +87,11 @@ New in v0.16.0 ([announcement](https://github.com/ADD-OCD/audiobookshelfplus-app
   removed. Please look over a log before sharing it publicly.
 - Many smaller playback and download fixes from a full stability audit.
 
-**Known limitations:** While an audiobook is playing, progress updates from another device are not applied. The next
-progress save from this device may overwrite those updates. However, when you return to a paused audiobook, progress
-changes from another device are recognized and applied. See [CHANGELOG.md](https://github.com/ADD-OCD/audiobookshelfplus-app/blob/plus/CHANGELOG.md) for other known limitations.
+**Known limitations:** Progress follows one rule: the later change wins, and a change on this device that has not
+reached the server yet (including listening to a downloaded book offline) is never overwritten by the server. While an
+audiobook is playing, progress updates from another device are not applied, and the next progress save from this
+device may overwrite them; when you return to a paused audiobook, a newer change from another device is applied unless
+this device has an unsent one. Device clocks are trusted as the server trusts them. See [CHANGELOG.md](https://github.com/ADD-OCD/audiobookshelfplus-app/blob/plus/CHANGELOG.md) for other known limitations.
 
 ### Getting builds
 
