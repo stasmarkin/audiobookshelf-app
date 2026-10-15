@@ -17,6 +17,7 @@ export const state = () => ({
   socketConnected: false,
   serverState: 'unknown', // reachability of the active server (native AbsData): unknown | online | offline | unauthorized
   activeServerConfigId: null, // the saved server serverState is about, kept after logout and while offline
+  syncState: { running: false, pendingCount: 0, lastError: null, lastSyncAt: null }, // native sync of userdata.db ($absData)
   networkConnected: false,
   networkConnectionType: null,
   isNetworkUnmetered: true,
@@ -197,6 +198,10 @@ export const mutations = {
   },
   setActiveServerConfigId(state, val) {
     state.activeServerConfigId = val
+  },
+  setSyncState(state, val) {
+    if (!val) return
+    state.syncState = { running: !!val.running, pendingCount: val.pendingCount || 0, lastError: val.lastError || null, lastSyncAt: val.lastSyncAt || null }
   },
   setNetworkListenerInit(state, val) {
     state.isNetworkListenerInit = val

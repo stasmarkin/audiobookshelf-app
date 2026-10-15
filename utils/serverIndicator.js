@@ -1,21 +1,26 @@
 /**
  * What the app-bar connection indicator shows. `tone` maps to a text color in ConnectionIndicator.vue; `labelKey` is
- * the $strings key of the message shown on tap; `count` is reserved for pending sync work (null for now).
+ * the $strings key of the message shown on tap; `count` is the number of changes waiting to be sent (null when none).
  *
  * @param {{ serverState: string, networkConnected: boolean, hasServer: boolean, signedIn: boolean, socketConnected: boolean, syncState: object|null,
  *   attemptingConnection: boolean, networkConnectionType: string|null, isNetworkUnmetered: boolean }} input
  * @returns {{ icon: string|null, tone: 'ok'|'warning'|'error'|'muted'|'metered', labelKey: string|null, count: number|null }}
  */
-export function indicatorModel({ serverState, networkConnected, hasServer, signedIn, socketConnected, attemptingConnection, networkConnectionType, isNetworkUnmetered }) {
-  const show = (icon, tone, labelKey) => ({ icon, tone, labelKey, count: null })
+export function indicatorModel({ serverState, networkConnected, hasServer, signedIn, socketConnected, syncState, attemptingConnection, networkConnectionType, isNetworkUnmetered }) {
+  const pending = syncState?.pendingCount > 0 ? syncState.pendingCount : null
+  const show = (icon, tone, labelKey) => ({ icon, tone, labelKey, count: pending })
+  // Offline the message is about what still has to reach the server, not about the connection
+  const unsentOr = (labelKey) => (pending ? 'LabelChangesPending' : labelKey)
 
   if (!hasServer && !attemptingConnection) return show(null, 'muted', null)
   // Signed out on purpose (Disconnect) while the server is fine: nothing to report, the socket is closed on purpose
   if (!signedIn && !attemptingConnection && serverState === 'online') return show(null, 'muted', null)
-  if (!networkConnected) return show('wifi_off', 'error', 'MessageNoNetworkConnection')
+  if (!networkConnected) return show('wifi_off', 'error', unsentOr('MessageNoNetworkConnection'))
   if (attemptingConnection) return show('cloud_sync', 'warning', 'MessageAttemptingServerConnection')
   if (serverState === 'unauthorized') return show('lock', 'error', 'LabelSignInAgain')
-  if (serverState === 'offline') return show('cloud_off', 'warning', 'LabelServerUnreachable')
+  if (serverState === 'offline') return show('cloud_off', 'warning', unsentOr('LabelServerUnreachable'))
+  if (serverState === 'online' && syncState?.running) return show('cloud_sync', 'ok', 'LabelSyncing')
+  if (serverState === 'online' && pending) return show('cloud_upload', 'warning', 'LabelChangesPending')
 
   // online, or unknown while the first probe is pending: the socket tells whether live updates arrive
   if (!socketConnected) return show('cloud_off', 'warning', 'MessageSocketNotConnected')

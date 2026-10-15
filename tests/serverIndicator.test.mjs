@@ -69,3 +69,20 @@ test('indicator is hidden after a deliberate disconnect while the server is fine
   assert.equal(model({ signedIn: false, serverState: 'offline', socketConnected: false }).labelKey, 'LabelServerUnreachable', 'offline cold start')
   assert.equal(model({ signedIn: false, serverState: 'unauthorized', socketConnected: false }).labelKey, 'LabelSignInAgain')
 })
+
+test('indicator shows pending changes', () => {
+  const offline = model({ serverState: 'offline', socketConnected: false, syncState: { running: false, pendingCount: 3 } })
+  assert.deepEqual([offline.labelKey, offline.count, offline.icon], ['LabelChangesPending', 3, 'cloud_off'])
+
+  const airplane = model({ networkConnected: false, socketConnected: false, syncState: { running: false, pendingCount: 2 } })
+  assert.deepEqual([airplane.labelKey, airplane.count], ['LabelChangesPending', 2])
+
+  const syncing = model({ syncState: { running: true, pendingCount: 1 } })
+  assert.deepEqual([syncing.labelKey, syncing.icon], ['LabelSyncing', 'cloud_sync'])
+
+  const waiting = model({ syncState: { running: false, pendingCount: 1 } })
+  assert.equal(waiting.labelKey, 'LabelChangesPending', 'online with changes held back (backoff)')
+
+  assert.equal(model({ syncState: { running: false, pendingCount: 0 } }).count, null)
+  assert.equal(model({ serverState: 'offline', socketConnected: false, syncState: { pendingCount: 0 } }).labelKey, 'LabelServerUnreachable')
+})

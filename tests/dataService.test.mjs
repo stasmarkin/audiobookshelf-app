@@ -215,3 +215,165 @@ test('a deliberate socket logout does not ask for a probe', async () => {
   s.onDisconnect('io client disconnect')
   assert.deepEqual(reports, [])
 })
+
+// Bookmarks and sync state (offline-first 2a): native userdata.db is the source, the store follows onDataChanged
+
+function bookmarkStore() {
+  const store = fakeStore()
+  const commit = store.commit
+  store.commit = (type, payload) => {
+    commit(type, payload)
+    if (type === 'user/setBookmarks') store.state.bookmarks = payload
+  }
+  return store
+}
+
+function nativeBookmarks(list = []) {
+  const plugin = fakeAbsData({ state: 'offline', serverConfigId: 'server-a' })
+  plugin.calls = []
+  plugin.bookmarks = list
+  plugin.getBookmarks = async () => {
+    plugin.calls.push(['getBookmarks'])
+    return { bookmarks: plugin.bookmarks }
+  }
+  for (const name of ['addBookmark', 'renameBookmark', 'removeBookmark', 'syncNow', 'applyServerEvent']) {
+    plugin[name] = async (args) => {
+      plugin.calls.push([name, args])
+      return name === 'applyServerEvent' ? { applied: true } : undefined
+    }
+  }
+  plugin.getSyncState = async () => ({ running: false, pendingCount: 2, lastError: null, lastSyncAt: null })
+  return plugin
+}
+
+test('dataService reloads bookmarks into the store on onDataChanged bookmarks', async () => {
+  const store = bookmarkStore()
+  const plugin = nativeBookmarks([{ libraryItemId: 'li1', time: 754, title: 'Mark', createdAt: 1 }])
+  const $absData = createDataService({ plugin, store, platform: 'android' })
+  const seen = []
+  $absData.onDataChanged((payload) => seen.push(payload.scope))
+  await flush()
+
+  plugin.send('onDataChanged', { scope: 'progress', ids: ['li1|'] })
+  await flush()
+  assert.deepEqual(plugin.calls, [], 'progress does not reread bookmarks')
+
+  plugin.send('onDataChanged', { scope: 'bookmarks', ids: ['li1'] })
+  await flush()
+  assert.deepEqual(plugin.calls, [['getBookmarks']])
+  assert.deepEqual(store.state.bookmarks, plugin.bookmarks)
+  assert.deepEqual(seen, ['progress', 'bookmarks'])
+})
+
+test('bookmark writes go to native, with the server of a downloaded copy only when given', async () => {
+  const store = bookmarkStore()
+  const plugin = nativeBookmarks()
+  const $absData = createDataService({ plugin, store, platform: 'android' })
+
+  await $absData.addBookmark({ libraryItemId: 'li1', time: 754, title: 'Mark' })
+  await $absData.renameBookmark({ libraryItemId: 'li1', time: 754, title: 'Renamed', serverConfigId: 'server-b' })
+  await $absData.removeBookmark({ libraryItemId: 'li1', time: 754, serverConfigId: null })
+
+  assert.deepEqual(plugin.calls, [
+    ['addBookmark', { libraryItemId: 'li1', time: 754, title: 'Mark' }],
+    ['renameBookmark', { libraryItemId: 'li1', time: 754, title: 'Renamed', serverConfigId: 'server-b' }],
+    ['removeBookmark', { libraryItemId: 'li1', time: 754 }]
+  ])
+})
+
+test('sync state from native reaches the store and subscribers', async () => {
+  const store = bookmarkStore()
+  const plugin = nativeBookmarks()
+  const $absData = createDataService({ plugin, store, platform: 'android' })
+  await flush()
+  assert.deepEqual(store.commits.find(([type]) => type === 'setSyncState'), ['setSyncState', { running: false, pendingCount: 2, lastError: null, lastSyncAt: null }], 'read once on creation')
+
+  const seen = []
+  $absData.onSyncState((s) => seen.push(s.running))
+  plugin.send('onSyncState', { running: true, pendingCount: 2, lastError: null, lastSyncAt: null })
+  assert.deepEqual(store.commits.at(-1), ['setSyncState', { running: true, pendingCount: 2, lastError: null, lastSyncAt: null }])
+  assert.deepEqual(seen, [true])
+
+  await $absData.syncNow()
+  await $absData.syncNow({ reason: 'socket-init' })
+  assert.deepEqual(plugin.calls, [
+    ['syncNow', { reason: 'manual' }],
+    ['syncNow', { reason: 'socket-init' }]
+  ])
+  assert.deepEqual(await $absData.applyServerEvent({ event: 'user_updated', payload: { bookmarks: [] }, serverConfigId: 'server-a' }), { applied: true })
+  assert.deepEqual(plugin.calls.at(-1), ['applyServerEvent', { event: 'user_updated', payload: { bookmarks: [] }, serverConfigId: 'server-a' }])
+})
+
+test('web dev fallback proxies bookmarks to $axios and refreshes the store', async () => {
+  const store = bookmarkStore()
+  const plugin = nativeBookmarks()
+  const server = [{ libraryItemId: 'li1', time: 10, title: 'Old', createdAt: 1 }]
+  const axiosCalls = []
+  const $axios = {
+    async $get(url) {
+      axiosCalls.push(['get', url])
+      return { id: 'user', bookmarks: [...server] }
+    },
+    async $post(url, body) {
+      axiosCalls.push(['post', url, body])
+      server.push({ libraryItemId: 'li1', ...body, createdAt: 2 })
+    },
+    async $patch(url, body) {
+      axiosCalls.push(['patch', url, body])
+    },
+    async $delete(url) {
+      axiosCalls.push(['delete', url])
+    }
+  }
+  const $absData = createDataService({ plugin, store, platform: 'web', $axios })
+  const seen = []
+  $absData.onDataChanged((payload) => seen.push(payload.scope))
+
+  await $absData.addBookmark({ libraryItemId: 'li1', time: 754, title: 'New' })
+  await flush()
+  assert.deepEqual(axiosCalls.slice(0, 2), [
+    ['post', '/api/me/item/li1/bookmark', { time: 754, title: 'New' }],
+    ['get', '/api/me']
+  ])
+  assert.deepEqual(
+    store.state.bookmarks.map((b) => b.time),
+    [10, 754]
+  )
+  assert.deepEqual(plugin.calls, [], 'the native plugin is not used in the browser')
+
+  await $absData.renameBookmark({ libraryItemId: 'li1', time: 10, title: 'Renamed' })
+  await $absData.removeBookmark({ libraryItemId: 'li1', time: 10 })
+  await flush()
+  assert.deepEqual(axiosCalls.filter(([m]) => m !== 'get'), [
+    ['post', '/api/me/item/li1/bookmark', { time: 754, title: 'New' }],
+    ['patch', '/api/me/item/li1/bookmark', { time: 10, title: 'Renamed' }],
+    ['delete', '/api/me/item/li1/bookmark/10']
+  ])
+
+  const pushed = [{ libraryItemId: 'li2', time: 5, title: 'From socket', createdAt: 3 }]
+  assert.deepEqual(await $absData.applyServerEvent({ event: 'user_updated', payload: { bookmarks: pushed }, serverConfigId: 'server-a' }), { applied: true })
+  assert.deepEqual(store.state.bookmarks, pushed)
+  assert.equal(seen.at(-1), 'bookmarks')
+  await $absData.syncNow()
+  assert.deepEqual(plugin.calls, [])
+})
+
+test('bookmark getter works without a signed-in user', async () => {
+  let src = await read('../store/user.js')
+  src = src.replace(/^import .*\n/gm, '').replace(/^export const (\w+) =/gm, 'exports.$1 =')
+  const exports = {}
+  new Function('exports', 'AbsLogger', src)(exports, { info: async () => {} })
+  const state = exports.state()
+  assert.deepEqual(state.bookmarks, [])
+  state.user = null
+  exports.mutations.setBookmarks(state, [
+    { libraryItemId: 'li1', time: 1, title: 'A' },
+    { libraryItemId: 'li2', time: 2, title: 'B' }
+  ])
+  assert.deepEqual(
+    exports.getters.getUserBookmarksForItem(state)('li1').map((b) => b.title),
+    ['A']
+  )
+  exports.mutations.setBookmarks(state, null)
+  assert.deepEqual(exports.getters.getUserBookmarksForItem(state)('li1'), [])
+})

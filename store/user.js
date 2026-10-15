@@ -5,6 +5,8 @@ export const state = () => ({
   user: null,
   accessToken: null,
   serverConnectionConfig: null,
+  // Visible bookmarks of the active server from native userdata.db ($absData), also without a signed-in user
+  bookmarks: [],
   settings: {
     mobileOrderBy: 'addedAt',
     mobileOrderDesc: true,
@@ -44,8 +46,7 @@ export const getters = {
       })
     },
   getUserBookmarksForItem: (state) => (libraryItemId) => {
-    if (!state?.user?.bookmarks) return []
-    return state.user.bookmarks.filter((bm) => bm.libraryItemId === libraryItemId)
+    return (state.bookmarks || []).filter((bm) => bm.libraryItemId === libraryItemId)
   },
   getUserSetting: (state) => (key) => {
     return state.settings?.[key] ?? null
@@ -209,6 +210,9 @@ export const mutations = {
   },
   setServerConnectionConfig(state, serverConnectionConfig) {
     state.serverConnectionConfig = serverConnectionConfig
+  },
+  setBookmarks(state, bookmarks) {
+    state.bookmarks = Array.isArray(bookmarks) ? bookmarks : []
   },
   setSettings(state, settings) {
     if (!settings) return
