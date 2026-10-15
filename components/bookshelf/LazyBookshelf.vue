@@ -7,8 +7,12 @@
       </div>
     </template>
 
-    <div v-show="!entities.length && initialized" class="w-full py-16 text-center text-xl">
-      <div v-if="page === 'collections'" class="py-4">{{ $strings.MessageNoCollections }}</div>
+    <div v-if="catalogNotLoaded" class="w-full py-16 px-6 text-center text-lg">
+      <p class="py-4">{{ $strings.MessageCatalogNotLoaded }}</p>
+    </div>
+    <div v-else v-show="!entities.length && initialized" class="w-full py-16 text-center text-xl">
+      <div v-if="requiresServer" class="py-4">{{ $strings.LabelRequiresServer }}</div>
+      <div v-else-if="page === 'collections'" class="py-4">{{ $strings.MessageNoCollections }}</div>
       <div v-else class="py-4 capitalize">No {{ entityName }}</div>
       <ui-btn v-if="hasFilter" @click="clearFilter">{{ $strings.ButtonClearFilter }}</ui-btn>
     </div>
@@ -19,6 +23,10 @@
 import bookshelfCardsHelpers from '@/mixins/bookshelfCardsHelpers'
 import { createPageRetry } from '@/utils/pageRetry'
 import { textScale } from '@/utils/textScale'
+import { shouldRefreshShelf, createDebouncer } from '@/utils/catalogRefresh'
+
+/** Reads from the bridge are capped at 100 entities a call. */
+const MAX_PAGE_SIZE = 100
 
 export default {
   props: {
@@ -48,7 +56,10 @@ export default {
       isFirstInit: false,
       pendingReset: false,
       localLibraryItems: [],
-      pageRetry: createPageRetry()
+      pageRetry: createPageRetry(),
+      catalogNotLoaded: false,
+      requiresServer: false,
+      totalChanged: false
     }
   },
   watch: {
@@ -62,6 +73,13 @@ export default {
   computed: {
     user() {
       return this.$store.state.user.user
+    },
+    /** The Library tab reads the catalog of the saved server, also offline; the other tabs still need a signed-in user. */
+    canLoad() {
+      return this.entityName === 'books' ? !!this.$store.getters.getHasActiveServer : !!this.user
+    },
+    activeServerConfigId() {
+      return this.$store.state.activeServerConfigId
     },
     isBookEntity() {
       return this.entityName === 'books' || this.entityName === 'series-books'
@@ -180,14 +198,39 @@ export default {
         this.currentSFQueryString = this.buildSearchParams()
       }
 
-      const entityPath = this.entityName === 'books' || this.entityName === 'series-books' ? `items` : this.entityName
-      const sfQueryString = this.currentSFQueryString ? this.currentSFQueryString + '&' : ''
-      const fullQueryString = `?${sfQueryString}limit=${this.booksPerFetch}&page=${page}&minified=1&include=rssfeed,numEpisodesIncomplete`
+      let payload
+      if (this.entityName === 'books') {
+        const params = new URLSearchParams(this.currentSFQueryString || '')
+        payload = await this.$absData
+          .getLibraryItems({
+            libraryId: this.currentLibraryId,
+            sort: params.get('sort'),
+            desc: params.get('desc') === '1',
+            filter: params.get('filter'),
+            collapseseries: params.get('collapseseries') === '1',
+            limit: this.booksPerFetch,
+            page,
+            sortingIgnorePrefix: !!this.sortingIgnorePrefix
+          })
+          .catch((error) => {
+            console.error('failed to fetch books', error)
+            return null
+          })
+        if (payload && page === 0) {
+          // An empty answer from a replica never reconciled is "not downloaded yet", not "no books"
+          this.catalogNotLoaded = payload.replica?.reconciledAt == null && !payload.total && !payload.fromServer
+          this.requiresServer = !!payload.unsupportedFilter
+        }
+      } else {
+        const entityPath = this.entityName === 'series-books' ? `items` : this.entityName
+        const sfQueryString = this.currentSFQueryString ? this.currentSFQueryString + '&' : ''
+        const fullQueryString = `?${sfQueryString}limit=${this.booksPerFetch}&page=${page}&minified=1&include=rssfeed,numEpisodesIncomplete`
 
-      const payload = await this.$nativeHttp.get(`/api/libraries/${this.currentLibraryId}/${entityPath}${fullQueryString}`).catch((error) => {
-        console.error('failed to fetch books', error)
-        return null
-      })
+        payload = await this.$nativeHttp.get(`/api/libraries/${this.currentLibraryId}/${entityPath}${fullQueryString}`).catch((error) => {
+          console.error('failed to fetch books', error)
+          return null
+        })
+      }
 
       this.isFetchingEntities = false
       if (this.pendingReset) {
@@ -204,6 +247,7 @@ export default {
       this.pageRetry.succeeded(page)
       if (payload && payload.results) {
         console.log('Received payload', payload)
+        if (this.initialized && payload.total !== this.totalEntities) this.totalChanged = true
         if (!this.initialized) {
           this.initialized = true
           this.totalEntities = payload.total
@@ -219,8 +263,7 @@ export default {
             this.entityComponentRefs[index].setEntity(this.entities[index])
 
             if (this.isBookEntity) {
-              const entity = this.entities[index]
-              const localLibraryItem = this.localLibraryItems.find((lli) => lli.libraryItemId == entity.id || (entity.ino && lli.ino && lli.ino == entity.ino))
+              const localLibraryItem = this.findLocalCopy(this.entities[index])
               if (localLibraryItem) {
                 this.entityComponentRefs[index].setLocalLibraryItem(localLibraryItem)
               }
@@ -229,16 +272,28 @@ export default {
         }
       }
     },
+    /** The downloaded copy of a server item; replicas of two accounts on one server share item ids. */
+    findLocalCopy(entity) {
+      if (!entity) return null
+      return (
+        this.localLibraryItems.find((lli) => {
+          if (this.activeServerConfigId && lli.serverConnectionConfigId !== this.activeServerConfigId) return false
+          return lli.libraryItemId == entity.id || (entity.ino && lli.ino && lli.ino == entity.ino)
+        }) || null
+      )
+    },
     async loadPage(page) {
       if (!this.currentLibraryId) {
         console.error('[LazyBookshelf] loadPage current library id not set')
+        // The saved server has no library on the device yet: its catalog was never downloaded
+        if (this.entityName === 'books' && this.canLoad) this.catalogNotLoaded = true
         return
       }
       this.pagesLoaded[page] = true
       await this.fetchEntities(page)
     },
     async retryPage(page) {
-      if (this.pagesLoaded[page] || !this.user) return
+      if (this.pagesLoaded[page] || !this.canLoad) return
       await this.loadPage(page)
       // Mount the rows now in view: a first page that failed left nothing mounted, and no scroll may come
       await this.$nextTick()
@@ -266,13 +321,12 @@ export default {
 
       var firstBookPage = Math.floor(firstBookIndex / this.booksPerFetch)
       var lastBookPage = Math.floor(lastBookIndex / this.booksPerFetch)
-      if (!this.pagesLoaded[firstBookPage]) {
-        console.log('Must load next batch', firstBookPage, 'book index', firstBookIndex)
-        this.loadPage(firstBookPage)
-      }
-      if (!this.pagesLoaded[lastBookPage]) {
-        console.log('Must load last next batch', lastBookPage, 'book index', lastBookIndex)
-        this.loadPage(lastBookPage)
+      // Every page in view: with pages capped at 100 the visible cards can span more than two
+      for (let page = firstBookPage; page <= lastBookPage; page++) {
+        if (!this.pagesLoaded[page]) {
+          console.log('Must load batch', page, 'book index', firstBookIndex)
+          this.loadPage(page)
+        }
       }
 
       // Remove entities out of view
@@ -322,9 +376,11 @@ export default {
       this.totalEntities = 0
       this.currentPage = 0
       this.initialized = false
+      this.catalogNotLoaded = false
+      this.requiresServer = false
 
       this.initSizeData()
-      if (this.user) {
+      if (this.canLoad) {
         await this.loadPage(0)
         var lastBookIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
         this.mountEntites(0, lastBookIndex)
@@ -364,7 +420,7 @@ export default {
       this.bookshelfMarginLeft = (this.bookshelfWidth - this.entitiesPerShelf * this.totalEntityCardWidth) / 2
 
       const entitiesPerPage = this.shelvesPerPage * this.entitiesPerShelf
-      this.booksPerFetch = Math.ceil(entitiesPerPage / 20) * 20 // Round up to the nearest 20
+      this.booksPerFetch = Math.min(MAX_PAGE_SIZE, Math.ceil(entitiesPerPage / 20) * 20) // Round up to the nearest 20
 
       if (this.totalEntities) {
         this.totalShelves = Math.ceil(this.totalEntities / this.entitiesPerShelf)
@@ -373,7 +429,7 @@ export default {
     },
     async init() {
       if (this.isFirstInit) return
-      if (!this.user) {
+      if (!this.canLoad) {
         // Offline support not available
         await this.resetEntities()
         this.$eventBus.$emit('bookshelf-total-entities', 0)
@@ -400,7 +456,7 @@ export default {
     },
     scroll(e) {
       if (!e || !e.target) return
-      if (!this.user) return
+      if (!this.canLoad) return
       var { scrollTop } = e.target
       this.handleScroll(scrollTop)
     },
@@ -472,14 +528,42 @@ export default {
         this.resetEntities()
       }
     },
+    /** A catalog or progress change native reports that this shelf shows: its loaded pages are read again. */
+    dataChanged(change) {
+      const shelf = { entity: this.entityName, libraryId: this.currentLibraryId, sort: this.orderBy, filter: this.filterBy, collapseSeries: !!this.collapseSeries }
+      if (!shouldRefreshShelf(change, shelf)) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(this.refreshLoadedPages)
+    },
+    /** Reads the loaded pages again in place; a changed total rebuilds the list at the same scroll position. */
+    async refreshLoadedPages() {
+      if (this.isDestroyed || !this.initialized) return
+      if (this.isFetchingEntities) {
+        this.refreshDebouncer.schedule(this.refreshLoadedPages)
+        return
+      }
+      this.totalChanged = false
+      for (const page of Object.keys(this.pagesLoaded).map(Number)) await this.fetchEntities(page)
+      if (!this.totalChanged) return
+      const wrapper = document.getElementById('bookshelf-wrapper')
+      const scrollTop = wrapper ? wrapper.scrollTop : 0
+      await this.resetEntities()
+      if (wrapper) {
+        wrapper.scrollTop = scrollTop
+        this.handleScroll(scrollTop)
+      }
+    },
     libraryItemAdded(libraryItem) {
+      // The Library tab follows native's catalog notice instead
+      if (this.entityName === 'books') return
       console.log('libraryItem added', libraryItem)
       // TODO: Check if item would be on this shelf
       this.resetEntities()
     },
     libraryItemUpdated(libraryItem) {
+      if (this.entityName === 'books') return
       console.log('Item updated', libraryItem)
-      if (this.entityName === 'books' || this.entityName === 'series-books') {
+      if (this.entityName === 'series-books') {
         var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
         if (indexOf >= 0) {
           this.entities[indexOf] = libraryItem
@@ -487,7 +571,7 @@ export default {
             this.entityComponentRefs[indexOf].setEntity(libraryItem)
 
             if (this.isBookEntity) {
-              var localLibraryItem = this.localLibraryItems.find((lli) => lli.libraryItemId == libraryItem.id || (libraryItem.ino && lli.ino && lli.ino == libraryItem.ino))
+              var localLibraryItem = this.findLocalCopy(libraryItem)
               if (localLibraryItem) {
                 this.entityComponentRefs[indexOf].setLocalLibraryItem(localLibraryItem)
               }
@@ -497,7 +581,7 @@ export default {
       }
     },
     libraryItemRemoved(libraryItem) {
-      if (this.entityName === 'books' || this.entityName === 'series-books') {
+      if (this.entityName === 'series-books') {
         var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
         if (indexOf >= 0) {
           this.entities = this.entities.filter((ent) => ent.id !== libraryItem.id)
@@ -508,11 +592,13 @@ export default {
       }
     },
     libraryItemsAdded(libraryItems) {
+      if (this.entityName === 'books') return
       console.log('items added', libraryItems)
       // TODO: Check if item would be on this shelf
       this.resetEntities()
     },
     libraryItemsUpdated(libraryItems) {
+      if (this.entityName === 'books') return
       libraryItems.forEach((ab) => {
         this.libraryItemUpdated(ab)
       })
@@ -531,6 +617,7 @@ export default {
 
       this.$eventBus.$on('library-changed', this.libraryChanged)
       this.$eventBus.$on('user-settings', this.settingsUpdated)
+      if (this.entityName === 'books') this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
 
       this.$socket.$on('item_updated', this.libraryItemUpdated)
       this.$socket.$on('item_added', this.libraryItemAdded)
@@ -553,6 +640,9 @@ export default {
 
       this.$eventBus.$off('library-changed', this.libraryChanged)
       this.$eventBus.$off('user-settings', this.settingsUpdated)
+      if (this.stopDataChanged) this.stopDataChanged()
+      this.stopDataChanged = null
+      if (this.refreshDebouncer) this.refreshDebouncer.cancel()
 
       this.$socket.$off('item_updated', this.libraryItemUpdated)
       this.$socket.$off('item_added', this.libraryItemAdded)

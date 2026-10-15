@@ -26,7 +26,7 @@
       <p class="text-white" :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }">{{ booksInSeries }}</p>
     </div>
 
-    <div class="w-full h-full absolute top-0 left-0 rounded overflow-hidden z-10">
+    <div class="w-full h-full absolute top-0 left-0 rounded overflow-hidden z-10" :class="{ 'opacity-50': notAvailableOffline }">
       <div v-show="libraryItem && !imageReady" class="absolute top-0 left-0 w-full h-full flex items-center justify-center" :style="{ padding: sizeMultiplier * 0.5 + 'rem' }">
         <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }" class="text-fg-muted text-center">{{ title }}</p>
       </div>
@@ -69,6 +69,10 @@
     <!-- Downloaded icon -->
     <div v-if="showHasLocalDownload" class="absolute right-0 top-0 z-20" :style="{ top: (isPodcast || (seriesSequence && showSequence) ? 1.75 : 0.375) * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem', padding: `${0.1 * sizeMultiplier}rem ${0.25 * sizeMultiplier}rem` }">
       <span class="material-symbols text-2xl text-success">download_done</span>
+    </div>
+
+    <div v-if="notAvailableOffline" class="not-offline-badge absolute left-0 right-0 z-20 flex justify-center pointer-events-none" :style="{ bottom: 0.5 * sizeMultiplier + 'rem' }">
+      <p class="rounded bg-black/80 text-white text-center px-1" :style="{ fontSize: 0.65 * sizeMultiplier + 'rem' }">{{ $strings.LabelNotAvailableOffline }}</p>
     </div>
 
     <!-- Error widget -->
@@ -411,7 +415,12 @@ export default {
       return this._libraryItem.rssFeed || null
     },
     showPlayButton() {
-      return !!this.queueSource && !this.collapsedSeries && !this.isPodcast && !this.isMissing && !this.isInvalid && !!this.numTracks
+      return !!this.queueSource && !this.collapsedSeries && !this.isPodcast && !this.isMissing && !this.isInvalid && !!this.numTracks && !this.notAvailableOffline
+    },
+    /** Offline, a server item without a downloaded copy cannot be opened or played (the replica lists it anyway). */
+    notAvailableOffline() {
+      if (this.isLocal || this.localLibraryItem || this.collapsedSeries || !this.libraryItem) return false
+      return this.store.state.serverState !== 'online'
     }
   },
   methods: {

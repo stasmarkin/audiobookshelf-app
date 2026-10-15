@@ -7,7 +7,7 @@
           <div class="absolute cover-bg" ref="coverBg" />
         </div>
 
-        <div class="w-full h-full absolute top-0 left-0">
+        <div class="w-full h-full absolute top-0 left-0" :class="{ 'opacity-50': notAvailableOffline }">
           <img v-show="libraryItem" ref="cover" :src="bookCoverSrc" class="w-full h-full transition-opacity duration-300" :class="showCoverBg ? 'object-contain' : 'object-fill'" @load="imageLoaded" :style="{ opacity: imageReady ? 1 : 0 }" />
         </div>
 
@@ -20,6 +20,7 @@
         </p>
         <p class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ displayAuthor }}</p>
         <p v-if="displaySortLine" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ displaySortLine }}</p>
+        <p v-if="notAvailableOffline" class="not-offline-badge truncate text-warning" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ $strings.LabelNotAvailableOffline }}</p>
         <p v-if="duration" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ $elapsedPretty(duration) }}</p>
 
         <p v-if="numEpisodesIncomplete" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">
@@ -257,10 +258,15 @@ export default {
       return this.store.state.isCasting
     },
     showReadButton() {
-      return !this.isSelectionMode && !this.showPlayButton && this.hasEbook
+      return !this.isSelectionMode && !this.showPlayButton && this.hasEbook && !this.notAvailableOffline
     },
     showPlayButton() {
-      return !this.isSelectionMode && !this.isMissing && !this.isInvalid && this.numTracks && !this.isPodcast
+      return !this.isSelectionMode && !this.isMissing && !this.isInvalid && this.numTracks && !this.isPodcast && !this.notAvailableOffline
+    },
+    /** Offline, a server item without a downloaded copy cannot be opened or played (the replica lists it anyway). */
+    notAvailableOffline() {
+      if (this.isLocal || this.localLibraryItem || this.collapsedSeries || !this.libraryItem) return false
+      return this.store.state.serverState !== 'online'
     },
     showSmallEBookIcon() {
       return !this.isSelectionMode && this.hasEbook

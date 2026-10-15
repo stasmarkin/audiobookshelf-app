@@ -84,7 +84,7 @@ export default {
         instance.setEntity(entity)
 
         if (this.isBookEntity && !entity.isLocal) {
-          var localLibraryItem = this.localLibraryItems.find((lli) => lli.libraryItemId == entity.id || (entity.ino && lli.ino && lli.ino == entity.ino))
+          var localLibraryItem = this.findLocalCopy(entity)
           if (localLibraryItem) {
             instance.setLocalLibraryItem(localLibraryItem)
           }
