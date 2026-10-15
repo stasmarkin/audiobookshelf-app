@@ -1,8 +1,43 @@
 import { CapacitorHttp } from '@capacitor/core'
 import { isRenewableUrl } from '@/utils/authRenewal'
+import { AbsData } from '@/plugins/capacitor/AbsData'
+
+// Names of the Java exceptions CapacitorHttp rejects with (err.code) when the server could not be reached. Other
+// rejections (MalformedURLException, JSONException of the request body, ...) are about the request, not the server.
+const UNREACHABLE_ERROR_CODES = new Set([
+  'ConnectException',
+  'SocketTimeoutException',
+  'UnknownHostException',
+  'NoRouteToHostException',
+  'SSLException',
+  'SSLHandshakeException',
+  'SSLPeerUnverifiedException',
+  'InterruptedIOException',
+  'SocketException'
+])
 
 export default function ({ store, $authRenewal }, inject) {
   const responseError = (res) => new Error(typeof res.data === 'string' ? res.data : `HTTP ${res.status}`)
+
+  // Native decides whether the url belongs to the active server; a report never fails the request
+  const report = (method, payload) => {
+    try {
+      Promise.resolve(AbsData[method](payload)).catch(() => {})
+    } catch {}
+  }
+
+  const send = async (request) => {
+    const isHttp = /^https?:\/\//i.test(request.url)
+    let res
+    try {
+      res = await CapacitorHttp.request(request)
+    } catch (error) {
+      if (isHttp && UNREACHABLE_ERROR_CODES.has(error?.code)) report('reportServerUnreachable', { address: request.url })
+      throw error
+    }
+    if (isHttp) report('reportServerResponse', { address: request.url, status: res.status })
+    return res
+  }
 
   const nativeHttp = {
     async request(method, _url, data, options = {}) {
@@ -32,7 +67,7 @@ export default function ({ store, $authRenewal }, inject) {
       }
       console.log(`[nativeHttp] Making ${method} request to ${url}`)
 
-      const res = await CapacitorHttp.request({ method, url, data, headers, ...options })
+      const res = await send({ method, url, data, headers, ...options })
       if (res.status === 401) {
         console.error(`[nativeHttp] 401 status for url "${url}"`)
         // The token this request was sent with, and the saved server it belongs to
@@ -57,7 +92,7 @@ export default function ({ store, $authRenewal }, inject) {
       const accessToken = await $authRenewal.renew({ serverConnectionConfigId, token: sentToken })
 
       console.log('[nativeHttp] Retrying original request with new token...')
-      const retryResponse = await CapacitorHttp.request({
+      const retryResponse = await send({
         method,
         url,
         data,

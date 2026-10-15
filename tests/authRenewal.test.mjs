@@ -350,7 +350,9 @@ async function app({ store = fakeStore() } = {}) {
   const inject = (name, value) => (ctx[`$${name}`] = value)
   const renewalPlugin = await loadPlugin('../plugins/authRenewal.js', { AbsDatabase: { refreshAccessToken: ({ serverConnectionConfigId }) => native.refresh(serverConnectionConfigId) }, createAuthRenewal })
   renewalPlugin(ctx, inject)
-  const nativeHttpPlugin = await loadPlugin('../plugins/nativeHttp.js', { CapacitorHttp: http.CapacitorHttp, isRenewableUrl })
+  // Reachability reports go to native AbsData (covered by dataService.test.mjs); here they are ignored
+  const AbsData = { reportServerResponse: async () => {}, reportServerUnreachable: async () => {} }
+  const nativeHttpPlugin = await loadPlugin('../plugins/nativeHttp.js', { CapacitorHttp: http.CapacitorHttp, isRenewableUrl, AbsData })
   nativeHttpPlugin(ctx, inject)
   return { ctx, store, native, http, location }
 }

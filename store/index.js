@@ -15,6 +15,8 @@ export const state = () => ({
   isCastAvailable: false,
   attemptingConnection: false,
   socketConnected: false,
+  serverState: 'unknown', // reachability of the active server (native AbsData): unknown | online | offline | unauthorized
+  activeServerConfigId: null, // the saved server serverState is about, kept after logout and while offline
   networkConnected: false,
   networkConnectionType: null,
   isNetworkUnmetered: true,
@@ -109,6 +111,8 @@ export const getters = {
     if (!state.playbackQueue) return null
     return state.playbackQueue.items[state.playbackQueue.currentIndex] || null
   },
+  getIsServerOnline: (state) => state.serverState === 'online',
+  getHasActiveServer: (state) => state.activeServerConfigId != null,
   getPlaybackQueueUpcomingItems: (state) => {
     if (!state.playbackQueue) return []
     return state.playbackQueue.items.slice(state.playbackQueue.currentIndex + 1)
@@ -187,6 +191,12 @@ export const mutations = {
   },
   setSocketConnected(state, val) {
     state.socketConnected = val
+  },
+  setServerState(state, val) {
+    state.serverState = val
+  },
+  setActiveServerConfigId(state, val) {
+    state.activeServerConfigId = val
   },
   setNetworkListenerInit(state, val) {
     state.isNetworkListenerInit = val

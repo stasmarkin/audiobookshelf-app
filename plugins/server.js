@@ -2,10 +2,12 @@ import { io } from 'socket.io-client'
 import EventEmitter from 'events'
 
 class ServerSocket extends EventEmitter {
-  constructor(store) {
+  constructor(store, app) {
     super()
 
     this.$store = store
+    // $data is injected after this plugin is created, so it is read from app at event time
+    this.app = app
     this.socket = null
     this.connected = false
     this.serverAddress = null
@@ -79,6 +81,7 @@ class ServerSocket extends EventEmitter {
     this.connected = true
     this.$store.commit('setSocketConnected', true)
     this.emit('connection-update', true)
+    this.app?.$data?.reportServerResponse({ address: this.serverAddress, status: 200 })
     this.sendAuthenticate()
   }
 
@@ -101,6 +104,8 @@ class ServerSocket extends EventEmitter {
     this.connected = false
     this.$store.commit('setSocketConnected', false)
     this.emit('connection-update', false)
+    // A lost socket on a live network is how a server that went away is noticed without any request; not on logout
+    if (reason !== 'io client disconnect') this.app?.$data?.reportSocketLost()
   }
 
   onInit(data) {
@@ -134,5 +139,5 @@ class ServerSocket extends EventEmitter {
 }
 
 export default ({ app, store }, inject) => {
-  inject('socket', new ServerSocket(store))
+  inject('socket', new ServerSocket(store, app))
 }
