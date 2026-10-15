@@ -7,6 +7,13 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Authors offline:** the Authors tab reads the same catalog copy, so it opens without the server with the last
+  synced authors and their book counts, sorted by name (the server listed them in no set order). Tapping an author
+  opens the Library tab filtered to their books, offline too, also for an author added on the server since the
+  last full sync. Offline, or when a photo fails to load, author photos show the placeholder. New, renamed, merged
+  and removed authors and changed book counts follow the server while the app is connected. Until a library's
+  authors have been copied once, the tab reads the server as before; offline it says the catalog isn't downloaded
+  yet.
 - **Series offline:** the Series tab and a series' page read the same catalog copy, so they open without the server
   with the last synced series, their books in series order and, with "Collapse Series" on in the series page menu,
   the books of other series folded into one card as on the server. Play and the add-to-queue button of a series work
@@ -24,7 +31,7 @@ Merged into `plus`, not yet in a published release.
   offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
   limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
   the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
-  the server (offline the tab says so). The Authors, Collections and Playlists tabs are unchanged.
+  the server (offline the tab says so). The Collections and Playlists tabs are unchanged.
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer
   uses the broadcast symbol. Tabs keep equal widths, the labels name each destination for screen readers, and the
