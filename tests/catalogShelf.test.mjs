@@ -470,5 +470,5 @@ test('no book count over "the catalog isn\'t downloaded yet"', async () => {
   await noLibrary.view.init()
   assert.deepEqual(noLibrary.emitted.filter(([name]) => name === 'bookshelf-total-entities').at(-1), ['bookshelf-total-entities', null])
   const toolbar = await read('../components/home/BookshelfToolbar.vue')
-  assert.match(toolbar, /v-show="!selectedSeriesName && totalEntities !== null" class="toolbar-count/)
+  assert.match(toolbar, /<template v-if="totalEntities !== null"><p v-show="!selectedSeriesName" class="toolbar-count/)
 })

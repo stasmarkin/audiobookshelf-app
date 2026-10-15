@@ -3,7 +3,8 @@
   <div class="browse-toolbar w-full min-h-9 bg-bg relative z-20">
     <div id="bookshelf-toolbar" class="relative w-full min-h-9 z-20 flex items-center px-2">
       <div class="flex items-center w-full text-sm">
-        <p v-show="!selectedSeriesName && totalEntities !== null" class="toolbar-count pt-1">{{ $formatNumber(totalEntities) }} {{ entityTitle }}</p>
+        <!-- null: the catalog is not downloaded yet, a count would contradict the message below -->
+        <template v-if="totalEntities !== null"><p v-show="!selectedSeriesName" class="toolbar-count pt-1">{{ $formatNumber(totalEntities) }} {{ entityTitle }}</p></template>
         <p v-show="selectedSeriesName" class="ml-2 pt-1 min-w-0 break-words line-clamp-2">{{ selectedSeriesName }} ({{ $formatNumber(totalEntities) }})</p>
         <div class="flex-grow" />
         <span v-if="page == 'library' || seriesBookPage" class="material-symbols text-2xl px-2" @click="changeView">{{ !bookshelfListView ? 'view_list' : 'grid_view' }}</span>
