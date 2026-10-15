@@ -429,6 +429,14 @@ class UserDataStore(
     return updated
   }
 
+  /**
+   * The server took a listening session of the item, so it has a progress record (a reconcile that no longer finds it
+   * deletes the row). Nothing without a row.
+   */
+  suspend fun onSessionAccepted(serverConfigId: String, libraryItemId: String, episodeId: String?) {
+    db.withTransaction { markSeenByServer(serverConfigId, progressItemKey(libraryItemId, episodeId)) }
+  }
+
   /** The server took a PATCH of the row, so it has a record now; its id comes with the next pull. */
   private suspend fun markSeenByServer(serverConfigId: String, itemKey: String) {
     val (libraryItemId, episodeId) = progressKeyParts(itemKey)

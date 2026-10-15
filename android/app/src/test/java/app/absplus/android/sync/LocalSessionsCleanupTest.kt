@@ -41,11 +41,12 @@ class LocalSessionsCleanupTest {
   @Before
   fun setUp() {
     Paper.init(context)
-    Paper.book("playbackSession").destroy()
+    for (book in listOf("playbackSession", "localLibraryItems", "localMediaProgress")) Paper.book(book).destroy()
+    app.absplus.android.managers.DbManager.localLibraryItemsChanged()
     SyncEngine.initForTest(SyncDeps(
             db = db, http = syncHttp(api), activeServer = { fakeServer() }, serverState = MutableStateFlow(ServerState.OFFLINE), onlineEntries = MutableStateFlow(0L),
             serverId = MutableStateFlow("srv"), isForeground = { false }, clock = { 1L }, scope = scope, log = {},
-            notifyWindowMs = 10, unsentSessionKeys = PaperProgressMirror::unsentSessionKeys))
+            notifyWindowMs = 10, unsentSessionKeys = PaperProgressMirror::unsentSessionKeys, mirror = PaperProgressMirror))
   }
 
   @After
@@ -292,6 +293,24 @@ class LocalSessionsCleanupTest {
       push()
       assertEquals("partly sent: $ebook", "mp1", db.mediaProgress().get("srv", "li1", "")!!.serverProgressId)
     }
+  }
+
+  @Test
+  fun anAcceptedSessionLetsAWebDeletionReachItsRow() = runBlocking {
+    val copy = app.absplus.android.data.LocalLibraryItem("local_li1", "folder", "", "", "", false, "book",
+            app.absplus.android.data.MediaType(MediaTypeMetadata("Book", false), null), mutableListOf(), null, null, true,
+            "srv", "https://srv.test.invalid", "user", "li1")
+    DeviceManager.dbManager.saveLocalLibraryItem(copy)
+    // Created by listening only: the server's record of it is not known yet
+    val row = progressRow(700.0, lastUpdate = 200L, pending = false).copy(serverProgressId = null)
+    db.mediaProgress().upsert(row)
+    PaperProgressMirror.mirror(listOf(row))
+    settle(saved(session("a")), true, listOf(ok("a")))
+
+    // The web client deleted the record; the next reconcile does not find it
+    SyncEngine.store!!.applyServerProgress("srv", emptyList(), deleteMissing = true)
+    assertNull(db.mediaProgress().get("srv", "li1", ""))
+    assertNull("and the copy's Paper progress", DeviceManager.dbManager.getLocalMediaProgress("local_li1"))
   }
 
   @Test

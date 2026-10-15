@@ -37,6 +37,8 @@ object LocalSessionsCleanup {
     if (!requestOk) return done()
     val remove = idsToRemove(sent.map { it.id }, results)
     val skipped = skippedProgress(sent, results)
+    val acceptedIds = results.filter { it.success && it.progressSynced != false }.map { it.id }.toSet()
+    val accepted = sent.filter { it.id in acceptedIds }.mapNotNull { sessionItem(it) }.toSet()
     fun removeSettled() {
       // A tick may have saved a session again during the request: that newer one is sent next time
       sent.filter { it.id in remove }.forEach { DeviceManager.dbManager.removePlaybackSessionIfUnchanged(it) }
@@ -51,6 +53,7 @@ object LocalSessionsCleanup {
                   conditionalFields = SKIPPED_PROGRESS_FIELDS)
           patched = true
         }
+        for (session in accepted) store.onSessionAccepted(session.first, session.second, session.third)
         removeSettled()
         if (patched) SyncEngine.onLocalWrite()
       } catch (e: CancellationException) {
@@ -66,6 +69,19 @@ object LocalSessionsCleanup {
   }
 
   private data class Item(val serverConfigId: String, val libraryItemId: String, val episodeId: String?)
+
+  /** Server, item and episode of a session; null without a server or an item. */
+  fun sessionItem(session: PlaybackSession): Triple<String, String, String?>? {
+    val serverConfigId = session.serverConnectionConfigId?.takeIf { it.isNotEmpty() } ?: return null
+    val libraryItemId = session.libraryItemId?.takeIf { it.isNotEmpty() } ?: return null
+    return Triple(serverConfigId, libraryItemId, session.episodeId?.takeIf { it.isNotEmpty() })
+  }
+
+  /** The server took a session of the item outside local-all (`/sync`, `/session/local`). */
+  fun onSessionAccepted(session: PlaybackSession) {
+    val (serverConfigId, libraryItemId, episodeId) = sessionItem(session) ?: return
+    SyncEngine.launchWrite { it.onSessionAccepted(serverConfigId, libraryItemId, episodeId) }
+  }
 
   private fun skippedProgress(sent: List<PlaybackSession>, results: List<LocalSessionSyncResult>): Set<Item> {
     val skippedIds = results.filter { it.success && it.progressSynced == false }.map { it.id }.toSet()

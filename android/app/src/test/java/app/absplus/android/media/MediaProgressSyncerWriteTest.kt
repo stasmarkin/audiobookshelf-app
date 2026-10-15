@@ -387,6 +387,16 @@ class MediaProgressSyncerWriteTest {
   }
 
   @Test
+  fun anAcceptedSyncLetsAWebDeletionReachItsRow() = runBlocking {
+    db.mediaProgress().upsert(progressRow(700.0, lastUpdate = 1L, pending = false).copy(serverProgressId = null))
+    syncer.syncStream(stream().clone(), ListeningLedger(), 15, hasNetwork = true, shouldSyncServer = true,
+            send = { _, _, done -> done(true, null) }) {}
+    eventually("marked as seen by the server") { row()?.serverProgressId != null }
+    SyncEngine.store!!.applyServerProgress("srv", emptyList(), deleteMissing = true)
+    assertNull(row())
+  }
+
+  @Test
   fun timeNotSentYetGoesToTheSegmentWhenTheSessionEnds() {
     var now = 1_000_000L
     val streamed = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get(),

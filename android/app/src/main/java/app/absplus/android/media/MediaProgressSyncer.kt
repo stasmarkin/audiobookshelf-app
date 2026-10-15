@@ -13,6 +13,7 @@ import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.player.ServerProgressAck
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.sync.LocalSessionsCleanup
 import app.absplus.android.sync.SyncEngine
 import java.util.*
 import kotlin.concurrent.schedule
@@ -359,6 +360,7 @@ class MediaProgressSyncer(
               failedSyncs = 0
               playerNotificationService.alertSyncSuccess()
               DeviceManager.dbManager.removePlaybackSession(it.id) // Remove session from db
+              LocalSessionsCleanup.onSessionAccepted(it)
               AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced local progress (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: ${it.id})")
             } else {
               failedSyncs++
@@ -427,6 +429,7 @@ class MediaProgressSyncer(
         }
         // A session an earlier version saved under the server's id
         DeviceManager.dbManager.removePlaybackSession(sessionId)
+        LocalSessionsCleanup.onSessionAccepted(session)
       } else {
         settleFailed(session, ledger, sent)
         if (stillCurrent) {
