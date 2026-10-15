@@ -34,6 +34,7 @@ class MediaProgressSyncer(
         private val hasNetwork: () -> Boolean = { DeviceManager.checkConnectivity(playerNotificationService) },
         private val playerTime: () -> Double = { playerNotificationService.getCurrentTimeSeconds() },
         private val sendProgressSync: ((String, MediaProgressSyncData, (Boolean, String?) -> Unit) -> Unit)? = null,
+        private val sendLocalProgressSync: ((PlaybackSession, (Boolean, String?) -> Unit) -> Unit)? = null,
         apiHandler: () -> ApiHandler
 ) {
   // Created on the first request: its secure storage is not needed to store a tick
@@ -52,6 +53,8 @@ class MediaProgressSyncer(
   @Volatile private var failedSyncs: Int = 0
   // The current session's streamed time not taken by /sync yet; a new session starts a new one
   @Volatile private var ledger = ListeningLedger()
+  // The listening time the last session reached here, kept past a reset: its next start goes on from it
+  private var lastTimeListening: Pair<String, Long>? = null
   // Changes with every start: an answer to an earlier stop or pause must not reset what started since
   private var generation = 0L
 
@@ -110,7 +113,7 @@ class MediaProgressSyncer(
     listeningTimerRunning = true
     lastSyncTime = clock()
     lastServerSyncAttempt = lastSyncTime
-    currentPlaybackSession = playbackSession.clone()
+    currentPlaybackSession = playbackSession.clone().also { it.timeListening = listenedSoFar(it) }
     DLog.d(
             tag,
             "start: init last sync time $lastSyncTime with playback session id=${currentPlaybackSession?.id}"
@@ -143,6 +146,18 @@ class MediaProgressSyncer(
                 }
               }
             }
+  }
+
+  /**
+   * A downloaded copy's session is sent whole and the server replaces its listening time with it: the player's copy of
+   * the session never counts, so a play after a pause, a stop or a restart goes on from what this syncer counted.
+   */
+  private fun listenedSoFar(session: PlaybackSession): Long {
+    var time = session.timeListening
+    currentPlaybackSession?.takeIf { it.id == session.id }?.let { time = maxOf(time, it.timeListening) }
+    lastTimeListening?.takeIf { it.first == session.id }?.let { time = maxOf(time, it.second) }
+    if (session.isLocal) DeviceManager.dbManager.getPlaybackSession(session.id)?.let { time = maxOf(time, it.timeListening) }
+    return time
   }
 
   fun play(playbackSession: PlaybackSession) {
@@ -338,7 +353,7 @@ class MediaProgressSyncer(
                         !it.libraryItemId.isNullOrEmpty() &&
                         isConnectedToSameServer
         ) {
-          apiHandler.sendLocalProgressSync(it) { syncSuccess, errorMsg ->
+          (sendLocalProgressSync ?: apiHandler::sendLocalProgressSync)(it) { syncSuccess, errorMsg ->
             if (syncSuccess) {
               failedSyncs = 0
               playerNotificationService.alertSyncSuccess()
@@ -581,6 +596,7 @@ class MediaProgressSyncer(
 
   fun reset() {
     retireLedger()
+    currentPlaybackSession?.let { lastTimeListening = it.id to it.timeListening }
     currentPlaybackSession = null
     currentLocalMediaProgress = null
     lastSyncTime = 0L

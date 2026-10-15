@@ -342,6 +342,51 @@ class MediaProgressSyncerWriteTest {
   }
 
   @Test
+  fun aDownloadedSessionsListeningTimeOnlyGrowsThroughPausePlayStopAndRestart() {
+    DeviceManager.dbManager.saveLocalLibraryItem(copy)
+    DeviceManager.serverConnectionConfig = fakeServer()
+    try {
+      var now = 1_000_000L
+      val sent = mutableListOf<Long>()
+      var succeed = true
+      fun downloadedSyncer() = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get(),
+              apiHandler = { throw AssertionError() }, clock = { now }, hasNetwork = { true }, playerTime = { 100.0 },
+              sendLocalProgressSync = { session, done -> sent.add(session.timeListening); done(succeed, null) })
+      // The player's own session object: its listening time never grows
+      val playerSession = session(PLAYMETHOD_LOCAL, copy).also { it.id = "local-session" }
+      var downloaded = downloadedSyncer()
+
+      downloaded.start(playerSession)
+      now += 15_000
+      downloaded.sync(true, 100.0) {}
+      now += 15_000
+      downloaded.pause {}
+      downloaded.start(playerSession) // play again
+      now += 15_000
+      downloaded.sync(true, 130.0) {}
+      now += 15_000
+      downloaded.stop {}
+      succeed = false
+      downloaded.start(playerSession) // the same item started again
+      now += 15_000
+      downloaded.sync(true, 160.0) {}
+      assertEquals(listOf(15L, 30L, 45L, 60L, 75L), sent)
+      assertEquals(75L, DeviceManager.dbManager.getPlaybackSession("local-session")!!.timeListening)
+
+      downloaded.stop(false) {}
+      downloaded = downloadedSyncer() // the process restarted
+      downloaded.start(playerSession)
+      now += 15_000
+      downloaded.sync(true, 175.0) {}
+      assertEquals(90L, sent.last())
+      assertEquals(90L, DeviceManager.dbManager.getPlaybackSession("local-session")!!.timeListening)
+      downloaded.stop(false) {}
+    } finally {
+      DeviceManager.serverConnectionConfig = null
+    }
+  }
+
+  @Test
   fun timeNotSentYetGoesToTheSegmentWhenTheSessionEnds() {
     var now = 1_000_000L
     val streamed = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get(),
