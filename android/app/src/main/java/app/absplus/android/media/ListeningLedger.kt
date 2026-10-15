@@ -39,8 +39,10 @@ class ListeningLedger(
   /** [sentSeconds] did not reach the server: they go into the open segment, opened now if there is none. */
   @Synchronized
   fun failServerSync(sentSeconds: Long): OfflineSegment {
-    val segment = open ?: OfflineSegment(newId(), 0, clock())
-    return segment.copy(timeListening = segment.timeListening + maxOf(sentSeconds, 0)).also { open = it }
+    val seconds = maxOf(sentSeconds, 0)
+    // Its listening began when the failed time did
+    val segment = open ?: OfflineSegment(newId(), 0, clock() - seconds * 1000)
+    return segment.copy(timeListening = segment.timeListening + seconds).also { open = it }
   }
 
   @Synchronized

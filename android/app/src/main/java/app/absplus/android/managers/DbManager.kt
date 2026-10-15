@@ -12,6 +12,7 @@ class DbManager {
 
   companion object {
     private var isDbInitialized = false
+    private val playbackSessionLock = Any()
 
     /** Changes with every write or removal of a local library item, so a reader can keep the list between them. */
     @Volatile var localLibraryItemsVersion = 0L
@@ -391,7 +392,16 @@ class DbManager {
   }
 
   fun savePlaybackSession(playbackSession: PlaybackSession) {
-    Paper.book("playbackSession").write(playbackSession.id, playbackSession)
+    synchronized(playbackSessionLock) { Paper.book("playbackSession").write(playbackSession.id, playbackSession) }
+  }
+  fun getPlaybackSession(playbackSessionId: String): PlaybackSession? =
+          Paper.book("playbackSession").read<PlaybackSession>(playbackSessionId)
+  /** Removes the session only if it is still the one sent at [sentUpdatedAt]: a later tick is sent next time. */
+  fun removePlaybackSessionIfUnchanged(playbackSessionId: String, sentUpdatedAt: Long): Boolean = synchronized(playbackSessionLock) {
+    val saved = getPlaybackSession(playbackSessionId) ?: return false
+    if (saved.updatedAt != sentUpdatedAt) return false
+    Paper.book("playbackSession").delete(playbackSessionId)
+    true
   }
   fun removePlaybackSession(playbackSessionId: String) {
     Paper.book("playbackSession").delete(playbackSessionId)

@@ -40,8 +40,13 @@ class MediaProgressSyncer(
   private var listeningTimerTask: TimerTask? = null
   var listeningTimerRunning: Boolean = false
 
+  // The last tick: each tick counts the listening since it
   private var lastSyncTime: Long = 0
-  private var failedSyncs: Int = 0
+  // When the stream last tried /sync: on a metered connection it tries once a minute
+  private var lastServerSyncAttempt: Long = 0
+  @Volatile private var failedSyncs: Int = 0
+  // The current session's streamed time not taken by /sync yet; a new session starts a new one
+  private var ledger = ListeningLedger()
 
   var currentPlaybackSession: PlaybackSession? = null // copy of pb session currently syncing
   var currentLocalMediaProgress: LocalMediaProgress? = null
@@ -81,15 +86,18 @@ class MediaProgressSyncer(
         lastSyncTime = 0L
         DLog.d(tag, "start: Set last sync time 0 $lastSyncTime")
         failedSyncs = 0
+        ledger = ListeningLedger()
       } else {
         return
       }
     } else if (playbackSession.id != currentSessionId) {
       currentLocalMediaProgress = null
+      ledger = ListeningLedger()
     }
 
     listeningTimerRunning = true
     lastSyncTime = System.currentTimeMillis()
+    lastServerSyncAttempt = lastSyncTime
     currentPlaybackSession = playbackSession.clone()
     DLog.d(
             tag,
@@ -107,7 +115,7 @@ class MediaProgressSyncer(
                   // last sync time is >= 60s
                   val shouldSyncServer =
                           PlayerNotificationService.isUnmeteredNetwork ||
-                                  System.currentTimeMillis() - lastSyncTime >=
+                                  System.currentTimeMillis() - lastServerSyncAttempt >=
                                           METERED_CONNECTION_SYNC_INTERVAL
 
                   val currentTime = playerNotificationService.getCurrentTimeSeconds()
@@ -260,13 +268,7 @@ class MediaProgressSyncer(
     }
     val listeningTimeToAdd = diffSinceLastSync / 1000L
 
-    // Captured now, not read live, so log lines in the async callbacks below stay correct even
-    // if the syncer moves on to the next queue item before the network response arrives.
-    // TODO(review): the server-sync branch further down (search "sendProgressSync") still reads
-    // currentSessionId live inside its async callback, including for removePlaybackSession(...) -
-    // that's not just a log cosmetics issue like this one was, it could remove the wrong session
-    // from the db if the syncer moves on before that network response arrives. Left as-is for now
-    // since it wasn't the mechanism observed causing confusion; revisit if it causes problems.
+    // Captured now, not read live: the syncer may move on to the next queue item before the network response arrives
     val syncedTitle = currentDisplayTitle
 
     val syncData = MediaProgressSyncData(listeningTimeToAdd, currentPlaybackDuration, currentTime)
@@ -279,6 +281,8 @@ class MediaProgressSyncer(
       )
       return cb(null)
     }
+    // Whole seconds only: the remainder counts in the next tick
+    lastSyncTime += listeningTimeToAdd * 1000L
 
     // Same sampled position, kept as the widget's last-known display position
     playerNotificationService.rememberPlaybackPosition(currentPlaybackSession?.id, currentTime)
@@ -289,7 +293,8 @@ class MediaProgressSyncer(
 
     if (currentIsLocal) {
       currentPlaybackSession?.let {
-        lastSyncTime = System.currentTimeMillis()
+        // As before: a downloaded copy is sent by a tick only on an unmetered connection
+        lastServerSyncAttempt = System.currentTimeMillis()
 
         DLog.d(
                 tag,
@@ -329,34 +334,78 @@ class MediaProgressSyncer(
           cb(SyncResult(false, null, null))
         }
       }
-    } else if (hasNetworkConnection && shouldSyncServer) {
-      AbsLogger.info("MediaProgressSyncer", "sync: Sending progress sync to server (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: ${currentSessionId}) (${DeviceManager.serverConnectionConfigName})")
-
-      val sentSessionId = currentSessionId
-      noteServerSync(sentSessionId, currentTime, false)
-      apiHandler.sendProgressSync(currentSessionId, syncData) { syncSuccess, errorMsg ->
-        if (syncSuccess) {
-          noteServerSync(sentSessionId, currentTime, true)
-          AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced progress (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: ${currentSessionId}) (${DeviceManager.serverConnectionConfigName})")
-
-          failedSyncs = 0
-          playerNotificationService.alertSyncSuccess()
-          lastSyncTime = System.currentTimeMillis()
-          DeviceManager.dbManager.removePlaybackSession(currentSessionId) // Remove session from db
-        } else {
-          failedSyncs++
-          if (failedSyncs == 2) {
-            playerNotificationService.alertSyncFailing() // Show alert in client
-            failedSyncs = 0
-          }
-          AbsLogger.error("MediaProgressSyncer", "sync: Progress sync failed (count: $failedSyncs) (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $currentSessionId) (${DeviceManager.serverConnectionConfigName})")
-        }
-        cb(SyncResult(true, syncSuccess, errorMsg))
-      }
     } else {
-      AbsLogger.info("MediaProgressSyncer", "sync: Not sending progress to server (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $currentSessionId) (${DeviceManager.serverConnectionConfigName}) (hasNetworkConnection: $hasNetworkConnection)")
-      cb(SyncResult(false, null, null))
+      val session = currentPlaybackSession?.clone() ?: return cb(null)
+      syncStream(session, ledger, listeningTimeToAdd, hasNetworkConnection, shouldSyncServer) { cb(it) }
     }
+  }
+
+  /**
+   * A stream tick: the time listened since the last tick goes to the server through `/sync`, or, when it cannot, into
+   * the ledger's offline segment, saved as a Paper session of its own that `local-all` sends later. [session] is this
+   * tick's snapshot: the answer settles it even if the player moved on.
+   */
+  internal fun syncStream(
+          session: PlaybackSession, ledger: ListeningLedger, listened: Long, hasNetwork: Boolean, shouldSyncServer: Boolean,
+          send: (String, MediaProgressSyncData, (Boolean, String?) -> Unit) -> Unit = { id, data, done -> apiHandler.sendProgressSync(id, data, done) },
+          cb: (SyncResult) -> Unit
+  ) {
+    val sessionId = session.id
+    val currentTime = session.currentTime
+    val title = session.displayTitle
+    ledger.addListened(listened)
+    if (!hasNetwork) {
+      saveSegment(session, ledger, ledger.beginServerSync())
+      AbsLogger.info("MediaProgressSyncer", "sync: No network, progress kept in an offline session (title: \"$title\") (currentTime: $currentTime) (session id: $sessionId)")
+      return cb(SyncResult(false, null, null))
+    }
+    if (!shouldSyncServer) return cb(SyncResult(false, null, null))
+
+    AbsLogger.info("MediaProgressSyncer", "sync: Sending progress sync to server (title: \"$title\") (currentTime: $currentTime) (session id: $sessionId) (${DeviceManager.serverConnectionConfigName})")
+    val sent = ledger.beginServerSync()
+    lastServerSyncAttempt = System.currentTimeMillis()
+    noteServerSync(sessionId, currentTime, false)
+    send(sessionId, MediaProgressSyncData(sent, session.duration, currentTime)) { syncSuccess, errorMsg ->
+      if (syncSuccess) {
+        ledger.ackServerSync(sent)
+        noteServerSync(sessionId, currentTime, true)
+        AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced progress (title: \"$title\") (currentTime: $currentTime) (session id: $sessionId)")
+        failedSyncs = 0
+        playerNotificationService.alertSyncSuccess()
+        // A session an earlier version saved under the server's id
+        DeviceManager.dbManager.removePlaybackSession(sessionId)
+      } else {
+        saveSegment(session, ledger, sent)
+        failedSyncs++
+        if (failedSyncs == 2) {
+          playerNotificationService.alertSyncFailing() // Show alert in client
+          failedSyncs = 0
+        }
+        AbsLogger.error("MediaProgressSyncer", "sync: Progress sync failed, progress kept in an offline session (count: $failedSyncs) (title: \"$title\") (currentTime: $currentTime) (session id: $sessionId)")
+      }
+      cb(SyncResult(true, syncSuccess, errorMsg))
+    }
+  }
+
+  /**
+   * Puts [seconds] into the ledger's offline segment and saves it: the session's snapshot under the segment's id, with
+   * the segment's total time. Serialized per ledger, so a late answer neither lowers the saved time nor moves the
+   * position back.
+   */
+  private fun saveSegment(snapshot: PlaybackSession, ledger: ListeningLedger, seconds: Long) = synchronized(ledger) {
+    val segment = ledger.failServerSync(seconds)
+    if (segment.timeListening <= 0) return@synchronized
+    val db = DeviceManager.dbManager
+    val saved = db.getPlaybackSession(segment.id)
+    db.savePlaybackSession(snapshot.clone().apply {
+      id = segment.id
+      startedAt = segment.startedAt
+      timeListening = segment.timeListening
+      if (saved != null && saved.updatedAt > updatedAt) {
+        currentTime = saved.currentTime
+        updatedAt = saved.updatedAt
+      }
+    })
   }
 
   private fun saveLocalProgress(playbackSession: PlaybackSession) {
@@ -389,9 +438,12 @@ class MediaProgressSyncer(
 
   /** Everything a tick stores on the device: the session, the downloaded copy's Paper progress and the Room row. */
   internal fun saveTick(session: PlaybackSession, currentTime: Double) {
-    // Sessions are removed once successfully synced with the server
-    DeviceManager.dbManager.savePlaybackSession(session)
-    if (session.isLocal) saveLocalProgress(session)
+    // A downloaded copy's session is removed once the server took it. A stream is never saved under its server id
+    // (local-all would overwrite the server's session): what /sync missed is saved as an offline segment (syncStream)
+    if (session.isLocal) {
+      DeviceManager.dbManager.savePlaybackSession(session)
+      saveLocalProgress(session)
+    }
     recordTick(session, currentTime)
   }
 
@@ -439,6 +491,8 @@ class MediaProgressSyncer(
     currentPlaybackSession = null
     currentLocalMediaProgress = null
     lastSyncTime = 0L
+    lastServerSyncAttempt = 0L
+    ledger = ListeningLedger()
     DLog.d(tag, "reset: Set last sync time 0 $lastSyncTime")
     failedSyncs = 0
   }

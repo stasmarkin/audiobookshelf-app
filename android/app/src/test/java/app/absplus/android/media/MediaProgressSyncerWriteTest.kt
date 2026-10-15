@@ -35,6 +35,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -190,6 +191,101 @@ class MediaProgressSyncerWriteTest {
     syncer.recordSeek(first, 120.0, playerSessionId = first.id)
     eventually("a seek of A itself") { row()?.currentTime == 120.0 }
   }
+
+  private fun stream(id: String = "srv-1") = session(PLAYMETHOD_DIRECTPLAY, null).also {
+    it.id = id
+    it.timeListening = 600 // what the server session already holds
+  }
+
+  private val noRequest: (String, MediaProgressSyncData, (Boolean, String?) -> Unit) -> Unit = { _, _, _ -> throw AssertionError("no request") }
+
+  /** One stream tick as `sync` runs it, on a snapshot of the session. */
+  private fun streamTick(session: PlaybackSession, ledger: ListeningLedger, time: Double, hasNetwork: Boolean,
+                         send: (String, MediaProgressSyncData, (Boolean, String?) -> Unit) -> Unit = noRequest) {
+    tick(session, time)
+    syncer.syncStream(session.clone(), ledger, 15, hasNetwork, shouldSyncServer = true, send = send) {}
+  }
+
+  private fun paperSessions() = DeviceManager.dbManager.getPlaybackSessions()
+
+  @Test
+  fun noNetworkTickAlsoGoesToSegment() {
+    val ledger = ListeningLedger()
+    streamTick(stream(), ledger, 100.0, hasNetwork = false)
+
+    val saved = paperSessions().single()
+    val segment = ledger.segment()!!
+    assertNotEquals("srv-1", saved.id)
+    assertEquals(segment.id, saved.id)
+    assertEquals(15L, saved.timeListening)
+    assertEquals(100.0, saved.currentTime, 0.0)
+
+    // The process ends before the network is back: a new syncer finds only the segment
+    syncer = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get()) { throw AssertionError() }
+    assertEquals(listOf(segment.id), paperSessions().map { it.id })
+  }
+
+  @Test
+  fun streamedFailureSavesSegmentNotServerSession() {
+    val ledger = ListeningLedger()
+    val session = stream()
+    val fail: (String, MediaProgressSyncData, (Boolean, String?) -> Unit) -> Unit = { _, _, done -> done(false, "Failed to connect") }
+    streamTick(session, ledger, 100.0, hasNetwork = true, send = fail)
+    streamTick(session, ledger, 115.0, hasNetwork = true, send = fail)
+
+    val saved = paperSessions().single()
+    assertEquals(ledger.segment()!!.id, saved.id)
+    assertEquals(30L, saved.timeListening)
+    assertEquals(115.0, saved.currentTime, 0.0)
+
+    // A session an earlier version saved under the server's id
+    DeviceManager.dbManager.savePlaybackSession(session.clone())
+    val sent = mutableListOf<Pair<String, Long>>()
+    streamTick(session, ledger, 130.0, hasNetwork = true) { id, data, done -> sent.add(id to data.timeListened); done(true, null) }
+    assertEquals("only the time since the last attempt", listOf("srv-1" to 15L), sent)
+    assertEquals("an accepted /sync keeps the segment", listOf(saved.id), paperSessions().map { it.id })
+    assertNull(ledger.segment())
+  }
+
+  @Test
+  fun aRequestSettlesTheSessionItWasSentFor() {
+    val ledger = ListeningLedger()
+    val first = stream("srv-1")
+    var answer: ((Boolean, String?) -> Unit)? = null
+    streamTick(first, ledger, 100.0, hasNetwork = true) { _, _, done -> answer = done }
+
+    // The player moved on to another streamed session before the answer came
+    syncer.reset()
+    DeviceManager.dbManager.savePlaybackSession(stream("srv-2"))
+    answer!!(true, null)
+    assertEquals(listOf("srv-2"), paperSessions().map { it.id })
+
+    streamTick(first, ledger, 115.0, hasNetwork = true) { _, _, done -> answer = done }
+    answer!!(false, null)
+    val segment = paperSessions().single { it.id != "srv-2" }
+    assertEquals("li1", segment.libraryItemId)
+    assertEquals(15L, segment.timeListening)
+  }
+
+  @Test
+  fun rollbackTo2bKeepsSegments() {
+    val booksBefore = paperBooks()
+    val prefsBefore = sharedPrefs()
+    val ledger = ListeningLedger()
+    streamTick(stream(), ledger, 100.0, hasNetwork = true) { _, _, done -> done(false, null) }
+
+    // What 2b reads and sends through local-all (createPartialPlaybackSession)
+    val segment = paperSessions().single()
+    assertEquals("srv", segment.serverConnectionConfigId)
+    assertEquals("li1", segment.libraryItemId)
+    assertEquals(15L, segment.timeListening)
+    assertEquals(PLAYMETHOD_DIRECTPLAY, segment.playMethod)
+    assertEquals("no new Paper books", booksBefore + "playbackSession", paperBooks() + "playbackSession")
+    assertEquals("no new preferences", prefsBefore, sharedPrefs())
+  }
+
+  private fun paperBooks() = java.io.File(Paper.book("playbackSession").path).parentFile!!.list()!!.toSet()
+  private fun sharedPrefs() = java.io.File(context.applicationInfo.dataDir, "shared_prefs").list()?.toSet().orEmpty()
 
   @Test
   fun aSeekOfADownloadedCopyLeavesItsPaperProgressToThePlayer() = runBlocking {
