@@ -33,6 +33,16 @@ class FilterCodecTest {
   }
 
   @Test
+  fun encodesLikeTheApp() {
+    assertEquals("RmFudGFzeQ%3D%3D", FilterCodec.encode("Fantasy"))
+    assertEquals("fn5%2B", FilterCodec.encode("~~~"))
+    assertEquals("0KDRg9GB0YHQutC40Lk%3D", FilterCodec.encode("Русский"))
+    for (value in listOf("a", "ab", "abc", "a1d73131-ab6b-46c1-91d5-87223de69f7a", "?ü")) {
+      assertEquals(value, FilterCodec.parse("series." + FilterCodec.encode(value))?.value)
+    }
+  }
+
+  @Test
   fun decoderDoesNotUsePlatformBase64() {
     val source = File("src/main/java/app/absplus/android/db/replica/LibraryQuery.kt").readText()
     assertFalse(source.contains("java.util.Base64"))

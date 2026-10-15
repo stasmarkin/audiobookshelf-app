@@ -21,8 +21,8 @@ import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-/** A request the fake server received. */
-data class FakeRequest(val method: String, val path: String, val body: String?) {
+/** A request the fake server received; [query] is the encoded query string. */
+data class FakeRequest(val method: String, val path: String, val body: String?, val query: String? = null) {
   override fun toString() = "$method $path"
 }
 
@@ -40,7 +40,7 @@ class FakeApi(var handler: (FakeRequest) -> Pair<Int, String> = { 200 to "{}" })
   val client: OkHttpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
     val request = chain.request()
     val body = request.body?.let { b -> Buffer().also { b.writeTo(it) }.readUtf8() }
-    val fake = FakeRequest(request.method, request.url.encodedPath.removePrefix(BASE_PATH), body)
+    val fake = FakeRequest(request.method, request.url.encodedPath.removePrefix(BASE_PATH), body, request.url.encodedQuery)
     requests.add(fake)
     val now = active.incrementAndGet()
     maxConcurrent.accumulateAndGet(now) { a, b -> maxOf(a, b) }

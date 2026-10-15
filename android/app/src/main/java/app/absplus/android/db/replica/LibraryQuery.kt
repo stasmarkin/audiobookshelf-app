@@ -31,6 +31,21 @@ object FilterCodec {
     return CatalogFilter(group, bytes?.takeIf { it.isNotEmpty() }?.toString(Charsets.UTF_8))
   }
 
+  /** The app's `$encode`: `encodeURIComponent` of the standard base64 of the UTF-8 bytes. */
+  fun encode(value: String): String {
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    val bytes = value.toByteArray(Charsets.UTF_8)
+    val out = StringBuilder()
+    for (i in bytes.indices step 3) {
+      val n = (bytes[i].toInt() and 0xFF shl 16) or
+              ((bytes.getOrNull(i + 1)?.toInt() ?: 0) and 0xFF shl 8) or
+              ((bytes.getOrNull(i + 2)?.toInt() ?: 0) and 0xFF)
+      val chars = minOf(4, (bytes.size - i) + 1)
+      for (k in 0 until 4) out.append(if (k < chars) alphabet[(n shr (18 - 6 * k)) and 0x3F] else '=')
+    }
+    return out.toString().replace("+", "%2B").replace("/", "%2F").replace("=", "%3D")
+  }
+
   /** `decodeURIComponent`: `+` stays, a malformed escape or invalid UTF-8 is an error (null). */
   internal fun percentDecode(text: String): String? {
     val bytes = ByteArrayOutputStream()

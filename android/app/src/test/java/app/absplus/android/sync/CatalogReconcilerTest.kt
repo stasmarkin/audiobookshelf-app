@@ -1,0 +1,351 @@
+package app.absplus.android.sync
+
+import app.absplus.android.db.inMemoryReplica
+import app.absplus.android.db.itemEntity
+import app.absplus.android.db.libraryRow
+import app.absplus.android.db.member
+import app.absplus.android.db.replica.FilterCodec
+import app.absplus.android.db.seriesRow
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
+import java.io.IOException
+import java.util.Collections
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class CatalogReconcilerTest {
+  private val db = inMemoryReplica()
+  private val server = FakeCatalogServer()
+  private val api = FakeApi { server.handle(it) }
+  private val config = fakeServer("srv")
+  private val topics: MutableList<String> = Collections.synchronizedList(mutableListOf())
+  private val logs: MutableList<String> = Collections.synchronizedList(mutableListOf())
+  private var now = 1_000L
+  private val reconciler = CatalogReconciler(db, syncHttp(api), { now }, { topics.addAll(it) }, {}, { logs.add(it) })
+
+  @After
+  fun tearDown() = db.close()
+
+  private fun reconcile(first: String? = null) = runBlocking { reconciler.reconcile(config, first) }
+
+  private fun itemRequests(libraryId: String = "lib1") =
+          api.requests.filter { it.path == "/api/libraries/$libraryId/items" && it.query?.contains("filter=series.") != true }
+
+  private fun pointRequests() = api.requests.filter { it.query?.contains("filter=series.") == true }
+
+  private fun state(libraryId: String) = runBlocking { db.libraryState().get("srv", libraryId) }
+
+  private fun membership(itemId: String) = runBlocking { db.series().membershipOfItem("srv", itemId) }.map { it.seriesId to it.sequence }.toSet()
+
+  private fun ids(libraryId: String = "lib1") = runBlocking { db.items().ids("srv", libraryId) }.toSet()
+
+  @Test
+  fun firstPassFillsLibrariesItemsSeriesAndState() {
+    server.library("lib1").library("lib2", "podcast")
+    server.series("s1", "Мир")
+    repeat(1200) { server.book("b$it", series = if (it < 2) listOf("s1" to "${it + 1}") else emptyList()) }
+    repeat(30) { server.book("p$it", libraryId = "lib2") }
+
+    val result = reconcile()
+
+    assertEquals(CatalogResult(2, emptyList(), null), result)
+    assertEquals(1200, ids().size)
+    assertEquals(30, ids("lib2").size)
+    assertEquals(listOf(0, 1), runBlocking { db.libraries().all("srv") }.map { it.position })
+    assertEquals(listOf("lib1", "lib2"), runBlocking { db.libraries().all("srv") }.map { it.id })
+    assertNotNull(runBlocking { db.libraries().get("srv", "lib1") }!!.filterDataJson)
+    assertTrue(state("lib1")!!.itemsComplete)
+    assertEquals(1_000L, state("lib1")!!.itemsReconciledAt)
+    assertEquals(1_000L, state("lib1")!!.seriesReconciledAt)
+    assertNotNull(state("")!!.itemsReconciledAt)
+    assertEquals(setOf("s1" to "1"), membership("b0"))
+    assertEquals(listOf("Мир"), runBlocking { db.series().forLibrary("srv", "lib1") }.map { it.name })
+    val pages = itemRequests()
+    assertEquals(3, pages.size)
+    pages.forEachIndexed { i, r -> assertEquals("limit=500&page=$i&sort=addedAt&include=rssfeed&minified=1", r.query) }
+    assertTrue(topics.containsAll(listOf("libraries", "library:lib1", "items:lib1", "series:lib1", "state:lib1", "items:lib2")))
+  }
+
+  @Test
+  fun currentLibraryIsReconciledFirst() {
+    server.library("lib1").library("lib2")
+    server.book("a")
+    server.book("b", libraryId = "lib2")
+    reconcile("lib2")
+    assertEquals("/api/libraries/lib2/items", api.requests.first { it.path.endsWith("/items") }.path)
+  }
+
+  @Test
+  fun restartsOnceWhenTotalChanges() {
+    server.library("lib1")
+    repeat(1200) { server.book("b$it") }
+    runBlocking { db.items().upsertAll(listOf(itemEntity("srv", "liX"))) }
+    server.onItemsPage = { if (it.call == 1) it.total = 1201 }
+
+    reconcile()
+
+    assertEquals("pages 0, 1, then the whole walk again", listOf(0, 1, 0, 1, 2), itemRequests().map { it.query!!.substringAfter("page=").substringBefore('&').toInt() })
+    assertFalse("the second walk is stable, so deletes run", "liX" in ids())
+    assertTrue(state("lib1")!!.itemsComplete)
+  }
+
+  @Test
+  fun skipsDeletesWhenTotalChangesTwice() {
+    server.library("lib1")
+    repeat(1200) { server.book("b$it") }
+    server.books.getValue("b3").title = "New title"
+    server.books.getValue("b3").updatedAt = 5
+    runBlocking { db.items().upsertAll(listOf(itemEntity("srv", "liX"), itemEntity("srv", "b3", title = "Old title"))) }
+    server.onItemsPage = { if (it.page == 1) it.total = 1201 + it.call }
+
+    reconcile()
+
+    assertTrue("nothing is deleted", "liX" in ids())
+    assertEquals("New title", runBlocking { db.items().get("srv", "b3") }!!.title)
+    assertFalse(state("lib1")!!.itemsComplete)
+    assertEquals(1_000L, state("lib1")!!.itemsReconciledAt)
+  }
+
+  @Test
+  fun duplicateIdAcrossPagesCountsAsChange() {
+    server.library("lib1")
+    repeat(1200) { server.book("b$it") }
+    server.onItemsPage = { if (it.call == 1) it.results = listOf(server.books.getValue("b0")) + it.results.drop(1) }
+
+    reconcile()
+
+    assertEquals(5, itemRequests().size)
+  }
+
+  @Test
+  fun deletesItemsMissingOnServer() {
+    server.library("lib1")
+    server.book("b1")
+    runBlocking {
+      db.items().upsertAll(listOf(itemEntity("srv", "liX")))
+      db.series().upsertAll(listOf(seriesRow("srv", "sX")))
+      db.series().insertMembers(listOf(member("srv", "sX", "liX")))
+    }
+
+    reconcile()
+
+    assertEquals(setOf("b1"), ids())
+    assertTrue(membership("liX").isEmpty())
+    // Downloaded copies live in Paper, which the reconciler has no access to
+    val source = File("src/main/java/app/absplus/android/sync/CatalogReconciler.kt").readText()
+    assertFalse(source.contains("DeviceManager") || source.contains("Paper."))
+  }
+
+  @Test
+  fun membershipComesFromSeriesNames() {
+    server.library("lib1")
+    server.series("mir", "Мир")
+    server.series("tri", "Трилогия")
+    server.book("b1", series = listOf("mir" to "2"))
+    server.book("b2", series = listOf("mir" to "1", "tri" to "3"))
+
+    reconcile()
+
+    assertEquals(setOf("mir" to "2"), membership("b1"))
+    assertEquals(setOf("mir" to "1", "tri" to "3"), membership("b2"))
+    assertTrue(pointRequests().isEmpty())
+  }
+
+  @Test
+  fun ambiguousNamesArePointQueried() {
+    server.library("lib1")
+    server.series("a", "A")
+    server.series("ab", "A, B")
+    server.series("b", "B")
+    server.book("b1", series = listOf("ab" to "1"))
+    server.book("b2", series = listOf("a" to "4"))
+
+    reconcile()
+
+    val queried = pointRequests().map { FilterCodec.parse(it.query!!.substringAfter("filter=").substringBefore('&'))!!.value }.toSet()
+    assertEquals(setOf("a", "ab", "b"), queried)
+    assertEquals(3, pointRequests().size)
+    assertEquals(setOf("ab" to "1"), membership("b1"))
+    assertEquals(setOf("a" to "4"), membership("b2"))
+    assertEquals("[]", state("lib1")!!.pendingSeriesQueries)
+    assertTrue(logs.any { it.contains("3 series membership queries") })
+  }
+
+  @Test
+  fun interruptedPointQueriesResumeNextPass() {
+    server.library("lib1")
+    server.series("a", "A")
+    server.series("ab", "A, B")
+    server.series("b", "B")
+    server.book("b1", series = listOf("ab" to "1"))
+    var fail = true
+    server.onItemsPage = { if (fail && it.filter == "series.${FilterCodec.encode("a")}") throw IOException("network down") }
+
+    val first = reconcile()
+    assertTrue(first.stoppedBy is HttpOutcome.Unreachable)
+    assertTrue(state("lib1")!!.pendingSeriesQueries.contains("\"a\""))
+
+    fail = false
+    api.requests.clear()
+    reconcile()
+
+    assertTrue(pointRequests().any { it.query!!.contains("filter=series.${FilterCodec.encode("a")}") })
+    assertEquals(setOf("ab" to "1"), membership("b1"))
+    assertEquals("[]", state("lib1")!!.pendingSeriesQueries)
+  }
+
+  @Test
+  fun ambiguousBookLeavingASeriesIsRequeried() {
+    server.library("lib1")
+    server.series("x", "X")
+    server.series("a", "A")
+    server.series("ab", "A, B")
+    server.series("b", "B")
+    val book = server.book("b1", series = listOf("x" to "1"))
+    reconcile()
+    assertEquals(setOf("x" to "1"), membership("b1"))
+
+    book.series = listOf("ab" to "1")
+    book.updatedAt = 2
+    api.requests.clear()
+    reconcile()
+
+    assertTrue(pointRequests().any { it.query!!.contains("filter=series.${FilterCodec.encode("x")}") })
+    assertEquals(setOf("ab" to "1"), membership("b1"))
+  }
+
+  @Test
+  fun hiddenSingleBookSeriesKeepsMembership() {
+    server.library("lib1")
+    server.series("p", "Повесть", hidden = true)
+    server.book("b1", series = listOf("p" to null))
+
+    reconcile()
+    reconcile()
+
+    assertEquals(listOf("Повесть"), runBlocking { db.series().forLibrary("srv", "lib1") }.map { it.name })
+    assertEquals(setOf("p" to null), membership("b1"))
+  }
+
+  @Test
+  fun unchangedItemIsNotRewritten() {
+    server.library("lib1")
+    repeat(600) { server.book("b$it") }
+    reconcile()
+    topics.clear()
+    api.requests.clear()
+
+    reconcile()
+
+    assertFalse(topics.contains("items:lib1"))
+    assertEquals(2, itemRequests().size)
+  }
+
+  @Test
+  fun changedContentWithSameUpdatedAtIsApplied() {
+    server.library("lib1")
+    val book = server.book("b1")
+    reconcile()
+    assertNull(runBlocking { db.items().get("srv", "b1") }!!.rssFeedJson)
+
+    book.rssFeedId = "feed1"
+    reconcile()
+
+    assertTrue(runBlocking { db.items().get("srv", "b1") }!!.rssFeedJson!!.contains("feed1"))
+  }
+
+  @Test
+  fun unreachableMidPassKeepsWrittenPagesAndDeletesNothing() {
+    server.library("lib1")
+    repeat(700) { server.book("b$it") }
+    runBlocking { db.items().upsertAll(listOf(itemEntity("srv", "liX"))) }
+    server.onItemsPage = { if (it.page == 1) throw IOException("gone") }
+
+    val result = reconcile()
+
+    assertTrue(result.stoppedBy is HttpOutcome.Unreachable)
+    assertEquals(501, ids().size)
+    assertTrue("liX" in ids())
+    assertNull(state("lib1")?.itemsReconciledAt)
+  }
+
+  @Test
+  fun notFoundLibrarySkipsOnlyIt() {
+    server.library("lib1").library("lib2")
+    server.book("a")
+    server.book("b", libraryId = "lib2")
+    server.notFound = setOf("lib2")
+
+    val result = reconcile()
+
+    assertEquals(listOf("lib2"), result.failedLibraries)
+    assertNull(result.stoppedBy)
+    assertTrue(state("lib1")!!.itemsComplete)
+    assertNotNull(state("lib2")!!.lastError)
+    assertTrue(ids("lib2").isEmpty())
+  }
+
+  @Test
+  fun removedLibraryIsDeletedWithItsRows() {
+    server.library("lib1")
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib3")))
+      db.items().upsertAll(listOf(itemEntity("srv", "old", libraryId = "lib3")))
+    }
+
+    reconcile()
+
+    assertNull(runBlocking { db.libraries().get("srv", "lib3") })
+    assertTrue(ids("lib3").isEmpty())
+    assertTrue(topics.contains("libraries"))
+  }
+
+  @Test
+  fun cancelledOnServerSwitch() = runBlocking {
+    server.library("lib1")
+    repeat(700) { server.book("b$it") }
+    lateinit var pass: kotlinx.coroutines.Deferred<CatalogResult>
+    server.onItemsPage = { if (it.page == 1) pass.cancel() }
+    pass = async(Dispatchers.IO, start = CoroutineStart.LAZY) { reconciler.reconcile(config, null) }
+    pass.start()
+    runCatching { pass.await() }
+
+    assertEquals("the page answered after the cancel is not written", 500, ids().size)
+  }
+
+  @Test
+  fun neverRequestsExpandedItems() {
+    server.library("lib1")
+    server.series("a", "A")
+    server.series("ab", "A, B")
+    server.book("b1", series = listOf("ab" to "1"))
+    reconcile()
+    assertTrue(api.requests.none { it.path.startsWith("/api/items/") })
+  }
+
+  @Test
+  fun tenThousandItemsInTwentyPages() {
+    server.library("lib1")
+    repeat(10_000) { server.book("b$it") }
+    val started = System.nanoTime()
+    reconcile()
+    val ms = (System.nanoTime() - started) / 1_000_000
+    println("CatalogReconcilerTest: first pass over 10 000 items took $ms ms on the JVM")
+
+    assertEquals(20, itemRequests().size)
+    assertEquals(10_000, ids().size)
+  }
+}
