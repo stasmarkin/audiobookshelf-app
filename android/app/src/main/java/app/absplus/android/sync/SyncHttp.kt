@@ -25,6 +25,12 @@ interface ReachabilitySink {
   fun reportUnreachable(address: String)
 }
 
+/** For requests whose failures say nothing about the server as a whole (long catalog pages). */
+object NoReachabilityReports : ReachabilitySink {
+  override fun reportResponse(address: String, code: Int) {}
+  override fun reportUnreachable(address: String) {}
+}
+
 sealed interface HttpOutcome {
   data class Ok(val code: Int, val body: String) : HttpOutcome
   data class HttpError(val code: Int) : HttpOutcome

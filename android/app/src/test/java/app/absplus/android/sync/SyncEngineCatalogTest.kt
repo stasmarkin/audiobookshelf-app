@@ -47,6 +47,10 @@ class SyncEngineCatalogTest {
   @Volatile private var foreground = true
   @Volatile private var now = 100_000_000L
   @Volatile private var beforeEventWrite: suspend () -> Unit = {}
+  @Volatile private var currentLibraryId: () -> String? = { "lib1" }
+  /** What the user's requests told about the server; catalog requests have their own SyncHttp. */
+  private val userReports = java.util.Collections.synchronizedList(mutableListOf<String>())
+  private val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
   private val store get() = SyncEngine.store!!
 
   /** Holds the items page [page] of the [pass]-th pass after the gate is set (from 0) until released. */
@@ -71,7 +75,12 @@ class SyncEngineCatalogTest {
   private suspend fun start() {
     SyncEngine.initForTest(SyncDeps(
             db = db,
-            http = syncHttp(api),
+            http = SyncHttp(api.client, { _, onResult -> onResult(app.absplus.android.server.RefreshResult.Transient) }, { "token" }, object : ReachabilitySink {
+              override fun reportResponse(address: String, code: Int) {}
+              override fun reportUnreachable(address: String) {
+                userReports.add("unreachable")
+              }
+            }),
             activeServer = { active },
             serverState = state,
             onlineEntries = onlineEntries,
@@ -80,8 +89,10 @@ class SyncEngineCatalogTest {
             clock = { now },
             scope = scope,
             log = {},
+            logError = { errors.add(it) },
             notifyWindowMs = 10,
-            catalog = CatalogDeps(replica, currentLibraryId = { "lib1" }, beforeEventWrite = { beforeEventWrite() })))
+            catalog = CatalogDeps(replica, currentLibraryId = { currentLibraryId() }, http = syncHttp(api), minIntervalMs = CATALOG_INTERVAL_MS,
+                    beforeEventWrite = { beforeEventWrite() })))
     settle()
   }
 
@@ -398,5 +409,68 @@ class SyncEngineCatalogTest {
     val payload = server.itemJson(FakeBook("li1", "lib1", "Elsewhere", updatedAt = 9)).toString()
     assertFalse(SyncEngine.applyEvent("item_updated", payload, "srvB"))
     assertEquals("Title li1", title("li1"))
+  }
+
+  @Test
+  fun reconnectStormPassesOncePerInterval() = runBlocking {
+    server.book("li1")
+    startOnline()
+    repeat(10) {
+      SyncEngine.onSocketLost()
+      SyncEngine.syncNow(SyncReason.SOCKET_INIT)
+    }
+    awaitPasses(2)
+    delay(CATALOG_INTERVAL_MS * 2)
+    assertEquals("one more pass for the whole storm", 2, passes())
+
+    // A later drop after the interval passes again
+    SyncEngine.onSocketLost()
+    SyncEngine.syncNow(SyncReason.SOCKET_INIT)
+    awaitPasses(3)
+  }
+
+  @Test
+  fun delayedReconnectPassIsDroppedInTheBackground() = runBlocking {
+    server.book("li1")
+    startOnline()
+    SyncEngine.onSocketLost()
+    SyncEngine.syncNow(SyncReason.SOCKET_INIT)
+    foreground = false
+    delay(CATALOG_INTERVAL_MS * 2)
+    assertEquals(1, passes())
+  }
+
+  @Test
+  fun catalogTimeoutDoesNotMarkServerUnreachable() = runBlocking {
+    repeat(700) { server.book("b$it") }
+    replica.items().upsertAll(listOf(app.absplus.android.db.itemEntity("srv", "kept")))
+    server.onItemsPage = { if (it.page == 1) throw java.io.IOException("timeout") }
+    start()
+    setState(ServerState.ONLINE)
+    eventually("the pass stopped") { errors.any { it.startsWith("Catalog srv stopped") } }
+    settle()
+
+    assertTrue("the user's transport heard nothing", userReports.isEmpty())
+    assertTrue("nothing is deleted", replica.items().get("srv", "kept") != null)
+    assertEquals(500, replica.items().ids("srv", "lib1").count { it.startsWith("b") })
+  }
+
+  @Test
+  fun failedPassStillEndsBuffering() = runBlocking {
+    server.book("li1")
+    replica.libraries().upsertAll(listOf(app.absplus.android.db.libraryRow("srv", "lib1")))
+    currentLibraryId = { throw IllegalStateException("broken preferences") }
+    start()
+    setState(ServerState.ONLINE)
+    eventually("the pass failed") { errors.any { it.startsWith("Catalog srv failed") } }
+    settle()
+
+    val payload = server.itemJson(FakeBook("li9", "lib1", "Applied at once", updatedAt = 5)).toString()
+    assertTrue(SyncEngine.applyEvent("item_added", payload, "srv"))
+    assertEquals("Applied at once", title("li9"))
+  }
+
+  private companion object {
+    const val CATALOG_INTERVAL_MS = 300L
   }
 }
