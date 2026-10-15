@@ -63,6 +63,15 @@ Merged into `plus`, not yet in a published release.
   sent only if it is further on than the server's; otherwise the phone takes the server's. Rolling back to the
   previous version is safe: the saved sessions are ordinary listening sessions it sends itself; only the last minute
   or so of streamed time not settled at that moment is not sent by it (it is sent after updating again).
+- **The player offline:** a downloaded book now always plays from the file, from every place that starts it (card,
+  item page, Continue shelf, queues, Android Auto, widget and headset), also when it was started by its server id or
+  downloaded through another library; the cellular prompt appears only when the book really streams. When the server
+  of a streamed book goes away (or answers 502/503/504, or a proxy's 52x), the player no longer closes with "Playback
+  Failed": it pauses with "Waiting for server" and continues by itself at the same position when the server is back.
+  A series or collection queue that reaches a book that is not downloaded while the server is away waits on that
+  book instead of skipping it. When the download of the book being streamed finishes, playback switches to the file
+  at the same position. A book starts where it was last left on this phone, also after a seek while paused offline.
+  Rolling back to the previous version is safe: a queue saved by this version streams its entries there.
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 
