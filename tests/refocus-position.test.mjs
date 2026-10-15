@@ -128,7 +128,7 @@ test('deviceFocused keeps its other behaviour: no work while playing or unfocuse
   assert.equal(remote.calls.sync.length, 1)
 })
 
-test('Bookmark timestamp: the modal posts the container time, which after refocus is the live paused position', async () => {
+test('Bookmark timestamp: the modal saves the container time, which after refocus is the live paused position', async () => {
   const container = await read('../components/app/AudioPlayerContainer.vue')
   assert.match(container, /@updateTime="\(t\) => \(currentTime = t\)"/)
   assert.match(container, /<modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime"/)
@@ -139,21 +139,25 @@ test('Bookmark timestamp: the modal posts the container time, which after refocu
     .replace('export default', 'globalThis.component =')
   const sandbox = { Dialog: {}, console }
   vm.runInNewContext(script, sandbox)
-  const posts = []
+  const added = []
   const ctx = {
     currentTime: LIVE,
     libraryItemId: 'item-1',
+    serverConfigId: null,
     newBookmarkTitle: 'check',
     showBookmarkTitleInput: true,
-    $nativeHttp: { post: (url, body) => (posts.push([url, body]), Promise.resolve()) },
+    $absData: { addBookmark: (args) => (added.push(args), Promise.resolve()) },
     $toast: { success() {}, error() {} },
     $strings: {},
     $formatDate: () => ''
   }
   Object.defineProperty(ctx, 'show', { set() {}, get: () => true })
   sandbox.component.methods.submitCreateBookmark.call(ctx)
-  assert.deepEqual(JSON.parse(JSON.stringify(posts)), [['/api/me/item/item-1/bookmark', { title: 'check', time: Math.floor(LIVE) }]])
-  assert.equal(posts[0][1].time, 7107)
+  assert.equal(added.length, 1)
+  assert.equal(added[0].libraryItemId, 'item-1')
+  assert.equal(added[0].title, 'check')
+  assert.equal(added[0].time, Math.floor(LIVE))
+  assert.equal(added[0].time, 7107)
 })
 
 test('Layout consumers above the collapsed player follow its projected height (bars: the variable; lists: the page height)', async () => {

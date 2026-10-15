@@ -112,6 +112,8 @@ class ServerSocket extends EventEmitter {
     console.log('[SOCKET] Initial socket data received', data)
     this.emit('initialized', true)
     this.isAuthenticated = true
+    // An authenticated socket is a fresh connection: pull what changed meanwhile and send what waited
+    this.app?.$absData?.syncNow({ reason: 'socket-init' }).catch((error) => console.error('[SOCKET] Sync failed to start', error))
   }
 
   onAuthFailed(data) {

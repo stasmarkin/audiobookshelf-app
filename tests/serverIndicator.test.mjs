@@ -86,3 +86,50 @@ test('indicator shows pending changes', () => {
   assert.equal(model({ syncState: { running: false, pendingCount: 0 } }).count, null)
   assert.equal(model({ serverState: 'offline', socketConnected: false, syncState: { pendingCount: 0 } }).labelKey, 'LabelServerUnreachable')
 })
+
+test('the tap dialog offers Sync now while online, Retry while unreachable, nothing without a network', () => {
+  assert.equal(model({}).action, 'sync')
+  assert.equal(model({ syncState: { running: true, pendingCount: 1 } }).action, 'sync')
+  assert.equal(model({ serverState: 'offline', socketConnected: false }).action, 'retry')
+  assert.equal(model({ serverState: 'offline', socketConnected: false, syncState: { pendingCount: 2 } }).action, 'retry', 'pending changes still offer Retry')
+  assert.equal(model({ networkConnected: false, syncState: { pendingCount: 2 } }).action, null)
+  assert.equal(model({ attemptingConnection: true }).action, null)
+  assert.equal(model({ serverState: 'unauthorized', socketConnected: false }).action, 'signIn')
+  assert.equal(model({ hasServer: false, serverState: 'unknown' }).action, null)
+})
+
+async function indicator(state) {
+  const vm = await import('node:vm')
+  const component = (await readFile(new URL('../components/widgets/ConnectionIndicator.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const dialogs = []
+  const sandbox = {
+    indicatorModel,
+    Dialog: {
+      confirm: async (opts) => (dialogs.push(['confirm', opts.okButtonTitle, opts.message]), { value: true }),
+      alert: async (opts) => dialogs.push(['alert', opts.message])
+    }
+  }
+  vm.runInNewContext(component.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
+  const calls = []
+  const strings = { HeaderConnectionStatus: 'Status', ButtonSyncNow: 'Sync now', ButtonRetry: 'Retry', ButtonCancel: 'Cancel', LabelChangesPending: '{0} pending', LabelServerUnreachable: 'down', MessageSocketConnectedOverUnmeteredWifi: 'fine' }
+  const ctx = {
+    $store: { state: { ...live, user: { user: { id: 'u' } }, ...state }, getters: { getHasActiveServer: true } },
+    $strings: strings,
+    $getString: (key, subs) => strings[key].replace('{0}', subs[0]),
+    $absData: { syncNow: async () => calls.push('syncNow'), retryServer: async () => calls.push('retryServer') },
+    $router: { push: (path) => calls.push(path) }
+  }
+  Object.defineProperty(ctx, 'model', { get: () => sandbox.component.computed.model.call(ctx) })
+  await sandbox.component.methods.showAlertDialog.call(ctx)
+  return { calls, dialogs }
+}
+
+test('indicator dialog sync button calls syncNow', async () => {
+  const online = await indicator({ syncState: { running: false, pendingCount: 0 } })
+  assert.deepEqual(online.calls, ['syncNow'])
+  assert.deepEqual(online.dialogs, [['confirm', 'Sync now', 'fine']])
+
+  const offline = await indicator({ serverState: 'offline', socketConnected: false, syncState: { running: false, pendingCount: 3 } })
+  assert.deepEqual(offline.calls, ['retryServer'], 'no Sync now while the server is unreachable')
+  assert.deepEqual(offline.dialogs, [['confirm', 'Retry', '3 pending']])
+})

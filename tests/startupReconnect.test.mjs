@@ -22,7 +22,8 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
     AbsLogger: { info: async () => {}, error: async () => {} },
     CapacitorHttp: {},
     console: { ...console, log: () => {}, warn: () => {} },
-    setTimeout: (fn, ms) => timers.push({ fn, ms }),
+    setTimeout: (fn, ms) => timers.push({ fn, ms }) && timers.at(-1),
+    clearTimeout: (t) => timers.includes(t) && timers.splice(timers.indexOf(t), 1),
     document: { addEventListener() {}, removeEventListener() {} }
   }
   vm.runInNewContext(script, sandbox)
@@ -54,7 +55,10 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
         (async () => {
           calls.push('getServerState')
           return { state: store.state.serverState }
-        })
+        }),
+      // Arrays, so the string-only filters below keep listing just the connection steps
+      reloadBookmarks: async () => calls.push(['reloadBookmarks']),
+      applyServerEvent: async (args) => calls.push(['applyServerEvent', args])
     },
     $setOrientationLock() {},
     $platform: 'android',
@@ -77,7 +81,7 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
     return (w.handler || w).call(view, newVal, oldVal)
   }
   const runTimers = () => timers.splice(0).forEach((t) => t.fn())
-  return { view, store, calls, emitted, watch, runTimers, mounted: () => component.mounted.call(view) }
+  return { view, store, calls, emitted, watch, runTimers, timers, component, mounted: () => component.mounted.call(view) }
 }
 
 test('server coming online retries authorization when there is no user and syncs sessions when there is', async () => {
@@ -306,4 +310,99 @@ test('a background library re-read does not override a library the user picked m
   l.watch('serverState', 'online', 'offline')
   await flush()
   assert.deepEqual({ ...l.calls.find((c) => c[1] === 'libraries/fetch')[2] }, { libraryId: 'lib-1', onlyIfCurrent: true })
+})
+
+// Bookmarks (offline-first 2a): kept natively, so a cold start without the server shows them; the server's copy arrives
+// with the user object (authorize, socket user_updated) and is handed to native
+
+const plain = (value) => JSON.parse(JSON.stringify(value)) // objects made inside the vm sandbox
+const order = (calls) => calls.filter((c) => typeof c === 'string' || c[0] === 'reloadBookmarks').map((c) => (typeof c === 'string' ? c : c[0]))
+
+test('a cold start loads saved bookmarks before connecting, also with the server unreachable', async () => {
+  const offline = layout({ serverState: 'offline' })
+  await offline.mounted()
+  assert.deepEqual(order(offline.calls), ['getServerState', 'reloadBookmarks'])
+
+  const unknown = layout({ serverState: 'unknown' })
+  await unknown.mounted()
+  assert.deepEqual(order(unknown.calls), ['getServerState', 'reloadBookmarks', 'attemptConnection'])
+
+  const failing = layout({ serverState: 'unknown' })
+  failing.view.$absData.reloadBookmarks = async () => {
+    throw new Error('plugin not implemented')
+  }
+  await failing.mounted()
+  assert.ok(failing.calls.includes('attemptConnection'), 'a failed read does not block the connection')
+})
+
+test('user_updated is debounced and forwarded once', async () => {
+  const l = layout({ user: { id: 'user-1' } })
+  const commits = []
+  l.store.commit = (type, payload) => commits.push([type, payload])
+  l.store.state.activeServerConfigId = 'server-a'
+
+  for (const n of [1, 2, 3]) l.view.userUpdated({ id: 'user-1', n })
+  l.view.userUpdated({ id: 'someone-else' })
+  assert.deepEqual(
+    commits.map(([type, payload]) => [type, payload.n]),
+    [
+      ['user/setUser', 1],
+      ['user/setUser', 2],
+      ['user/setUser', 3]
+    ],
+    'the store still follows every event'
+  )
+  assert.equal(l.timers.length, 1)
+  assert.equal(l.timers[0].ms, 500)
+  l.runTimers()
+  await flush()
+  assert.deepEqual(
+    plain(l.calls.filter((c) => c[0] === 'applyServerEvent')),
+    [['applyServerEvent', { event: 'user_updated', payload: { id: 'user-1', n: 3 }, serverConfigId: 'server-a' }]]
+  )
+
+  // A server switch while one is waiting: the waiting one goes out at once with its own server
+  l.view.userUpdated({ id: 'user-1', n: 4 })
+  l.store.state.activeServerConfigId = 'server-b'
+  l.view.userUpdated({ id: 'user-1', n: 5 })
+  l.runTimers()
+  await flush()
+  assert.deepEqual(
+    plain(l.calls.filter((c) => c[0] === 'applyServerEvent').slice(1).map(([, a]) => [a.payload.n, a.serverConfigId])),
+    [
+      [4, 'server-a'],
+      [5, 'server-b']
+    ]
+  )
+})
+
+test('authorize result is handed to native once', async () => {
+  const l = layout({ serverState: 'online' })
+  const config = { id: 'server-a', name: 'Synthetic', address: 'https://a.test.invalid', token: 'access-1' }
+  const user = { id: 'user-1', token: 'other', librariesAccessible: [], bookmarks: [{ libraryItemId: 'li1', time: 3, title: 'A' }] }
+  const commits = []
+  l.store.commit = (type, payload) => {
+    commits.push(type)
+    if (type === 'setAttemptingConnection') l.store.state.attemptingConnection = payload
+  }
+  Object.assign(l.view, {
+    $db: {
+      getDeviceData: async () => ({ deviceSettings: {}, lastServerConnectionConfigId: 'server-a', serverConnectionConfigs: [config] }),
+      setServerConnectionConfig: async (c) => c
+    },
+    $nativeHttp: { post: async () => ({ user, userDefaultLibraryId: 'lib-1', serverSettings: { version: '2.30.0' }, ereaderDevices: [] }) },
+    $isValidVersion: () => true,
+    $authRenewal: { latestToken: () => null },
+    $localStore: { getLastLibraryId: async () => null },
+    $socket: { connect() {}, on() {}, off() {} }
+  })
+  l.view.initLibraries = async () => {}
+
+  await l.component.methods.attemptConnection.call(l.view)
+
+  assert.ok(commits.includes('user/setUser'), 'user/setUser stays')
+  assert.deepEqual(
+    plain(l.calls.filter((c) => c[0] === 'applyServerEvent')),
+    [['applyServerEvent', { event: 'user_updated', payload: user, serverConfigId: 'server-a' }]]
+  )
 })

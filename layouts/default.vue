@@ -207,6 +207,7 @@ export default {
       this.$store.commit('user/setUser', user)
       this.$store.commit('user/setAccessToken', serverConnectionConfig.token)
       this.$store.commit('user/setServerConnectionConfig', serverConnectionConfig)
+      this.forwardUserToNative(user, serverConnectionConfig.id)
 
       this.$socket.connect(serverConnectionConfig.address, serverConnectionConfig.token)
 
@@ -282,7 +283,30 @@ export default {
     userUpdated(user) {
       if (this.user?.id == user.id) {
         this.$store.commit('user/setUser', user)
+        this.queueUserForNative(user)
       }
+    },
+    /** The user object carries the server's bookmarks; native merges them into userdata.db. */
+    forwardUserToNative(user, serverConfigId) {
+      this.$absData.applyServerEvent({ event: 'user_updated', payload: user, serverConfigId }).catch((error) => console.error('[default] Could not hand the user to native', error))
+    },
+    /**
+     * Socket user_updated arrives in bursts (one per change on the server) and each carries the whole user, so only the
+     * last one within 500 ms crosses the bridge. The server is captured on arrival: native drops it if another one is
+     * active by then, and a switch sends what was waiting for the previous server right away.
+     */
+    queueUserForNative(user) {
+      const serverConfigId = this.$store.state.activeServerConfigId
+      if (this.pendingNativeUser && this.pendingNativeUser.serverConfigId !== serverConfigId) this.flushUserForNative()
+      this.pendingNativeUser = { user, serverConfigId }
+      clearTimeout(this.nativeUserTimer)
+      this.nativeUserTimer = setTimeout(this.flushUserForNative, 500)
+    },
+    flushUserForNative() {
+      clearTimeout(this.nativeUserTimer)
+      const pending = this.pendingNativeUser
+      this.pendingNativeUser = null
+      if (pending) this.forwardUserToNative(pending.user, pending.serverConfigId)
     },
     async userMediaProgressUpdated(payload) {
       const prog = payload.data // MediaProgress
@@ -398,6 +422,8 @@ export default {
 
       // Native may already know the server is down; then the serverState watcher connects once it answers again
       await this.$absData.getServerState().catch((error) => console.error('[default] Could not read the server state', error))
+      // Bookmarks are kept on the device, so they show before (and without) a connection
+      await this.$absData.reloadBookmarks().catch((error) => console.error('[default] Could not read bookmarks', error))
 
       if (this.$store.state.user.serverConnectionConfig) {
         AbsLogger.info({ tag: 'default', message: `mounted: Server connected, init libraries (${this.$store.getters['user/getServerConfigName']})` })
@@ -419,6 +445,7 @@ export default {
     this.hasMounted = true
   },
   beforeDestroy() {
+    this.flushUserForNative()
     this.$eventBus.$off('change-lang', this.changeLanguage)
     document.removeEventListener('visibilitychange', this.visibilityChanged)
     this.$socket.off('user_updated', this.userUpdated)

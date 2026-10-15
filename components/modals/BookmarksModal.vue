@@ -58,7 +58,12 @@ export default {
       type: Number,
       default: 1
     },
-    libraryItemId: String
+    libraryItemId: String,
+    // The server of the downloaded copy that is playing, when it is not the active one; null writes for the active server
+    serverConfigId: {
+      type: String,
+      default: null
+    }
   },
   data() {
     return {
@@ -110,25 +115,20 @@ export default {
       })
       if (!value) return
 
-      this.$nativeHttp
-        .delete(`/api/me/item/${this.libraryItemId}/bookmark/${bm.time}`)
-        .then(() => {
-          this.$store.commit('user/deleteBookmark', { libraryItemId: this.libraryItemId, time: bm.time })
-        })
-        .catch((error) => {
-          this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
-          console.error(error)
-        })
+      // Saved on the device and sent when the server is reachable; the list follows through $absData.onDataChanged
+      this.$absData.removeBookmark({ libraryItemId: this.libraryItemId, time: bm.time, serverConfigId: this.serverConfigId }).catch((error) => {
+        this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
+        console.error(error)
+      })
     },
     async clickBookmark(bm) {
       await this.$hapticsImpact()
       this.$emit('select', bm)
     },
     submitUpdateBookmark(updatedBookmark) {
-      this.$nativeHttp
-        .patch(`/api/me/item/${this.libraryItemId}/bookmark`, updatedBookmark)
-        .then((bookmark) => {
-          this.$store.commit('user/updateBookmark', bookmark)
+      this.$absData
+        .renameBookmark({ libraryItemId: this.libraryItemId, time: updatedBookmark.time, title: updatedBookmark.title, serverConfigId: this.serverConfigId })
+        .then(() => {
           this.showBookmarkTitleInput = false
         })
         .catch((error) => {
@@ -144,8 +144,8 @@ export default {
         title: this.newBookmarkTitle,
         time: Math.floor(this.currentTime)
       }
-      this.$nativeHttp
-        .post(`/api/me/item/${this.libraryItemId}/bookmark`, bookmark)
+      this.$absData
+        .addBookmark({ libraryItemId: this.libraryItemId, ...bookmark, serverConfigId: this.serverConfigId })
         .then(() => {
           this.$toast.success('Bookmark added')
         })

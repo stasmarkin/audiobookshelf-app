@@ -1,14 +1,22 @@
 /**
  * What the app-bar connection indicator shows. `tone` maps to a text color in ConnectionIndicator.vue; `labelKey` is
- * the $strings key of the message shown on tap; `count` is the number of changes waiting to be sent (null when none).
+ * the $strings key of the message shown on tap; `count` is the number of changes waiting to be sent (null when none);
+ * `action` is the button the tap dialog offers: 'signIn', 'retry' (server unreachable), 'sync' (server online) or null.
  *
  * @param {{ serverState: string, networkConnected: boolean, hasServer: boolean, signedIn: boolean, socketConnected: boolean, syncState: object|null,
  *   attemptingConnection: boolean, networkConnectionType: string|null, isNetworkUnmetered: boolean }} input
- * @returns {{ icon: string|null, tone: 'ok'|'warning'|'error'|'muted'|'metered', labelKey: string|null, count: number|null }}
+ * @returns {{ icon: string|null, tone: 'ok'|'warning'|'error'|'muted'|'metered', labelKey: string|null, count: number|null, action: string|null }}
  */
 export function indicatorModel({ serverState, networkConnected, hasServer, signedIn, socketConnected, syncState, attemptingConnection, networkConnectionType, isNetworkUnmetered }) {
   const pending = syncState?.pendingCount > 0 ? syncState.pendingCount : null
-  const show = (icon, tone, labelKey) => ({ icon, tone, labelKey, count: pending })
+  const settled = networkConnected && !attemptingConnection
+  const actionFor = (labelKey) => {
+    if (labelKey === 'LabelSignInAgain') return 'signIn'
+    if (settled && serverState === 'offline') return 'retry'
+    if (settled && serverState === 'online') return 'sync'
+    return null
+  }
+  const show = (icon, tone, labelKey) => ({ icon, tone, labelKey, count: pending, action: icon ? actionFor(labelKey) : null })
   // Offline the message is about what still has to reach the server, not about the connection
   const unsentOr = (labelKey) => (pending ? 'LabelChangesPending' : labelKey)
 

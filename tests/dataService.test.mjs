@@ -377,3 +377,11 @@ test('bookmark getter works without a signed-in user', async () => {
   exports.mutations.setBookmarks(state, null)
   assert.deepEqual(exports.getters.getUserBookmarksForItem(state)('li1'), [])
 })
+
+test('socket init triggers user reconcile', async () => {
+  const { s } = await socket()
+  const synced = []
+  s.app.$absData.syncNow = async (args) => synced.push(args)
+  s.onInit({})
+  assert.deepEqual(synced, [{ reason: 'socket-init' }])
+})

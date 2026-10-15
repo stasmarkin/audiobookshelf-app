@@ -20,7 +20,7 @@ export default {
         hasServer: this.$store.getters['getHasActiveServer'],
         signedIn: !!state.user.user,
         socketConnected: state.socketConnected,
-        syncState: null,
+        syncState: state.syncState,
         attemptingConnection: state.attemptingConnection,
         networkConnectionType: state.networkConnectionType,
         isNetworkUnmetered: state.isNetworkUnmetered
@@ -35,15 +35,16 @@ export default {
   },
   methods: {
     async showAlertDialog() {
-      const { labelKey } = this.model
+      const { labelKey, count, action } = this.model
       const title = this.$strings.HeaderConnectionStatus
-      const message = this.$strings[labelKey]
-      if (labelKey === 'LabelSignInAgain') {
-        const { value } = await Dialog.confirm({ title, message, okButtonTitle: this.$strings.ButtonConnectToServer, cancelButtonTitle: this.$strings.ButtonCancel })
-        if (value) this.$router.push('/connect')
-      } else if (labelKey === 'LabelServerUnreachable') {
-        const { value } = await Dialog.confirm({ title, message, okButtonTitle: this.$strings.ButtonRetry, cancelButtonTitle: this.$strings.ButtonCancel })
-        if (value) this.$absData.retryServer()
+      const message = count ? this.$getString(labelKey, [count]) : this.$strings[labelKey]
+      const confirm = async (okButtonTitle) => (await Dialog.confirm({ title, message, okButtonTitle, cancelButtonTitle: this.$strings.ButtonCancel })).value
+      if (action === 'signIn') {
+        if (await confirm(this.$strings.ButtonConnectToServer)) this.$router.push('/connect')
+      } else if (action === 'retry') {
+        if (await confirm(this.$strings.ButtonRetry)) this.$absData.retryServer()
+      } else if (action === 'sync') {
+        if (await confirm(this.$strings.ButtonSyncNow)) this.$absData.syncNow()
       } else {
         Dialog.alert({ title, message })
       }

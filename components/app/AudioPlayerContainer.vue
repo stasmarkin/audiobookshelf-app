@@ -4,7 +4,7 @@
 
     <modals-playback-speed-modal v-model="showPlaybackSpeedModal" :playback-rate.sync="playbackSpeed" @update:playbackRate="updatePlaybackSpeed" @change="changePlaybackSpeed" />
     <modals-sleep-timer-modal v-model="showSleepTimerModal" :current-time="sleepTimeRemaining" :sleep-timer-running="isSleepTimerRunning" :current-end-of-chapter-time="currentEndOfChapterTime" :is-auto="isAutoSleepTimer" @change="selectSleepTimeout" @cancel="cancelSleepTimer" @increase="increaseSleepTimer" @decrease="decreaseSleepTimer" />
-    <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="serverLibraryItemId" :playback-rate="playbackSpeed" @select="selectBookmark" />
+    <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="serverLibraryItemId" :server-config-id="bookmarkServerConfigId" :playback-rate="playbackSpeed" @select="selectBookmark" />
     <modals-queue-modal v-model="showQueueModal" :queue="playbackQueue" @reorder="reorderQueue" @remove="removeFromQueue" />
   </div>
 </template>
@@ -52,6 +52,10 @@ export default {
     bookmarks() {
       if (!this.serverLibraryItemId) return []
       return this.$store.getters['user/getUserBookmarksForItem'](this.serverLibraryItemId)
+    },
+    bookmarkServerConfigId() {
+      // A downloaded copy keeps its own server: its bookmarks are queued for that server, not the active one
+      return this.currentPlaybackSession?.localLibraryItem?.serverConnectionConfigId || null
     },
     isIos() {
       return this.$platform === 'ios'
