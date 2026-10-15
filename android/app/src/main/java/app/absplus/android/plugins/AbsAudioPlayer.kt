@@ -118,6 +118,10 @@ class AbsAudioPlayer : Plugin() {
         override fun onPlaybackSpeedChanged(playbackSpeed:Float) {
           emit("onPlaybackSpeedChanged", playbackSpeed)
         }
+
+        override fun onAwaitingServer(awaiting: Boolean) {
+          notifyListeners("onAwaitingServer", JSObject().put("awaiting", awaiting))
+        }
       })
 
       MediaEventManager.clientEventEmitter = playerNotificationService.clientEventEmitter
@@ -163,6 +167,7 @@ class AbsAudioPlayer : Plugin() {
     queue.put("items", JSArray(jacksonMapper.writeValueAsString(pns.playlistQueue)))
     queue.put("currentIndex", pns.playlistQueueIndex)
     ret.put("queue", queue)
+    ret.put("awaitingServer", pns.awaiting.isAwaiting)
     DLog.i("PlaybackRestore", "UI requested native playback state | hasSession=${session != null} | isPlaying=${session != null && pns.currentPlayer.isPlaying} | queue=${pns.playlistQueue.size}")
     call.resolve(ret)
   }
@@ -485,6 +490,7 @@ class AbsAudioPlayer : Plugin() {
     Handler(Looper.getMainLooper()).post {
       playerNotificationService.playlistQueue = queue
       playerNotificationService.playlistQueueIndex = currentIndex
+      playerNotificationService.onQueueReplaced()
       DLog.d(tag, "setPlaylistQueue: ${queue.size} items, currentIndex=$currentIndex")
       call.resolve()
     }
@@ -505,6 +511,7 @@ class AbsAudioPlayer : Plugin() {
     Handler(Looper.getMainLooper()).post {
       playerNotificationService.playlistQueue = emptyList()
       playerNotificationService.playlistQueueIndex = -1
+      playerNotificationService.onQueueReplaced()
       DLog.d(tag, "clearPlaylistQueue: cleared")
       call.resolve()
     }
