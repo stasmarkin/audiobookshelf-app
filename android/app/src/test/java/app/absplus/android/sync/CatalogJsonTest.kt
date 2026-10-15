@@ -115,6 +115,23 @@ class CatalogJsonTest {
   }
 
   @Test
+  fun candidatesStartASegment() {
+    val names = mapOf("Saga I" to listOf("s1"), "I" to listOf("s2"), "The Big One" to listOf("s3"), "Big" to listOf("s4"))
+    // "I" and "Big" occur only inside a segment, so they are no candidates
+    val parse = CatalogJson.parseSeriesName("Saga I, The Big Ones #1", names)
+    assertEquals(SeriesNameParse.Ambiguous(setOf("s1", "s3")), parse)
+  }
+
+  @Test
+  fun seriesRowKeepsNoBooks() {
+    val page = fixture("series-page.json")
+    val series = CatalogJson.seriesEntity("srv", page.path("results").first())
+    assertFalse(series.json.contains("\"books\""))
+    assertTrue("the other fields stay", series.json.contains("\"nameIgnorePrefix\""))
+    assertTrue("the answer itself is not changed", page.path("results").first().has("books"))
+  }
+
+  @Test
   fun expandedItemSeriesBecomeMembership() {
     val members = CatalogJson.seriesMembershipOf("srv", fixture("book-expanded.json"))
     assertEquals(listOf("Мир" to "1", "Трилогия" to "3").map { it.second }, members.map { it.sequence })

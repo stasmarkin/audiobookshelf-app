@@ -171,7 +171,9 @@ object CatalogJson {
           page.path("results").map { seriesEntity(serverConfigId, it) }
 
   fun seriesEntity(serverConfigId: String, series: JsonNode): SeriesEntity {
-    val json = (series.deepCopy<JsonNode>() as ObjectNode).apply { remove("books") }
+    // Field by field: a series answer carries all its books, which are not kept and need no copy
+    val json = nodes.objectNode()
+    series.fields().forEach { (key, value) -> if (key != "books") json.set<JsonNode>(key, value) }
     val name = series.text("name") ?: ""
     return SeriesEntity(
             serverConfigId = serverConfigId,
@@ -232,7 +234,9 @@ object CatalogJson {
     if (single != null && single.all { (name, _) -> idsByName[name]?.size == 1 }) {
       return SeriesNameParse.Parsed(single.map { (name, sequence) -> idsByName.getValue(name).single() to sequence })
     }
-    val candidates = idsByName.filterKeys { it.isNotEmpty() && seriesName.contains(it) }.values.flatten().toSet()
+    // A part starts the string or follows ", ": a name found elsewhere is inside another series' name
+    val candidates = idsByName.filterKeys { it.isNotEmpty() && (seriesName.startsWith(it) || seriesName.contains(", $it")) }
+            .values.flatten().toSet()
     return SeriesNameParse.Ambiguous(candidates)
   }
 }
