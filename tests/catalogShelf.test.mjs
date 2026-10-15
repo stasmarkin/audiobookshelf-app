@@ -331,14 +331,28 @@ test('a list read from the server still follows the socket', async () => {
   assert.equal(replicaResets, 0, "the replica's own notice refreshes it")
 })
 
-test('a book removed from a server-read list reloads it', async () => {
-  const shelf = await bookshelf({ answer: { results: [{ id: 'x' }, { id: 'y' }], total: 300, fromServer: true, replica: { reconciledAt: null, complete: false } } })
-  await shelf.view.init()
-  let resets = 0
-  shelf.view.resetEntities = () => resets++
-  shelf.view.executeRebuild = () => assert.fail('no local filtering of the sparse list')
-  shelf.view.libraryItemRemoved({ id: 'x' })
-  assert.equal(resets, 1)
-  shelf.view.libraryItemRemoved({ id: 'not-loaded' })
-  assert.equal(resets, 2, 'also a book on a page not loaded yet: the total changed')
+test('a book removed from a server-read list leaves in place, keeping the scroll', async () => {
+  const results = Array.from({ length: 20 }, (_, i) => ({ id: `b${i}`, libraryId: 'l1' }))
+  const shelf = await bookshelf({ answer: { results, total: 300, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+  const { view } = shelf
+  await view.init()
+  Object.assign(view, { booksPerFetch: 20, entitiesPerShelf: 2, currScrollTop: 700 })
+  view.pagesLoaded = { 0: true, 1: true }
+  const shown = {}
+  view.entityComponentRefs = { 4: { setEntity: (e) => (shown[4] = e.id), setLocalLibraryItem() {} }, 1: { setEntity: (e) => (shown[1] = e.id), setLocalLibraryItem() {} } }
+  let scrolledTo = null
+  view.handleScroll = (top) => (scrolledTo = top)
+  view.resetEntities = () => assert.fail('the list is not reset')
+
+  view.libraryItemRemoved({ id: 'b3', libraryId: 'l1' })
+
+  assert.equal(view.totalEntities, 299)
+  assert.equal(view.entities[3].id, 'b4')
+  assert.deepEqual(shown, { 4: 'b5' }, 'cards from the removed one on show the next book; earlier ones stay')
+  assert.deepEqual(Object.keys(view.pagesLoaded), [], 'pages from the removed one on are read again when in view')
+  assert.equal(scrolledTo, 700, 'the scroll position stays')
+
+  view.libraryItemRemoved({ id: 'b5', libraryId: 'other' })
+  view.libraryItemRemoved({ id: 'not-loaded', libraryId: 'l1' })
+  assert.equal(view.totalEntities, 299, 'another library, or a book not loaded, changes nothing')
 })

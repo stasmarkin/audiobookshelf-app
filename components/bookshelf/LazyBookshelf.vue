@@ -598,9 +598,8 @@ export default {
     },
     libraryItemRemoved(libraryItem) {
       if (!this.followsSocket()) return
-      // The Library list is loaded page by page (a sparse array): reload it rather than filter what is there
       if (this.entityName === 'books') {
-        this.resetEntities()
+        this.removeBookInPlace(libraryItem)
         return
       }
       if (this.entityName === 'series-books') {
@@ -612,6 +611,32 @@ export default {
           this.executeRebuild()
         }
       }
+    },
+    /**
+     * A book removed while the list comes from the server: taken out where it is, keeping the scroll. The list is
+     * sparse (pages load as they come into view), so the pages from the removed one on are read again when in view
+     * instead of shifting holes into them. A book not on a loaded page is left to the next load: where it was is unknown.
+     */
+    removeBookInPlace(libraryItem) {
+      if (libraryItem.libraryId && libraryItem.libraryId !== this.currentLibraryId) return
+      const index = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
+      if (index < 0) return
+      this.entities.splice(index, 1)
+      this.totalEntities = Math.max(0, this.totalEntities - 1)
+      this.totalShelves = Math.ceil(this.totalEntities / this.entitiesPerShelf)
+      this.$eventBus.$emit('bookshelf-total-entities', this.totalEntities)
+      const fromPage = Math.floor(index / this.booksPerFetch)
+      Object.keys(this.pagesLoaded)
+        .map(Number)
+        .filter((page) => page >= fromPage)
+        .forEach((page) => delete this.pagesLoaded[page])
+      for (const key of Object.keys(this.entityComponentRefs).map(Number)) {
+        const entity = this.entities[key]
+        if (key < index || !entity) continue
+        this.entityComponentRefs[key].setEntity(entity)
+        this.entityComponentRefs[key].setLocalLibraryItem(this.findLocalCopy(entity))
+      }
+      this.handleScroll(this.currScrollTop || 0)
     },
     libraryItemsAdded(libraryItems) {
       if (!this.followsSocket()) return
