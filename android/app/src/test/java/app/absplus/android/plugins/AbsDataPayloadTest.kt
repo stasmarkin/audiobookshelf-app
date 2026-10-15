@@ -1,6 +1,7 @@
 package app.absplus.android.plugins
 
 import app.absplus.android.sync.ItemsRequest
+import app.absplus.android.sync.SeriesRequest
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -44,5 +45,19 @@ class AbsDataPayloadTest {
     assertEquals(ItemsRequest("lib1", "addedAt", true, "genres.Rm9v", true, true, 100, 2), request)
     val plain = itemsRequest(JSONObject().put("libraryId", "lib1").put("limit", 20).put("sort", ""))
     assertEquals(ItemsRequest("lib1", null, false, null, false, false, 20, 0), plain)
+  }
+
+  @Test
+  fun seriesRequestReadsTheTabArgumentsAndRejectsMoreThan100() {
+    assertEquals(SeriesRequest("lib1", "name", true, true, 100, 1),
+            seriesRequest(JSONObject().put("libraryId", "lib1").put("sort", "name").put("desc", true).put("sortingIgnorePrefix", 1).put("limit", 100).put("page", 1)))
+    for (limit in listOf(101, 0)) {
+      try {
+        seriesRequest(JSONObject().put("libraryId", "lib1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..100", expected.message)
+      }
+    }
   }
 }

@@ -6,7 +6,9 @@ import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
 import app.absplus.android.db.replica.SeriesIndex
 import app.absplus.android.db.replica.UnsupportedFilterException
+import app.absplus.android.db.replica.naturalComparator
 import app.absplus.android.db.replica.nocaseCompare
+import app.absplus.android.db.replica.seriesSequenceList
 import app.absplus.android.db.replica.orderItems
 import app.absplus.android.db.userdata.MediaProgressEntity
 import org.junit.Assert.assertEquals
@@ -189,5 +191,21 @@ class LibraryQueryTest {
     val plain = listOf(itemRow("b", authorName = "John", narratorName = "Jane"))
     assertEquals(listOf("b"), ids(orderItems(plain, q(CatalogFilter("authors", "au2")), emptyMap(), SeriesIndex.EMPTY, mapOf("au2" to "John"), 0, Random(1))))
     assertEquals(listOf("b"), ids(orderItems(plain, q(CatalogFilter("narrators", "Jane")), emptyMap(), SeriesIndex.EMPTY, emptyMap(), 0, Random(1), listOf("Jane"))))
+  }
+
+  @Test
+  fun naturalOrderComparesNumbersByValue() {
+    val natural = naturalComparator()
+    assertEquals(listOf("1", "1.5", "1.10", "2", "10", "a", "B", "null"), listOf("10", "B", "null", "1.10", "2", "a", "1.5", "1").sortedWith(natural))
+    assertEquals(0, natural.compare("Book", "book"))
+    assertEquals(0, natural.compare("02", "2"))
+  }
+
+  @Test
+  fun seriesSequenceListJoinsRuns() {
+    assertEquals("1-3, 5", seriesSequenceList(listOf("3", "1", "2", "5")))
+    assertEquals("1.5-3.5, x", seriesSequenceList(listOf("x", "2.5", "1.5", "3.5", null, "")))
+    assertEquals("1.5, 3", seriesSequenceList(listOf("3", "1.5")))
+    assertEquals("", seriesSequenceList(listOf(null)))
   }
 }

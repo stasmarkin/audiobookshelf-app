@@ -6,6 +6,8 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
+import java.text.Collator
+import java.util.Locale
 import kotlin.random.Random
 
 /**
@@ -134,7 +136,11 @@ sealed interface QueryEntry {
           val nameIgnorePrefix: String,
           val sequence: String?,
           val numBooks: Int,
-          val libraryItemIds: List<String>
+          val libraryItemIds: List<String>,
+          /** Set only on a sub-series card of a series page, which the server sends in its own shape. */
+          val seriesSequenceList: String? = null,
+          /** On a sub-series card: the book's membership in the filtered series. */
+          val filterMember: SeriesItemEntity? = null
   ) : QueryEntry
 }
 
@@ -169,6 +175,63 @@ fun nocaseCompare(a: String?, b: String?): Int {
 }
 
 private fun fold(cp: Int) = if (cp in 'A'.code..'Z'.code) cp + 32 else cp
+
+/**
+ * `Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare` of the server's in-memory sorts: digit runs
+ * by value, the rest by a primary-strength collator. Not thread-safe: one per sort.
+ */
+fun naturalComparator(): Comparator<String> {
+  val collator = Collator.getInstance(Locale.ROOT).apply { strength = Collator.PRIMARY }
+  return Comparator { a, b ->
+    val ta = naturalTokens(a)
+    val tb = naturalTokens(b)
+    for (i in 0 until minOf(ta.size, tb.size)) {
+      val x = ta[i]
+      val y = tb[i]
+      val c = if (x[0] in '0'..'9' && y[0] in '0'..'9') compareDigits(x, y) else collator.compare(x, y)
+      if (c != 0) return@Comparator c
+    }
+    ta.size.compareTo(tb.size)
+  }
+}
+
+private val NATURAL_TOKEN = Regex("[0-9]+|[^0-9]+")
+
+private fun naturalTokens(text: String) = NATURAL_TOKEN.findAll(text).map { it.value }.toList()
+
+private fun compareDigits(x: String, y: String): Int {
+  val a = x.trimStart('0')
+  val b = y.trimStart('0')
+  return if (a.length != b.length) a.length.compareTo(b.length) else a.compareTo(b)
+}
+
+private val PLAIN_NUMBER = Regex("""^(\d+|\d+\.\d*|\d*\.\d+)$""")
+
+/** A number as JavaScript prints it ("2", not "2.0"). */
+private fun jsNumber(value: Double): String =
+        if (value % 1.0 == 0.0 && Math.abs(value) < 1e15) value.toLong().toString() else value.toString()
+
+/**
+ * `seriesSequenceList` of a sub-series card: the card's sequences in the filtered series, naturally sorted, runs of
+ * consecutive numbers joined ("1-3, 5").
+ */
+fun seriesSequenceList(sequences: List<String?>): String {
+  class Run(val start: String, var end: String, var last: Double?)
+  val runs = ArrayList<Run>()
+  for (sequence in sequences.filterNotNull().filter { it.isNotEmpty() }.sortedWith(naturalComparator())) {
+    val number = if (PLAIN_NUMBER.matches(sequence)) sequence.toDouble() else null
+    val text = number?.let { jsNumber(it) } ?: sequence
+    val run = runs.lastOrNull()
+    val previous = run?.last
+    if (run != null && number != null && previous != null && previous + 1 == number) {
+      run.end = text
+      run.last = number
+    } else {
+      runs += Run(text, text, number)
+    }
+  }
+  return runs.joinToString(", ") { if (it.start == it.end) it.start else "${it.start}-${it.end}" }
+}
 
 /** `CAST(x AS INTEGER)` of SQLite on text: the leading integer, 0 without one; null stays null. */
 internal fun sqliteInt(text: String?): Long? {
@@ -254,7 +317,11 @@ internal fun prepareItems(
 
   val ignorePrefix = q.sortingIgnorePrefix
   val collapse = q.collapseSeries && !podcast && filter?.group != "series"
+  val subSeries = if (seriesFilter && q.collapseSeries) {
+    filter?.value?.let { collapseSubSeries(filtered, it, series, progress, ignorePrefix, q.hideSingleBookSeries) }
+  } else null
   val keyed: List<Keyed> = when {
+    subSeries != null -> subSeries
     collapse -> collapse(filtered, series, progress, ignorePrefix)
     seriesFilter -> filtered.map { row ->
       val member = series.membersByItem[row.id]?.firstOrNull { it.seriesId == filter!!.value }
@@ -305,6 +372,7 @@ internal fun prepareItems(
     else -> null
   }
   if (seriesFilter && sort != "sequence") primary = primary?.then(sequenceOrder(false)) ?: sequenceOrder(false)
+  if (subSeries != null) primary = subSeriesOrder(sort, desc, primary)
   // Without a sort the server's order is undefined; the title keeps it stable
   return Prepared(keyed, primary ?: nocaseOrder(false) { it.displayTitle }, sort == "random")
 }
@@ -435,4 +503,58 @@ private fun collapse(
       Keyed(QueryEntry.Item(row.id, null), row, progress[row.id], null, titleOf(row, ignorePrefix))
     }
   }
+}
+
+/**
+ * `handleCollapseSubseries` of a series page: books of [seriesId] that are also in another series fold into a card of
+ * that series, on its first book by that series' sequence; with [hideSingle] only series with more than one book here.
+ * Null when that leaves one card: the server lists the books then.
+ */
+private fun collapseSubSeries(
+        filtered: List<ItemRow>,
+        seriesId: String,
+        series: SeriesIndex,
+        progress: Map<String, MediaProgressEntity>,
+        ignorePrefix: Boolean,
+        hideSingle: Boolean
+): List<Keyed>? {
+  val natural = naturalComparator()
+  val subs = LinkedHashMap<String, MutableList<Pair<SeriesItemEntity, ItemRow>>>()
+  for (row in filtered) {
+    for (m in series.membersByItem[row.id].orEmpty()) {
+      if (m.seriesId != seriesId && m.seriesId in series.series) subs.getOrPut(m.seriesId) { ArrayList() } += m to row
+    }
+  }
+  // The server's collator compares a missing sequence as the text "null"
+  val cards = subs.filterValues { !hideSingle || it.size > 1 }
+          .mapValues { (_, books) -> books.sortedWith(compareBy(natural) { it.first.sequence ?: "null" }).map { it.second } }
+  val inCard = cards.values.flatten().map { it.id }.toSet()
+  fun memberOf(row: ItemRow) = series.membersByItem[row.id]?.firstOrNull { it.seriesId == seriesId }
+
+  val keyed = ArrayList<Keyed>()
+  for (row in filtered) {
+    val member = memberOf(row)
+    for ((id, books) in cards) {
+      if (books.first().id != row.id) continue
+      val entity = series.series.getValue(id)
+      val card = QueryEntry.Collapsed(row.id, id, entity.name, entity.nameIgnorePrefix, null, books.size, books.map { it.id },
+              seriesSequenceList(books.map { memberOf(it)?.sequence }), member)
+      keyed += Keyed(card, row, progress[row.id], member?.sequence, if (ignorePrefix) entity.nameIgnorePrefix else entity.name)
+    }
+    if (row.id !in inCard) keyed += Keyed(QueryEntry.Item(row.id, member), row, progress[row.id], member?.sequence, titleOf(row, ignorePrefix))
+  }
+  return if (keyed.size == 1 && keyed[0].entry is QueryEntry.Collapsed) null else keyed
+}
+
+/** The in-memory sort of `handleCollapseSubseries`: sequence then name by default, by name, or cards last by name first. */
+private fun subSeriesOrder(sort: String?, desc: Boolean, primary: Comparator<Keyed>?): Comparator<Keyed> {
+  val natural = naturalComparator()
+  fun directed(c: Comparator<Keyed>) = if (desc) c.reversed() else c
+  val title = directed(Comparator { a, b -> natural.compare(a.displayTitle, b.displayTitle) })
+  if (sort == null || sort == "sequence") {
+    return directed(Comparator { a, b -> natural.compare(a.sequence ?: "null", b.sequence ?: "null") }).then(title)
+  }
+  if (sort == "media.metadata.title") return title
+  fun cardName(k: Keyed) = if (k.entry is QueryEntry.Collapsed) k.displayTitle else ""
+  return Comparator<Keyed> { a, b -> natural.compare(cardName(a), cardName(b)) }.then(primary ?: title)
 }

@@ -6,6 +6,7 @@ import app.absplus.android.sync.CatalogPrefs
 import app.absplus.android.sync.CatalogReader
 import app.absplus.android.sync.ItemsRequest
 import app.absplus.android.sync.MAX_READ_LIMIT
+import app.absplus.android.sync.SeriesRequest
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
 import app.absplus.android.sync.SyncEngine
@@ -47,14 +48,26 @@ private fun flag(data: JSONObject, key: String): Boolean = when (val value = dat
 
 /** `getLibraryItems` arguments; IllegalArgumentException with the message the call is rejected with. */
 internal fun itemsRequest(data: JSONObject): ItemsRequest {
+  val (libraryId, limit, page) = pageArguments(data)
+  return ItemsRequest(libraryId, text(data, "sort"), flag(data, "desc"), text(data, "filter"), flag(data, "collapseseries"),
+          flag(data, "sortingIgnorePrefix"), limit, page)
+}
+
+/** `getSeries` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun seriesRequest(data: JSONObject): SeriesRequest {
+  val (libraryId, limit, page) = pageArguments(data)
+  return SeriesRequest(libraryId, text(data, "sort"), flag(data, "desc"), flag(data, "sortingIgnorePrefix"), limit, page)
+}
+
+private fun text(data: JSONObject, key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
+
+private fun pageArguments(data: JSONObject): Triple<String, Int, Int> {
   val libraryId = data.optString("libraryId").takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("libraryId is required")
   val limit = (data.opt("limit") as? Number)?.toInt() ?: data.optString("limit").toIntOrNull()
   if (limit == null || limit !in 1..MAX_READ_LIMIT) throw IllegalArgumentException("limit must be 1..$MAX_READ_LIMIT")
   val page = (data.opt("page") as? Number)?.toInt() ?: data.optString("page").toIntOrNull() ?: 0
   if (page < 0) throw IllegalArgumentException("page must not be negative")
-  fun text(key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
-  return ItemsRequest(libraryId, text("sort"), flag(data, "desc"), text("filter"), flag(data, "collapseseries"),
-          flag(data, "sortingIgnorePrefix"), limit, page)
+  return Triple(libraryId, limit, page)
 }
 
 /**
@@ -402,6 +415,28 @@ class AbsData : Plugin() {
       JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
               .put("replica", emptyReplica())
     }) { reader, sc -> reader.items(sc, request) }
+  }
+
+  /** A page of `GET /api/libraries/:id/series` from the replica, books included; `limit` must be 1..100. */
+  @PluginMethod
+  fun getSeries(call: PluginCall) {
+    val request = try {
+      seriesRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.series(sc, request) }
+  }
+
+  /** `{ serverConfigId, series, replica }`; `series: null` when the replica lacks it. */
+  @PluginMethod
+  fun getSeriesById(call: PluginCall) {
+    val id = call.getString("id")
+    if (id.isNullOrEmpty()) return call.reject("id is required")
+    readCatalog(call, { JSONObject().put("series", JSONObject.NULL).put("replica", emptyReplica()) }) { reader, sc -> reader.seriesById(sc, id) }
   }
 
   /** The library the next catalog pass reconciles first. */
