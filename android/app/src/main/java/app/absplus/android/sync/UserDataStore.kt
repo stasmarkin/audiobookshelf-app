@@ -252,6 +252,7 @@ class UserDataStore(
       taken to deleted
     }
     mirror.mirror(taken)
+    mirror.noteServerValues(taken)
     mirror.remove(deleted)
     val changed = (taken + deleted).map { it.libraryItemId }.distinct()
     if (changed.isNotEmpty()) notifier.notify(SCOPE_PROGRESS, changed)

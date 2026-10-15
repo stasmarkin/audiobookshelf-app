@@ -57,7 +57,7 @@ class UserDataStoreProgressTest {
   @Before
   fun setUp() {
     Paper.init(ApplicationProvider.getApplicationContext<Context>())
-    for (book in listOf("localLibraryItems", "localMediaProgress", "playbackSession")) Paper.book(book).destroy()
+    for (book in listOf("localLibraryItems", "localMediaProgress", "playbackSession", "mediaItemHistory")) Paper.book(book).destroy()
     // Emptied behind DbManager's back: the mirror must not keep the previous test's copies
     DbManager.localLibraryItemsChanged()
   }
@@ -613,5 +613,21 @@ class UserDataStoreProgressTest {
     assertFalse(pending.applied)
     assertTrue(pending.protected)
 
+  }
+
+  @Test
+  fun aServerValueTakenForAPlayedDownloadIsInItsHistory() = runBlocking {
+    downloadedCopy(currentTime = 100.0)
+    db.mediaProgress().upsert(progressRow(100.0, lastUpdate = 5L, pending = false))
+    DeviceManager.dbManager.saveMediaItemHistory(app.absplus.android.data.MediaItemHistory(
+            "li1", "Book", "li1", null, false, "srv", null, "user", 1L, mutableListOf()))
+
+    store.applyServerProgressCandidate("srv", server(700.0, lastUpdate = 50L))
+    // The server's echo of its own value again: no new entry
+    store.applyServerProgressCandidate("srv", server(700.0, lastUpdate = 60L))
+
+    val events = DeviceManager.dbManager.getMediaItemHistory("li1")!!.events
+    assertEquals(listOf("Sync"), events.map { it.name })
+    assertEquals(700.0, events.single().currentTime!!.toDouble(), 0.0)
   }
 }

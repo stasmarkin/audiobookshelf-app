@@ -3,10 +3,12 @@ package app.absplus.android.sync
 import app.absplus.android.data.Book
 import app.absplus.android.data.LocalLibraryItem
 import app.absplus.android.data.LocalMediaProgress
+import app.absplus.android.data.MediaProgress
 import app.absplus.android.data.Podcast
 import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
+import app.absplus.android.media.MediaEventManager
 
 /** Where accepted progress of a downloaded copy is also written during phase 1 (Paper stays readable on rollback). */
 interface ProgressMirror {
@@ -18,6 +20,9 @@ interface ProgressMirror {
 
   /** Removes the progress of the downloaded copy of each row's item, if there is one. */
   fun remove(rows: Collection<MediaProgressEntity>)
+
+  /** Server values that changed rows; a downloaded copy's listening history shows them (it did before offline-first). */
+  fun noteServerValues(rows: Collection<MediaProgressEntity>) {}
 
   object None : ProgressMirror {
     override fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>?) {}
@@ -48,6 +53,19 @@ object PaperProgressMirror : ProgressMirror {
     for (row in rows) {
       val (item, localEpisodeId) = copyOf(copies, row) ?: continue
       mirror(row, item, localEpisodeId, fields)
+    }
+  }
+
+  override fun noteServerValues(rows: Collection<MediaProgressEntity>) {
+    if (rows.isEmpty()) return
+    val copies = copies()
+    for (row in rows) {
+      if (copyOf(copies, row) == null) continue
+      val progress = MediaProgress(row.serverProgressId.orEmpty(), row.libraryItemId, row.episodeId.ifEmpty { null },
+              row.duration, row.progress, row.currentTime, row.isFinished, row.ebookLocation, row.ebookProgress,
+              row.lastUpdate, row.startedAt, row.finishedAt)
+      // A no-op for an item never played here: the history exists only after playback
+      MediaEventManager.syncEvent(progress, "Received from server")
     }
   }
 
