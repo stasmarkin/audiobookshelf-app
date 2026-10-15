@@ -105,6 +105,7 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 25. **Early end of a stream:** while streaming, cut the network mid-file several times. The queue never advances past a book because of the cut; the Diagnostics log has no `STATE_ENDED of a stream … before its end` warning (if it has one, report it with the log).
 26. **Behind Cloudflare or a reverse proxy:** with the server behind a proxy, stop the server but not the proxy (the proxy answers 502/52x). The player waits as in 20, not "Playback Failed".
 27. **Expired token while streaming:** stream with a short `ACCESS_TOKEN_EXPIRY` until the token expires and the stream request gets 401: playback falls back to transcode with a refreshed token as before, without "Waiting for server".
+28. **Catalog copy in the background:** after updating, open the app online and wait a minute. The Diagnostics log shows a `SyncEngine` `Catalog <server>: N libraries, failed []` entry after the `Reconcile` entry, the tabs look and behave as before, and playback started meanwhile is not delayed. Force-stop and reopen: the next pass ends faster (only the lists are fetched again).
 
 ## Emulator baseline (for comparison)
 

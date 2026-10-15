@@ -7,6 +7,11 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Catalog copy on the device (groundwork for browsing offline):** after each full sync with the server (on start,
+  on reconnect, on Sync now) the app now also copies the catalog of every library (libraries, books, series and the
+  filter lists) into a database on the phone, page by page in the background, and only rewrites what changed since
+  the last copy. Nothing changes on screen yet: the tabs still read the server as before. The first copy of a large
+  library takes a while and some mobile data; later ones only fetch the lists again.
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer
   uses the broadcast symbol. Tabs keep equal widths, the labels name each destination for screen readers, and the
