@@ -159,8 +159,12 @@ object ServerReachability {
   }
 
   private fun startProbe() {
-    val config = ActiveServer.current() ?: return
-    if (config.id != machine?.serverConfigId) return
+    val config = ActiveServer.current()
+    if (config == null || config.id != machine?.serverConfigId) {
+      // Someone set DeviceManager.serverConnectionConfig without ActiveServer.remember
+      DLog.w(TAG, "Probe skipped: active server ${config?.id ?: "-"} is not the tracked ${machine?.serverConfigId ?: "-"}")
+      return
+    }
     val generation = ++probeGeneration
     probeJob = scope.launch {
       val ok = try {

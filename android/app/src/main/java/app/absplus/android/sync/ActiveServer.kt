@@ -21,15 +21,12 @@ object ActiveServer {
     if (prefs != null) return
     val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     prefs = p
-    rememberedId = p.getString(KEY_ACTIVE_ID, null)
-    if (rememberedId == null) {
-      // First start of a version with ActiveServer: adopt the server the app last signed in to, if it is still saved
-      val last = DeviceManager.deviceData.lastServerConnectionConfigId
-      if (last != null && DeviceManager.getServerConnectionConfig(last) != null) {
-        rememberedId = last
-        p.edit().putString(KEY_ACTIVE_ID, last).apply()
-      }
-    }
+    val stored = p.getString(KEY_ACTIVE_ID, null)
+    // The server the app last signed in to wins when it is still saved: on the first start of this version, and after
+    // a rollback, where the older version switched servers by changing only lastServerConnectionConfigId
+    val last = DeviceManager.deviceData.lastServerConnectionConfigId
+    rememberedId = if (last != null && DeviceManager.getServerConnectionConfig(last) != null) last else stored
+    if (rememberedId != stored) p.edit().putString(KEY_ACTIVE_ID, rememberedId).apply()
   }
 
   fun current(): ServerConnectionConfig? =

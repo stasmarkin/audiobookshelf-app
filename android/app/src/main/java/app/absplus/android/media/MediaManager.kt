@@ -6,6 +6,7 @@ import android.support.v4.media.MediaBrowserCompat
 import android.util.Log
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.sync.ActiveServer
 import app.absplus.android.server.ApiHandler
 import com.getcapacitor.JSObject
 import java.util.*
@@ -789,6 +790,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
             if (result) {
               hasValidConn = true
               DeviceManager.serverConnectionConfig = config
+              ActiveServer.remember(config.id)
               Log.d(tag, "checkSetValidServerConnectionConfig: Set server connection config ${DeviceManager.serverConnectionConfigId}")
               break
             }

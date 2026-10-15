@@ -38,6 +38,7 @@ import app.absplus.android.data.DeviceInfo
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
 import app.absplus.android.sync.SyncRuntime
+import app.absplus.android.sync.ActiveServer
 import app.absplus.android.managers.PlaybackRestoreStore
 import app.absplus.android.managers.PlaybackRestoreStore.LOG_TAG as RESTORE_TAG
 import app.absplus.android.managers.SleepTimerManager
@@ -1375,6 +1376,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (DeviceManager.serverConnectionConfig == null) {
       DLog.i(RESTORE_TAG, "Using saved server connection for restore")
       DeviceManager.serverConnectionConfig = config
+      ActiveServer.remember(config.id)
     }
 
     // A new server session returns the server's current progress for this item

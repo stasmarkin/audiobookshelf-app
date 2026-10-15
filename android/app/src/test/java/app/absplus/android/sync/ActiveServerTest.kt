@@ -57,8 +57,25 @@ class ActiveServerTest {
   fun rememberedServerSurvivesProcessRestart() {
     f.save(f.config("a"), f.config("b"))
     f.context.getSharedPreferences("absplus_sync", Context.MODE_PRIVATE).edit().putString("activeServerConfigId", "b").commit()
-    DeviceManager.deviceData.lastServerConnectionConfigId = "a"
+    DeviceManager.deviceData.lastServerConnectionConfigId = null // signed out
     ActiveServer.init(f.context)
     assertEquals("b", ActiveServer.current()?.id)
+  }
+
+  @Test
+  fun serverSwitchedByAnOlderVersionWins() {
+    // After a rollback the older version switches servers by changing only lastServerConnectionConfigId
+    f.save(f.config("a"), f.config("b"))
+    f.context.getSharedPreferences("absplus_sync", Context.MODE_PRIVATE).edit().putString("activeServerConfigId", "b").commit()
+    DeviceManager.deviceData.lastServerConnectionConfigId = "a"
+    ActiveServer.init(f.context)
+    assertEquals("a", ActiveServer.current()?.id)
+    assertEquals("a", storedId())
+
+    ActiveServer.resetForTest()
+    f.context.getSharedPreferences("absplus_sync", Context.MODE_PRIVATE).edit().putString("activeServerConfigId", "b").commit()
+    DeviceManager.deviceData.lastServerConnectionConfigId = "gone"
+    ActiveServer.init(f.context)
+    assertEquals("a last server that is no longer saved is ignored", "b", ActiveServer.current()?.id)
   }
 }

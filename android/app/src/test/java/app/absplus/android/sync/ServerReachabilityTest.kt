@@ -150,6 +150,16 @@ class ServerReachabilityTest {
   }
 
   @Test
+  fun rememberingAnotherServerProbesItsAddress() {
+    online()
+    ActiveServer.remember("b") // e.g. Android Auto picked another saved server
+    assertEquals("b", ServerReachability.serverConfigId.value)
+    f.idle()
+    assertEquals(listOf(base, "https://b.test.invalid"), f.probed.map { it.address })
+    assertEquals(ServerState.ONLINE, ServerReachability.state.value)
+  }
+
+  @Test
   fun forgettingTheActiveServerIsUnknown() {
     online()
     ActiveServer.forget("a")
