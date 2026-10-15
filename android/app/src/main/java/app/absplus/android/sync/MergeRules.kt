@@ -101,7 +101,9 @@ fun coalesce(existing: List<OutboxEntity>, incoming: OutboxEntity, inFlightId: L
       // An explicit "finished" survives the fold unless the new change overrides it (false)
       val mark = OutboxPayload.finishedMark(incoming.payload)
               ?: if (patches.any { OutboxPayload.finishedMark(it.payload) == true }) true else null
-      OutboxPlan(patches.map { it.id }, incoming.copy(payload = OutboxPayload.progressPatch(fields, mark)), null)
+      // Conditional only while every folded change is: a user's own change is always sent
+      val ifAhead = (patches + incoming).all { OutboxPayload.ifAhead(it.payload) }
+      OutboxPlan(patches.map { it.id }, incoming.copy(payload = OutboxPayload.progressPatch(fields, mark, ifAhead)), null)
     }
     // The reset makes queued changes of the same progress pointless
     OutboxKind.PROGRESS_DELETE -> OutboxPlan(queued.filter { it.kind == OutboxKind.PROGRESS_PATCH }.map { it.id }, incoming, null)

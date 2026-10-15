@@ -8,7 +8,10 @@ import kotlinx.coroutines.CancellationException
 
 /** What the device keeps of its saved listening sessions after the server answered `local-all`. */
 object LocalSessionsCleanup {
-  /** The row's values the server did not take from a session (it held newer progress): sent by PATCH instead. */
+  /**
+   * The row's values the server did not take from a session (it held newer progress): sent by PATCH instead, only if
+   * the device is further on than the server; otherwise the server's position is taken.
+   */
   private val SKIPPED_PROGRESS_FIELDS = listOf("duration", "progress", "currentTime")
 
   /**
@@ -44,7 +47,7 @@ object LocalSessionsCleanup {
         for (item in skipped) {
           val hasRow = store.progressRowsFor(item.serverConfigId, listOf(item.libraryItemId)).any { it.episodeId == item.episodeId.orEmpty() }
           if (!hasRow) continue
-          store.queueProgressPatch(item.serverConfigId, item.libraryItemId, item.episodeId, SKIPPED_PROGRESS_FIELDS)
+          store.queueProgressPatch(item.serverConfigId, item.libraryItemId, item.episodeId, SKIPPED_PROGRESS_FIELDS, ifAhead = true)
           patched = true
         }
         removeSettled()

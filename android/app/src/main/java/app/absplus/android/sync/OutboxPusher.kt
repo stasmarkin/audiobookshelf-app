@@ -39,8 +39,11 @@ class OutboxPusher(
     private set
 
   private sealed interface Step {
-    /** [sentProgress]: the progress row a PATCH body was built from, to detect a newer write during the request. */
-    data class Sent(val sentProgress: MediaProgressEntity? = null) : Step
+    /**
+     * [sentProgress]: the progress row a PATCH body was built from, to detect a newer write during the request.
+     * [serverValue]: a conditional PATCH not sent because the server is ahead; merged into the row once settled.
+     */
+    data class Sent(val sentProgress: MediaProgressEntity? = null, val serverValue: ServerProgress? = null) : Step
     data class Drop(val reason: String) : Step
     data class Retry(val reason: String) : Step
     data class Stop(val reason: StopReason, val message: String) : Step
@@ -65,6 +68,7 @@ class OutboxPusher(
         when (val step = send(config, row)) {
           is Step.Sent -> {
             store.onOutboxSent(row, followUp(row, step.sentProgress))
+            step.serverValue?.let { store.applyServerProgressCandidate(config.id, it) }
             sent++
           }
           is Step.Drop -> {
@@ -134,6 +138,17 @@ class OutboxPusher(
             ?: return Step.Drop("no progress row")
     if (!progress.pending) return Step.Drop("progress row is not pending")
     val path = "/api/me/progress/${segment(libraryItemId)}" + if (episodeId.isEmpty()) "" else "/${segment(episodeId)}"
+    if (OutboxPayload.ifAhead(row.payload)) {
+      when (val outcome = http.send(config, "GET", path)) {
+        is HttpOutcome.Ok -> {
+          val server = parseServerProgress(readTree(outcome.body)) ?: return Step.Retry("unreadable server progress")
+          if (server.isFinished || server.currentTime >= progress.currentTime) return Step.Sent(serverValue = server)
+        }
+        // No record on the server: nothing to overwrite
+        is HttpOutcome.HttpError -> if (outcome.code != 404) return Step.Retry("HTTP ${outcome.code}")
+        else -> return classify(outcome)
+      }
+    }
     val step = classify(http.send(config, "PATCH", path, mapper.writeValueAsString(patchBody(progress, fields))))
     return if (step is Step.Sent) Step.Sent(progress) else step
   }
@@ -163,6 +178,12 @@ class OutboxPusher(
     if (outbox.byItemKey(row.serverConfigId, row.itemKey).any { it.kind == OutboxKind.PROGRESS_PATCH && it.id > row.id }) return null
     return OutboxEntity(serverConfigId = row.serverConfigId, kind = OutboxKind.PROGRESS_PATCH, itemKey = row.itemKey,
             payload = OutboxPayload.progressPatch(PLAYBACK_FIELDS), createdAt = clock())
+  }
+
+  private fun readTree(body: String) = try {
+    mapper.readTree(body)
+  } catch (e: Exception) {
+    null
   }
 
   private fun patchBody(progress: MediaProgressEntity, fields: List<String>): ObjectNode {

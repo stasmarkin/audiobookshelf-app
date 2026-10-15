@@ -57,10 +57,10 @@ Merged into `plus`, not yet in a published release.
   was on its way, that time also goes into the offline session and can count twice.
   The server's answer is now read per session: the ones it took leave the phone, the ones it rejects because their
   book or library no longer exists are dropped (with a Diagnostics log entry), and any other is sent again next time.
-  When the server takes a session but keeps its own newer position, the phone's position is sent to it as a progress
-  change, so the offline position stays protected until the server has it. Rolling back to the previous version is
-  safe: the saved sessions are ordinary listening sessions it sends itself; only the last minute or so of streamed
-  time not settled at that moment is not sent by it (it is sent after updating again).
+  When the server takes a session but not its position, because its own record is newer, the phone's position is
+  sent only if it is further on than the server's; otherwise the phone takes the server's. Rolling back to the
+  previous version is safe: the saved sessions are ordinary listening sessions it sends itself; only the last minute
+  or so of streamed time not settled at that moment is not sent by it (it is sent after updating again).
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 

@@ -139,17 +139,80 @@ class LocalSessionsCleanupTest {
     assertEquals(OutboxKind.PROGRESS_PATCH, queued.single().kind)
 
     // A newer server value pulled before the patch went out does not replace the row
-    SyncEngine.store!!.applyServerProgress("srv", listOf(ServerProgress("mp1", "li1", null, 1000.0, 0.9, 900.0, false, false, null, null, 300L, 1L, null)))
+    SyncEngine.store!!.applyServerProgress("srv", listOf(serverAt(300.0, lastUpdate = 300L)))
     assertEquals(700.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)
 
-    OutboxPusher(db, syncHttp(api), SyncEngine.store!!, { 2L }, {}).pushAll(fakeServer())
-    assertEquals(listOf("PATCH /api/me/progress/li1"), api.paths())
-    val body = JSONObject(api.requests.single().body!!)
+    // The server is behind the device: the PATCH goes out
+    serverAnswers(serverJson(300.0, lastUpdate = 300L))
+    push()
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    val body = JSONObject(api.requests.last().body!!)
     assertEquals(700.0, body.getDouble("currentTime"), 0.0)
     assertEquals(0.7, body.getDouble("progress"), 0.0)
     assertEquals(200L, body.getLong("lastUpdate"))
     assertFalse(db.mediaProgress().get("srv", "li1", "")!!.pending)
     assertNull(db.outbox().head("srv"))
+  }
+
+  private fun serverAt(currentTime: Double, lastUpdate: Long, isFinished: Boolean = false) =
+          ServerProgress("mp1", "li1", null, 1000.0, currentTime / 1000.0, currentTime, isFinished, false, null, null, lastUpdate, 1L, null)
+
+  private fun serverJson(currentTime: Double, lastUpdate: Long, isFinished: Boolean = false) =
+          """{"id":"mp1","libraryItemId":"li1","duration":1000,"progress":${currentTime / 1000.0},"currentTime":$currentTime,"isFinished":$isFinished,"lastUpdate":$lastUpdate,"startedAt":1}"""
+
+  /** GET of the item's progress answers [progress] (null: no record, 404); anything else 200. */
+  private fun serverAnswers(progress: String?) {
+    api.handler = { request -> if (request.method == "GET") (if (progress == null) 404 to "Not Found" else 200 to progress) else 200 to "{}" }
+  }
+
+  private suspend fun push() = OutboxPusher(db, syncHttp(api), SyncEngine.store!!, { 2L }, {}).pushAll(fakeServer())
+
+  private suspend fun skippedProgressQueued(rowTime: Double, rowLastUpdate: Long = 200L) {
+    db.mediaProgress().upsert(progressRow(rowTime, lastUpdate = rowLastUpdate, pending = false))
+    settle(saved(session("a")), true, listOf(ok("a", progressSynced = false)))
+    assertTrue(db.mediaProgress().get("srv", "li1", "")!!.pending)
+  }
+
+  @Test
+  fun aServerAheadOfTheDeviceKeepsItsPositionAndTheDeviceTakesIt() = runBlocking {
+    skippedProgressQueued(700.0)
+    serverAnswers(serverJson(500.0, lastUpdate = 300L, isFinished = true)) // behind, but finished elsewhere
+    push()
+    assertEquals("no PATCH", listOf("GET /api/me/progress/li1"), api.paths())
+    val row = db.mediaProgress().get("srv", "li1", "")!!
+    assertFalse(row.pending)
+    assertTrue(row.isFinished)
+    assertEquals(500.0, row.currentTime, 0.0)
+    assertNull(db.outbox().head("srv"))
+  }
+
+  @Test
+  fun anOfflineListenerBehindAnotherDeviceTakesItsPosition() = runBlocking {
+    // A listened offline to 1:00; B reached 3:00 on the server later
+    skippedProgressQueued(60.0, rowLastUpdate = 100L)
+    serverAnswers(serverJson(180.0, lastUpdate = 200L))
+    push()
+    assertTrue("the server keeps 3:00", api.requests.none { it.method == "PATCH" })
+    assertEquals(180.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun noServerRecordIsPatched() = runBlocking {
+    skippedProgressQueued(700.0)
+    serverAnswers(null)
+    push()
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    assertFalse(db.mediaProgress().get("srv", "li1", "")!!.pending)
+  }
+
+  @Test
+  fun aUsersOwnChangeFoldedInIsSentUnconditionally() = runBlocking {
+    skippedProgressQueued(700.0)
+    SyncEngine.store!!.markFinished("srv", "li1", null, true)
+    serverAnswers(serverJson(900.0, lastUpdate = 300L))
+    push()
+    assertEquals(listOf("PATCH /api/me/progress/li1"), api.paths())
+    assertTrue(JSONObject(api.requests.single().body!!).getBoolean("isFinished"))
   }
 
   @Test
