@@ -259,9 +259,11 @@ class UserDataStore(
   }
 
   /**
-   * Imported rows ([keys]) that the server has no record of, or an older one, are queued to be sent: they hold what
-   * was done on the device before this release or on a rolled-back version. Runs before the merge and the deletion of
-   * rows missing on the server. A pending row already has its own outbox rows.
+   * Imported rows ([keys]) newer than the server's record are queued to be sent: they hold what was done on the device
+   * before this release or on a rolled-back version. One without a server record is not sent, as before this release:
+   * it may be progress reset on another client, which must not come back; listening to it still goes with its
+   * sessions. Runs before the merge and the deletion of rows missing on the server, which spares these keys this once.
+   * A pending row already has its own outbox rows.
    */
   suspend fun pushNewerImported(serverConfigId: String, keys: Set<String>, server: List<ServerProgress>) {
     if (keys.isEmpty()) return
@@ -271,8 +273,8 @@ class UserDataStore(
         val (libraryItemId, episodeId) = progressKeyParts(key)
         val row = progress.get(serverConfigId, libraryItemId, episodeId) ?: continue
         if (row.pending) continue
-        val remote = byKey[key]
-        if (remote != null && row.lastUpdate <= remote.lastUpdate) continue
+        val remote = byKey[key] ?: continue
+        if (row.lastUpdate <= remote.lastUpdate) continue
         enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, key, OutboxPayload.progressPatch(PaperProgressImport.IMPORT_FIELDS))
         setProgressPending(serverConfigId, key)
       }

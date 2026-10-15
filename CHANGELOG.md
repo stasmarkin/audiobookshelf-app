@@ -41,8 +41,9 @@ Merged into `plus`, not yet in a published release.
   unsent change on the device, including unsent listening to a downloaded book, is never overwritten by the server.
   A value from another device moves a paused player only when it wins. Progress deleted on another device or in the
   web client disappears here on the next sync. The previous separate sync of downloaded-book progress is replaced by
-  this rule; progress saved by an older version (or after rolling back) is brought in on every start and sent if the
-  server does not have it or has an older value.
+  this rule; progress saved by an older version (or after rolling back) is brought in on every start and sent when
+  it is newer than the server's. Progress the server has no record of (for example reset in the web client) is not
+  sent back; listening to those books still reaches the server with its sessions.
 - **A refused sign-in no longer throws you out:** when the server refuses the session (for example after a password
   change), the app stays where it was with the selected library, progress and bookmarks; downloaded books keep
   playing, changes keep waiting, and the indicator asks to sign in again (it opens the sign-in form for that server).

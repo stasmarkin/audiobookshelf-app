@@ -170,22 +170,37 @@ class PaperProgressImportTest {
   }
 
   @Test
-  fun importedRowAbsentOnServerIsPushedNotDeleted() = runBlocking {
+  fun importedRowAbsentOnServerIsKeptButNotPushed() = runBlocking {
     import.import(listOf(lmp(lastUpdate = 200L)))
     serverHas()
 
     assertTrue(reconcile().isSuccess)
 
-    assertNotNull(row())
-    assertTrue(row()!!.pending)
-    assertEquals(1, outbox().size)
+    assertNotNull("this reconcile spares it", row())
+    assertFalse(row()!!.pending)
+    assertTrue(outbox().isEmpty())
+    assertTrue(import.unsettled("srv").isEmpty())
+  }
+
+  @Test
+  fun progressResetInTheWebClientDoesNotComeBackFromAnOldPaperCopy() = runBlocking {
+    // Reset in the web client: the server has no record; the downloaded copy still has its old Paper progress
+    import.import(listOf(lmp(lastUpdate = 200L, currentTime = 700.0)))
+    serverHas()
+
+    assertTrue(reconcile().isSuccess)
+    assertTrue(reconcile().isSuccess)
+
+    OutboxPusher(db, syncHttp(api), store, { 2L }, {}).pushAll(fakeServer())
+    assertTrue("no PATCH brings it back", api.paths().none { it.startsWith("PATCH") })
+    assertNull("the next reconcile follows the server", row())
   }
 
   @Test
   fun importIsSettledPerServer() = runBlocking {
     import.import(listOf(lmp(serverConfigId = "a"), lmp(serverConfigId = "b")))
-    serverHas()
 
+    serverHas(serverProgress("li1", 50.0, lastUpdate = 100L))
     assertTrue(reconciler.reconcileUser(fakeServer("a", version = "2.35.1")).isSuccess)
 
     assertEquals(1, outbox(serverConfigId = "a").size)
@@ -217,7 +232,7 @@ class PaperProgressImportTest {
 
   @Test
   fun startImportsPaperBeforeTheFirstSync() = runBlocking {
-    serverHas()
+    serverHas(serverProgress("li1", 50.0, lastUpdate = 100L))
     SyncEngine.initForTest(SyncDeps(
             db = db, http = syncHttp(api), activeServer = { fakeServer(version = "2.35.1") },
             serverState = MutableStateFlow(ServerState.ONLINE), onlineEntries = MutableStateFlow(1L),
