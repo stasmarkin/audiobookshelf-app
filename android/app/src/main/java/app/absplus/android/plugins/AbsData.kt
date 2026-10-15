@@ -1,6 +1,11 @@
 package app.absplus.android.plugins
 
+import android.content.Context
 import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.CatalogPrefs
+import app.absplus.android.sync.CatalogReader
+import app.absplus.android.sync.ItemsRequest
+import app.absplus.android.sync.MAX_READ_LIMIT
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
 import app.absplus.android.sync.SyncEngine
@@ -24,12 +29,39 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
+
+/** The payload of a server event as JSON text: an object, or the array of `items_added`/`items_updated`; else null. */
+internal fun eventPayloadJson(data: JSONObject): String? = when (val payload = data.opt("payload")) {
+  is JSONObject, is JSONArray -> payload.toString()
+  else -> null
+}
+
+private fun flag(data: JSONObject, key: String): Boolean = when (val value = data.opt(key)) {
+  is Boolean -> value
+  is Number -> value.toInt() != 0
+  is String -> value == "1" || value == "true"
+  else -> false
+}
+
+/** `getLibraryItems` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun itemsRequest(data: JSONObject): ItemsRequest {
+  val libraryId = data.optString("libraryId").takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("libraryId is required")
+  val limit = (data.opt("limit") as? Number)?.toInt() ?: data.optString("limit").toIntOrNull()
+  if (limit == null || limit !in 1..MAX_READ_LIMIT) throw IllegalArgumentException("limit must be 1..$MAX_READ_LIMIT")
+  val page = (data.opt("page") as? Number)?.toInt() ?: data.optString("page").toIntOrNull() ?: 0
+  if (page < 0) throw IllegalArgumentException("page must not be negative")
+  fun text(key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
+  return ItemsRequest(libraryId, text("sort"), flag(data, "desc"), text("filter"), flag(data, "collapseseries"),
+          flag(data, "sortingIgnorePrefix"), limit, page)
+}
 
 /**
  * Offline-first data bridge: the active server's reachability (its state, the WebView's reports about its own requests
- * and socket, a manual retry), the user's progress, bookmarks and user object from userdata.db with their writes, and
- * the sync engine (`onDataChanged`, `onSyncState`, manual sync, server events the WebView received).
+ * and socket, a manual retry), the user's progress, bookmarks and user object from userdata.db with their writes, the
+ * catalog from replica.db (at most [MAX_READ_LIMIT] entities a call), and the sync engine (`onDataChanged`,
+ * `onSyncState`, manual sync, server events the WebView received).
  */
 @CapacitorPlugin(name = "AbsData")
 class AbsData : Plugin() {
@@ -297,11 +329,14 @@ class AbsData : Plugin() {
     call.resolve(syncState(SyncEngine.syncState.value))
   }
 
-  /** A server event with the server that was active when the WebView received it; resolves `{ applied }`. */
+  /**
+   * A server event with the server that was active when the WebView received it; resolves `{ applied }`. The payload
+   * is an object, or an array for `items_added`/`items_updated`.
+   */
   @PluginMethod
   fun applyServerEvent(call: PluginCall) {
     val event = call.getString("event")
-    val payload = call.getObject("payload")
+    val payload = eventPayloadJson(call.data)
     if (event.isNullOrEmpty() || payload == null) {
       call.reject("event and payload are required")
       return
@@ -309,7 +344,7 @@ class AbsData : Plugin() {
     val serverConfigId = call.getString("serverConfigId")
     io.launch {
       try {
-        val applied = SyncEngine.applyEvent(event, payload.toString(), serverConfigId)
+        val applied = SyncEngine.applyEvent(event, payload, serverConfigId)
         call.resolve(JSObject().put("applied", applied))
       } catch (e: Exception) {
         call.reject(e.message ?: "Could not apply the event")
@@ -317,8 +352,71 @@ class AbsData : Plugin() {
     }
   }
 
+  private fun emptyReplica() = JSONObject().put("reconciledAt", JSONObject.NULL).put("complete", false)
+
+  /** Runs [read] for the catalog of `serverConfigId` (the active server by default); [empty] without one. */
+  private fun readCatalog(call: PluginCall, empty: () -> JSONObject, read: suspend (CatalogReader, String) -> JSONObject) {
+    val reader = SyncEngine.catalog
+    val serverConfigId = call.getString("serverConfigId") ?: ActiveServer.current()?.id
+    if (reader == null || serverConfigId == null) {
+      call.resolve(JSObject(empty().put("serverConfigId", serverConfigId ?: JSONObject.NULL).toString()))
+      return
+    }
+    io.launch {
+      try {
+        call.resolve(JSObject(read(reader, serverConfigId).toString()))
+      } catch (e: IllegalArgumentException) {
+        call.reject(e.message ?: "Invalid request")
+      } catch (e: Exception) {
+        call.reject("Could not read the catalog: ${e.message}")
+      }
+    }
+  }
+
+  /** `{ serverConfigId, libraries, replica: { reconciledAt, complete } }` in the server's order. */
+  @PluginMethod
+  fun getLibraries(call: PluginCall) = readCatalog(call, { JSONObject().put("libraries", JSONArray()).put("replica", emptyReplica()) }) { reader, sc ->
+    reader.libraries(sc)
+  }
+
+  /** `{ serverConfigId, library, filterdata, issues, numUserPlaylists, replica }`; `library: null` when the replica lacks it. */
+  @PluginMethod
+  fun getLibrary(call: PluginCall) {
+    val id = call.getString("id")
+    if (id.isNullOrEmpty()) return call.reject("id is required")
+    readCatalog(call, {
+      JSONObject().put("library", JSONObject.NULL).put("filterdata", JSONObject.NULL).put("issues", 0).put("numUserPlaylists", 0)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.library(sc, id) }
+  }
+
+  /** A page of `GET /api/libraries/:id/items` (minified) from the replica; `limit` must be 1..100. */
+  @PluginMethod
+  fun getLibraryItems(call: PluginCall) {
+    val request = try {
+      itemsRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.items(sc, request) }
+  }
+
+  /** The library the next catalog pass reconciles first. */
+  @PluginMethod
+  fun setCurrentLibrary(call: PluginCall) {
+    val libraryId = call.getString("libraryId")
+    if (libraryId.isNullOrEmpty()) return call.reject("libraryId is required")
+    context.getSharedPreferences(CatalogPrefs.PREFS, Context.MODE_PRIVATE).edit()
+            .putString(CatalogPrefs.CURRENT_LIBRARY, libraryId).apply()
+    call.resolve()
+  }
+
   private fun syncState(state: SyncState) = JSObject()
           .put("running", state.running)
+          .put("catalogRunning", state.catalogRunning)
           .put("pendingCount", state.pendingCount)
           .put("lastError", state.lastError ?: JSONObject.NULL)
           .put("lastSyncAt", state.lastSyncAt ?: JSONObject.NULL)
