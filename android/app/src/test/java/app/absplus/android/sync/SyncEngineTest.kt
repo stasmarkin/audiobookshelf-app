@@ -509,4 +509,15 @@ class SyncEngineTest {
     eventually("the bookmark is pushed") { db.outbox().count("srv") == 0 }
     assertEquals(listOf("POST /api/me/item/li1/bookmark"), api.paths())
   }
+
+  @Test
+  fun userWriteLandsAfterTheTicksQueuedBeforeIt() = runBlocking {
+    start()
+    val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+    SyncEngine.launchWrite { delay(100); order.add("tick") }
+    val answer = SyncEngine.write { order.add("finished"); 42 }
+
+    assertEquals(42, answer)
+    assertEquals(listOf("tick", "finished"), order)
+  }
 }

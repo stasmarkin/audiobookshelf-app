@@ -6,6 +6,7 @@ import app.absplus.android.data.LocalMediaProgress
 import app.absplus.android.data.Podcast
 import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.managers.DbManager
 
 /** Where accepted progress of a downloaded copy is also written during phase 1 (Paper stays readable on rollback). */
 interface ProgressMirror {
@@ -29,10 +30,21 @@ object PaperProgressMirror : ProgressMirror {
   val MARK_FINISHED_FIELDS = listOf("isFinished", "progress", "currentTime", "finishedAt")
   val EBOOK_FIELDS = listOf("ebookLocation", "ebookProgress")
 
+  @Volatile private var cachedCopies: Pair<Long, List<LocalLibraryItem>>? = null
+
+  /**
+   * Every downloaded copy, read from disk only after the list changed: a stream mirrors every 15 s, and a full pull can
+   * take thousands of rows.
+   */
+  private fun copies(): List<LocalLibraryItem> {
+    val version = DbManager.localLibraryItemsVersion
+    cachedCopies?.let { (seen, list) -> if (seen == version) return list }
+    return DeviceManager.dbManager.getLocalLibraryItems().also { cachedCopies = version to it }
+  }
+
   override fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>?) {
     if (rows.isEmpty()) return
-    // Read once: a full pull can take thousands of rows, and Paper reads every copy from disk
-    val copies = DeviceManager.dbManager.getLocalLibraryItems()
+    val copies = copies()
     for (row in rows) {
       val (item, localEpisodeId) = copyOf(copies, row) ?: continue
       mirror(row, item, localEpisodeId, fields)
@@ -41,7 +53,7 @@ object PaperProgressMirror : ProgressMirror {
 
   override fun remove(rows: Collection<MediaProgressEntity>) {
     if (rows.isEmpty()) return
-    val copies = DeviceManager.dbManager.getLocalLibraryItems()
+    val copies = copies()
     for (row in rows) {
       val (item, localEpisodeId) = copyOf(copies, row) ?: continue
       DeviceManager.dbManager.removeLocalMediaProgress(localProgressId(item, localEpisodeId))

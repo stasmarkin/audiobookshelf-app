@@ -83,6 +83,16 @@ class PaperProgressImportTest {
   }
 
   @Test
+  fun localEpisodeWithoutItsServerIdIsNotImported() = runBlocking {
+    // An episode progress that lost its server episode id would otherwise land on the podcast's own row
+    val orphan = LocalMediaProgress("local_pod-local-ep", "local_pod", "local-ep", 60.0, 0.5, 30.0, false, null, null, 200L, 1L,
+            null, "srv", "https://srv.test.invalid", "user", "pod1", null)
+
+    assertEquals(0, import.import(listOf(orphan)))
+    assertNull(row("pod1"))
+  }
+
+  @Test
   fun importDoesNotOverwriteNewerRoomRow() = runBlocking {
     db.mediaProgress().upsert(progressRow(900.0, lastUpdate = 500L, pending = false))
 

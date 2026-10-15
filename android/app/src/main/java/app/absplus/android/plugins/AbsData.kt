@@ -207,7 +207,7 @@ class AbsData : Plugin() {
     }
     io.launch {
       try {
-        val rows = store.progressRows(serverConfigId).filter { it.libraryItemId in ids }
+        val rows = store.progressRowsFor(serverConfigId, ids)
         call.resolve(JSObject().put("mediaProgress", JSArray(UserDataJson.progressList(rows).toString())))
       } catch (e: Exception) {
         call.reject("Could not read progress: ${e.message}")
@@ -248,7 +248,7 @@ class AbsData : Plugin() {
     }
     io.launch {
       try {
-        write(store!!, serverConfigId!!, libraryItemId!!)
+        SyncEngine.write { write(it, serverConfigId!!, libraryItemId!!) }
         SyncEngine.onLocalWrite()
         call.resolve()
       } catch (e: Exception) {
@@ -257,7 +257,11 @@ class AbsData : Plugin() {
     }
   }
 
-  /** A server progress record the WebView got (the value on refocus); merged by the one rule. Resolves `{ applied }`. */
+  /**
+   * A server progress record the WebView got (the value on refocus), merged by the one rule. Resolves `{ applied,
+   * protected, currentTime }`: the row's position after the merge, and whether the device keeps its own (an unsent
+   * change or listening session), so the player can follow a value an earlier sync already took.
+   */
   @PluginMethod
   fun applyServerProgress(call: PluginCall) {
     val store = SyncEngine.store
@@ -270,7 +274,11 @@ class AbsData : Plugin() {
     }
     io.launch {
       try {
-        call.resolve(JSObject().put("applied", store!!.applyServerProgressCandidate(serverConfigId!!, record!!)))
+        val result = SyncEngine.write { it.mergeServerProgress(serverConfigId!!, record!!) }
+        call.resolve(JSObject()
+                .put("applied", result.applied)
+                .put("protected", result.protected)
+                .put("currentTime", result.row?.currentTime ?: JSONObject.NULL))
       } catch (e: Exception) {
         call.reject(e.message ?: "Could not apply the progress")
       }

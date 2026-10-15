@@ -12,6 +12,7 @@ import app.absplus.android.data.Podcast
 import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.data.PodcastMetadata
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.managers.DbManager
 import io.paperdb.Paper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +45,9 @@ class UserDataStoreProgressTest {
   private val config = fakeServer()
   @Volatile private var now = 10_000L
   private lateinit var pusher: OutboxPusher
-  private val store = UserDataStore(db, DataChangeNotifier(10, scope) { _, _ -> }, { now }, { pusher.inFlightId },
+  /** Scopes the store announced. */
+  private val changes = java.util.Collections.synchronizedList(mutableListOf<String>())
+  private val store = UserDataStore(db, DataChangeNotifier(10, scope) { name, _ -> changes.add(name) }, { now }, { pusher.inFlightId },
           unsentSessionKeys = PaperProgressMirror::unsentSessionKeys, mirror = PaperProgressMirror)
 
   init {
@@ -55,6 +58,8 @@ class UserDataStoreProgressTest {
   fun setUp() {
     Paper.init(ApplicationProvider.getApplicationContext<Context>())
     for (book in listOf("localLibraryItems", "localMediaProgress", "playbackSession")) Paper.book(book).destroy()
+    // Emptied behind DbManager's back: the mirror must not keep the previous test's copies
+    DbManager.localLibraryItemsChanged()
   }
 
   @After
@@ -458,5 +463,122 @@ class UserDataStoreProgressTest {
 
     assertNull(row())
     assertEquals(40.0, paper()!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun itemRowsAreReadByTheirIds() = runBlocking {
+    db.mediaProgress().upsert(progressRow(1.0, 1L))
+    db.mediaProgress().upsert(progressRow(2.0, 1L, episodeId = "ep1").copy(libraryItemId = "li2"))
+    db.mediaProgress().upsert(progressRow(3.0, 1L).copy(libraryItemId = "li3"))
+    db.mediaProgress().upsert(progressRow(4.0, 1L).copy(serverConfigId = "other", libraryItemId = "li2"))
+
+    val rows = store.progressRowsFor("srv", listOf("li2", "li3", "li2"))
+
+    assertEquals(listOf("li2" to 2.0, "li3" to 3.0), rows.map { it.libraryItemId to it.currentTime }.sortedBy { it.first })
+  }
+
+  @Test
+  fun mirrorReadsTheCopiesAgainOnlyAfterTheyChange() = runBlocking {
+    downloadedCopy(currentTime = 100.0)
+    store.recordPlayback("srv", "li1", null, 110.0, 1000.0, 0.11, lastUpdate = 10L)
+    assertEquals(110.0, paper()!!.currentTime, 0.0)
+
+    // A copy written behind DbManager's back is not seen: the list is not read from disk on every tick
+    Paper.book("localLibraryItems").delete("local_srv")
+    store.recordPlayback("srv", "li1", null, 120.0, 1000.0, 0.12, lastUpdate = 20L)
+    assertEquals("still mirrored from the kept list", 120.0, paper()!!.currentTime, 0.0)
+
+    DbManager.localLibraryItemsChanged()
+    store.recordPlayback("srv", "li1", null, 130.0, 1000.0, 0.13, lastUpdate = 30L)
+    assertEquals("a change of the copies is read", 120.0, paper()!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun serverEchoOfTheDevicesOwnValuesChangesNothing() = runBlocking {
+    downloadedCopy(currentTime = 600.0)
+    db.mediaProgress().upsert(progressRow(600.0, lastUpdate = 100L, pending = false))
+    kotlinx.coroutines.delay(50)
+    changes.clear()
+
+    // What the server sends after this device's own /sync: the same position, stamped later by the server
+    assertFalse(store.applyServerProgressCandidate("srv", server(600.0, lastUpdate = 200L)))
+
+    assertEquals(100L, row()!!.lastUpdate)
+    assertEquals("the copy is not rewritten", 5L, paper()!!.lastUpdate)
+    kotlinx.coroutines.delay(50)
+    assertTrue("nothing to re-read", changes.isEmpty())
+  }
+
+  @Test
+  fun markFinishedThenTickKeepsFinished() = runBlocking {
+    db.mediaProgress().upsert(progressRow(400.0, lastUpdate = 5L, pending = false))
+    store.markFinished("srv", "li1", null, true)
+    // Playing on before the mark reached the server
+    store.recordPlayback("srv", "li1", null, 450.0, 1000.0, 0.45, lastUpdate = now + 15_000)
+
+    assertTrue(row()!!.isFinished)
+    assertEquals(now, row()!!.finishedAt)
+    assertEquals(450.0, row()!!.currentTime, 0.0)
+    pusher.pushAll(config)
+    assertTrue(json(api.requests.single().body).getBoolean("isFinished"))
+  }
+
+  @Test
+  fun delayedTickAfterResetIsDropped() = runBlocking {
+    db.mediaProgress().upsert(progressRow(500.0, lastUpdate = 5L, pending = false))
+    store.resetProgress("srv", "li1", null)
+    val reset = row()!!
+
+    // Sampled before the reset, written after it
+    store.recordPlayback("srv", "li1", null, 505.0, 1000.0, 0.505, lastUpdate = now - 1)
+
+    assertEquals(reset, row())
+    assertEquals(listOf(OutboxKind.PROGRESS_DELETE), outbox().map { it.kind })
+  }
+
+  @Test
+  fun staleSnapshotAfterResetDoesNotBringTheRecordBack() = runBlocking {
+    db.mediaProgress().upsert(progressRow(500.0, lastUpdate = 5L, pending = false))
+    store.resetProgress("srv", "li1", null)
+    val resetAt = now
+    pusher.pushAll(config)
+    assertNull(row())
+
+    // A user object or socket event built before the DELETE still has the old record
+    now += 1_000
+    assertFalse(store.applyServerProgressCandidate("srv", server(500.0, lastUpdate = 50L)))
+    store.applyServerProgress("srv", listOf(server(500.0, lastUpdate = resetAt)))
+    assertNull("snapshots from before the reset are ignored", row())
+
+    // Listening on another device after the reset is a new record
+    assertTrue(store.applyServerProgressCandidate("srv", server(30.0, lastUpdate = resetAt + 10)))
+    db.mediaProgress().delete("srv", "li1", "")
+
+    // A fresh full pull is the server's current state: no marker applies
+    store.applyServerProgress("srv", listOf(server(500.0, lastUpdate = 50L)), deleteMissing = true)
+    assertEquals(500.0, row()!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun resetMarkerExpires() = runBlocking {
+    db.mediaProgress().upsert(progressRow(500.0, lastUpdate = 5L, pending = false))
+    store.resetProgress("srv", "li1", null)
+    pusher.pushAll(config)
+    now += UserDataStore.RECENTLY_SETTLED_MS
+    assertTrue(store.applyServerProgressCandidate("srv", server(500.0, lastUpdate = 50L)))
+  }
+
+  @Test
+  fun mergedServerValueReportsTheRowAndWhetherTheDeviceKeepsIt() = runBlocking {
+    db.mediaProgress().upsert(progressRow(9000.0, lastUpdate = 100L, pending = false))
+    // A reconcile already took the server's position: nothing new, but the row is where the player should be
+    val synced = store.mergeServerProgress("srv", server(9000.0, lastUpdate = 100L))
+    assertEquals(CandidateResult(false, row(), false), synced)
+
+    store.markFinished("srv", "li1", null, false)
+    val pending = store.mergeServerProgress("srv", server(10.0, lastUpdate = now + 500))
+    assertFalse(pending.applied)
+    assertTrue(pending.protected)
+
   }
 }

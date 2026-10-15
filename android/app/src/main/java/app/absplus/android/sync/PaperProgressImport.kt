@@ -25,6 +25,8 @@ class PaperProgressImport(private val db: UserDataDatabase, private val prefs: S
       paper.mapNotNull { lmp ->
         val serverConfigId = lmp.serverConnectionConfigId?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val libraryItemId = lmp.libraryItemId?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        // A local episode without its server episode id would land on the podcast's own progress
+        if (!lmp.localEpisodeId.isNullOrEmpty() && lmp.episodeId.isNullOrEmpty()) return@mapNotNull null
         val episodeId = lmp.episodeId.orEmpty()
         val row = dao.get(serverConfigId, libraryItemId, episodeId)
         if (row != null && (row.pending || lmp.lastUpdate <= row.lastUpdate)) return@mapNotNull null

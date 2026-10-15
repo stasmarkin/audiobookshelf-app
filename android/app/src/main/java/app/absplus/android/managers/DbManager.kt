@@ -13,6 +13,14 @@ class DbManager {
   companion object {
     private var isDbInitialized = false
 
+    /** Changes with every write or removal of a local library item, so a reader can keep the list between them. */
+    @Volatile var localLibraryItemsVersion = 0L
+      private set
+
+    fun localLibraryItemsChanged() {
+      localLibraryItemsVersion++
+    }
+
     fun initialize(ctx: Context) {
       if (isDbInitialized) return
       Paper.init(ctx)
@@ -86,14 +94,17 @@ class DbManager {
 
   fun removeLocalLibraryItem(localLibraryItemId: String) {
     Paper.book("localLibraryItems").delete(localLibraryItemId)
+    localLibraryItemsChanged()
   }
 
   fun saveLocalLibraryItems(localLibraryItems: List<LocalLibraryItem>) {
     localLibraryItems.map { Paper.book("localLibraryItems").write(it.id, it) }
+    localLibraryItemsChanged()
   }
 
   fun saveLocalLibraryItem(localLibraryItem: LocalLibraryItem) {
     Paper.book("localLibraryItems").write(localLibraryItem.id, localLibraryItem)
+    localLibraryItemsChanged()
   }
 
   fun saveLocalFolder(localFolder: LocalFolder) {
@@ -115,6 +126,7 @@ class DbManager {
   fun removeLocalFolder(folderId: String) {
     val localLibraryItems = getLocalLibraryItemsInFolder(folderId)
     localLibraryItems.forEach { Paper.book("localLibraryItems").delete(it.id) }
+    localLibraryItemsChanged()
     Paper.book("localFolders").delete(folderId)
   }
 
@@ -323,9 +335,11 @@ class DbManager {
         // only items beginning in 0.9.80
         Log.d(tag, "cleanLocalLibraryItems: Local only item ${lli.id} - removing from ABS")
         Paper.book("localLibraryItems").delete(lli.id)
+        localLibraryItemsChanged()
       } else if (hasUpdates) {
         Log.d(tag, "cleanLocalLibraryItems: Saving local library item ${lli.id}")
         Paper.book("localLibraryItems").write(lli.id, lli)
+        localLibraryItemsChanged()
       }
     }
   }

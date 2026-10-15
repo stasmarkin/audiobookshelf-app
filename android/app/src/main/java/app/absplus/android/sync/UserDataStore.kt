@@ -7,6 +7,9 @@ import app.absplus.android.db.userdata.OutboxDao
 import app.absplus.android.db.userdata.OutboxEntity
 import app.absplus.android.db.userdata.UserDataDatabase
 
+/** A server record merged on request, and the row it leaves. */
+data class CandidateResult(val applied: Boolean, val row: MediaProgressEntity?, val protected: Boolean)
+
 /**
  * Every write of the user's data. A user action and its outbox row are written in one transaction, and a row is
  * `pending` exactly while the outbox still has rows for its item, so a server copy never overwrites an unsent change.
@@ -29,6 +32,8 @@ class UserDataStore(
   private val progress = db.mediaProgress()
   /** Bookmark keys whose outbox rows were settled lately, with the time; see [applyServerBookmarks]. */
   private val recentlySettled = HashMap<String, Long>()
+  /** Progress keys whose reset reached the server lately: the reset's time and when it was answered. */
+  private val recentResets = HashMap<String, Pair<Long, Long>>()
 
   suspend fun visibleBookmarks(serverConfigId: String): List<BookmarkEntity> = bookmarks.getVisible(serverConfigId)
 
@@ -107,6 +112,10 @@ class UserDataStore(
 
   suspend fun progressRows(serverConfigId: String): List<MediaProgressEntity> = progress.getAll(serverConfigId)
 
+  /** Rows of just these items; ids beyond SQLite's parameter limit are read in chunks. */
+  suspend fun progressRowsFor(serverConfigId: String, libraryItemIds: Collection<String>): List<MediaProgressEntity> =
+          libraryItemIds.distinct().chunked(500).flatMap { progress.getForItems(serverConfigId, it) }
+
   /** The server's user object as last known (without progress, bookmarks and tokens); null when none is. */
   suspend fun userJson(serverConfigId: String): String? = db.syncState().get(serverConfigId)?.userJson
 
@@ -175,12 +184,19 @@ class UserDataStore(
     val row = db.withTransaction {
       val key = progressItemKey(libraryItemId, episodeId)
       val queued = outbox.byItemKey(serverConfigId, key)
-      val row = progress.get(serverConfigId, libraryItemId, episodeId.orEmpty())
-              ?: newRow(serverConfigId, libraryItemId, episodeId, lastUpdate).copy(pending = queued.isNotEmpty())
-      val finished = progressValue >= FINISHED_PROGRESS
+      val existing = progress.get(serverConfigId, libraryItemId, episodeId.orEmpty())
+      // Sampled before the user's own unsent change (a reset, "finished"): it must not undo it
+      if (existing != null && existing.pending && lastUpdate <= existing.lastUpdate) return@withTransaction null
+      val row = existing ?: newRow(serverConfigId, libraryItemId, episodeId, lastUpdate).copy(pending = queued.isNotEmpty())
+      // An unsent "finished" mark stays as the user set it, even while playing on: the PATCH sends the row's value.
+      // Not after a reset, whose own PATCH of the listening carries isFinished as playback leaves it
+      val keepFinished = queued.none { it.kind == OutboxKind.PROGRESS_DELETE } && queued.any {
+        it.kind == OutboxKind.PROGRESS_PATCH && "isFinished" in OutboxPayload.progressPatchFields(it.payload).orEmpty()
+      }
+      val finished = if (keepFinished) row.isFinished else progressValue >= FINISHED_PROGRESS
       var updated = row.copy(currentTime = currentTime, duration = duration, progress = progressValue,
-              isFinished = finished, finishedAt = if (finished) lastUpdate else null, lastUpdate = lastUpdate,
-              source = PROGRESS_SOURCE_DEVICE)
+              isFinished = finished, finishedAt = if (keepFinished) row.finishedAt else if (finished) lastUpdate else null,
+              lastUpdate = lastUpdate, source = PROGRESS_SOURCE_DEVICE)
       val lastDelete = queued.lastOrNull { it.kind == OutboxKind.PROGRESS_DELETE }
       if (lastDelete != null && queued.none { it.kind == OutboxKind.PROGRESS_PATCH && it.id > lastDelete.id }) {
         enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, key, OutboxPayload.progressPatch(PLAYBACK_FIELDS))
@@ -188,7 +204,7 @@ class UserDataStore(
       }
       progress.upsert(updated)
       updated
-    }
+    } ?: return
     if (mirrorToPaper) mirror.mirror(listOf(row), PLAYBACK_MIRROR_FIELDS)
     // Its own scope: the WebView re-reads just this row for a tick, not the Paper progress of every copy
     notifier.notify(SCOPE_PLAYBACK, listOf(libraryItemId))
@@ -199,27 +215,32 @@ class UserDataStore(
    * pending. [deleteMissing] (a full pull only, never a snapshot that may predate a just-sent PATCH): a row the server
    * has no record of is deleted, with the Paper progress of its copy, unless it is pending, has unsent sessions or is
    * in [keep] (read in the deleting transaction, so a key remembered by an import that just committed is seen).
+   * Anything else ([deleteMissing] false) is a snapshot, which may predate a reset that reached the server lately: its
+   * records from before that reset are ignored. A taken record with the device's own values (the server's echo of
+   * this device's listening) changes nothing.
    *
    * @return the rows taken from the server
    */
   suspend fun applyServerProgress(serverConfigId: String, list: List<ServerProgress>, deleteMissing: Boolean = false,
                                   keep: () -> Set<String> = { emptySet() }): List<MediaProgressEntity> {
     val unsent = unsentSessionKeys(serverConfigId)
+    val resets = if (deleteMissing) emptyMap() else recentResetsOf(serverConfigId)
     val (taken, deleted) = db.withTransaction {
       val taken = mutableListOf<MediaProgressEntity>()
       val seen = HashSet<String>()
       for (server in list) {
         val key = progressItemKey(server.libraryItemId, server.episodeId)
         if (!seen.add(key)) continue
+        val resetAt = resets[key]
+        if (resetAt != null && server.lastUpdate <= resetAt) continue
         val local = progress.get(serverConfigId, server.libraryItemId, server.episodeId.orEmpty())
-        when (val merge = mergeProgress(serverConfigId, local, server, key in unsent)) {
-          is ProgressMerge.TakeServer -> {
-            progress.upsert(merge.row)
-            taken.add(merge.row)
-          }
+        val merge = mergeProgress(serverConfigId, local, server, key in unsent)
+        if (merge is ProgressMerge.TakeServer && (local == null || !sameValues(local, merge.row))) {
+          progress.upsert(merge.row)
+          taken.add(merge.row)
+        } else if (local != null && local.serverProgressId == null && server.id.isNotEmpty()) {
           // The id is what a later reset deletes
-          ProgressMerge.KeepLocal -> if (local != null && local.serverProgressId == null && server.id.isNotEmpty())
-            progress.upsert(local.copy(serverProgressId = server.id))
+          progress.upsert(local.copy(serverProgressId = server.id))
         }
       }
       val kept = if (deleteMissing) keep() else emptySet()
@@ -273,6 +294,24 @@ class UserDataStore(
   suspend fun applyServerProgressCandidate(serverConfigId: String, server: ServerProgress): Boolean =
           applyServerProgress(serverConfigId, listOf(server)).isNotEmpty()
 
+  /**
+   * [applyServerProgressCandidate] with the row as it stands after it: [CandidateResult.protected] when the device
+   * holds something the server has not got yet (an unsent change or listening session), which the player keeps.
+   */
+  suspend fun mergeServerProgress(serverConfigId: String, server: ServerProgress): CandidateResult {
+    val applied = applyServerProgressCandidate(serverConfigId, server)
+    val row = progress.get(serverConfigId, server.libraryItemId, server.episodeId.orEmpty())
+    val key = progressItemKey(server.libraryItemId, server.episodeId)
+    val protected = row != null && (row.pending || key in unsentSessionKeys(serverConfigId))
+    return CandidateResult(applied, row, protected)
+  }
+
+  /** What a server record would change; the time and who wrote it do not count. */
+  private fun sameValues(local: MediaProgressEntity, server: MediaProgressEntity) =
+          local.currentTime == server.currentTime && local.isFinished == server.isFinished &&
+                  local.ebookLocation == server.ebookLocation && local.ebookProgress == server.ebookProgress &&
+                  local.hideFromContinueListening == server.hideFromContinueListening
+
   fun notifyUserChanged() = notifier.notify(SCOPE_USER, emptyList())
 
   private fun newRow(serverConfigId: String, libraryItemId: String, episodeId: String?, now: Long) = MediaProgressEntity(
@@ -316,6 +355,7 @@ class UserDataStore(
         OutboxKind.PROGRESS_DELETE -> {
           val (libraryItemId, episodeId) = progressKeyParts(row.itemKey)
           val deletedId = OutboxPayload.serverProgressId(row.payload)
+          if (!dropped) markReset(row.serverConfigId, row.itemKey, OutboxPayload.deleteLastUpdate(row.payload) ?: clock())
           val local = progress.get(row.serverConfigId, libraryItemId, episodeId)
           when {
             local == null || dropped -> setProgressPending(row.serverConfigId, row.itemKey)
@@ -355,6 +395,17 @@ class UserDataStore(
     plan.deleteIds.forEach { outbox.delete(it) }
     plan.update?.let { outbox.update(owned(it)) }
     plan.insert?.let { outbox.insert(owned(it)) }
+  }
+
+  private fun markReset(serverConfigId: String, itemKey: String, resetAt: Long) = synchronized(recentResets) {
+    recentResets["$serverConfigId $itemKey"] = resetAt to clock()
+  }
+
+  /** Progress keys of the server reset lately, with the time of the reset. */
+  private fun recentResetsOf(serverConfigId: String): Map<String, Long> = synchronized(recentResets) {
+    val now = clock()
+    recentResets.entries.removeAll { now - it.value.second >= recentlySettledMs }
+    recentResets.filterKeys { it.startsWith("$serverConfigId ") }.entries.associate { it.key.substringAfter(' ') to it.value.first }
   }
 
   private fun markSettled(serverConfigId: String, itemKey: String) = synchronized(recentlySettled) {

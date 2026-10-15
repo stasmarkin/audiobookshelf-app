@@ -14,6 +14,10 @@ interface MediaProgressDao {
   @Query("SELECT * FROM media_progress WHERE serverConfigId = :serverConfigId")
   suspend fun getAll(serverConfigId: String): List<MediaProgressEntity>
 
+  /** Every row (all episodes) of these items. */
+  @Query("SELECT * FROM media_progress WHERE serverConfigId = :serverConfigId AND libraryItemId IN (:libraryItemIds)")
+  suspend fun getForItems(serverConfigId: String, libraryItemIds: List<String>): List<MediaProgressEntity>
+
   @Upsert
   suspend fun upsert(entity: MediaProgressEntity)
 

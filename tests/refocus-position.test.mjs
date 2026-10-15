@@ -43,8 +43,9 @@ async function loadContainer() {
 }
 
 // $absData.applyServerProgress stands for native's merge: by default it takes only a newer value than the saved one;
-// `applied` forces its answer (false: an unsent local change wins). calls.sync: values it took
-function makeContext(component, { native, server, applied } = {}) {
+// `applied` forces its answer. Not taken, it answers the row it holds: `rowTime` (by default where the player is, as
+// after this device's own last tick) and `protected` (an unsent change or listening session). calls.sync: values taken
+function makeContext(component, { native, server, applied, rowTime, protected: isProtected = false } = {}) {
   const calls = { seek: [], sync: [], asked: [], db: [], native: 0 }
   const ctx = {
     currentPlaybackSession: session,
@@ -57,7 +58,7 @@ function makeContext(component, { native, server, applied } = {}) {
         calls.asked.push(progress)
         const taken = applied ?? progress.lastUpdate > 2000
         if (taken) calls.sync.push(progress)
-        return { applied: taken }
+        return { applied: taken, protected: isProtected, currentTime: taken ? progress.currentTime : rowTime ?? ctx.$refs.audioPlayer.currentTime }
       }
     },
     $db: new Proxy({}, { get: (_, name) => (...args) => calls.db.push([name, args]) })
@@ -144,7 +145,7 @@ test('refocus applies server progress through Room and seeks only if accepted', 
   sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
   const newer = { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }
   // The device has an unsent change of this item: native keeps it although the server value is newer
-  const kept = makeContext(component, { server: newer, applied: false })
+  const kept = makeContext(component, { server: newer, applied: false, protected: true, rowTime: SAVED + 50 })
   await component.methods.deviceFocused.call(kept.ctx, true)
   assert.deepEqual(kept.calls.asked, [newer], 'the server value is handed to native')
   assert.deepEqual(kept.calls.seek, [], 'no seek to a value native did not take')
@@ -153,6 +154,19 @@ test('refocus applies server progress through Room and seeks only if accepted', 
   const taken = makeContext(component, { server: newer, applied: true })
   await component.methods.deviceFocused.call(taken.ctx, true)
   assert.deepEqual(taken.calls.seek, [9000])
+})
+
+test('refocus after a sync already took the server position still moves the paused player', async () => {
+  const { component, sandbox } = await loadContainer()
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
+  // The reconcile on return wrote 9000 into Room first: the same value is no longer "taken", yet the player is behind
+  const synced = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }, applied: false, rowTime: 9000 })
+  await component.methods.deviceFocused.call(synced.ctx, true)
+  assert.deepEqual(synced.calls.seek, [9000])
+
+  const pending = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }, applied: false, rowTime: 9000, protected: true })
+  await component.methods.deviceFocused.call(pending.ctx, true)
+  assert.deepEqual(pending.calls.seek, [], 'the device keeps its own position')
 })
 
 test('Bookmark timestamp: the modal saves the container time, which after refocus is the live paused position', async () => {

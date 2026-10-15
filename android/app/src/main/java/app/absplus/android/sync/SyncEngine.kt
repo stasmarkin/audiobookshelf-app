@@ -162,6 +162,13 @@ object SyncEngine {
    */
   fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = core?.launchWrite(block) ?: false
 
+  /**
+   * Runs [block] in the same queue as [launchWrite] and returns its result: a user's change lands after the ticks
+   * sampled before it, never under them. Throws when sync is not started.
+   */
+  suspend fun <T> write(block: suspend (UserDataStore) -> T): T =
+          (core ?: throw IllegalStateException("Sync is not started")).write(block)
+
   /** Imports [paper] like on start (a downloaded copy relinked to another server item); false before [init]. */
   fun importPaperProgress(paper: List<LocalMediaProgress>): Boolean = core?.importPaperProgress(paper) ?: false
 
@@ -307,6 +314,19 @@ object SyncEngine {
     }
 
     fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = writes.trySend(block).isSuccess
+
+    suspend fun <T> write(block: suspend (UserDataStore) -> T): T {
+      val result = CompletableDeferred<T>()
+      val queued = launchWrite { store ->
+        try {
+          result.complete(block(store))
+        } catch (e: Throwable) {
+          result.completeExceptionally(e)
+        }
+      }
+      if (!queued) throw IllegalStateException("Sync is stopped")
+      return result.await()
+    }
 
     fun onLocalWrite() {
       refreshPendingCount()

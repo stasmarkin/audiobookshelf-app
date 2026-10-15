@@ -159,10 +159,10 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   const webApplyProgress = (progress) => {
     if (!progress?.libraryItemId || typeof progress.lastUpdate !== 'number') return { applied: false }
     const current = storedProgress(progress.libraryItemId, progress.episodeId)
-    if (current && !(progress.lastUpdate > current.lastUpdate)) return { applied: false }
+    if (current && !(progress.lastUpdate > current.lastUpdate)) return { applied: false, protected: false, currentTime: current.currentTime }
     store.commit('user/upsertMediaProgress', progress)
     dataListeners.forEach((cb) => cb({ scope: 'progress', ids: [progress.libraryItemId] }))
-    return { applied: true }
+    return { applied: true, protected: false, currentTime: progress.currentTime }
   }
 
   // Without this the indicator stays hidden until something else asks
@@ -224,7 +224,10 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
       if (isWeb) return webProgressWrite(() => $axios.$patch(progressPath(libraryItemId), { ebookLocation, ebookProgress }))
       return plugin.updateEbookProgress(withServer({ libraryItemId, ebookLocation, ebookProgress }, serverConfigId))
     },
-    /** A server progress record (the value fetched on refocus), merged by native's rule; resolves `{ applied }`. */
+    /**
+     * A server progress record (the value fetched on refocus), merged by native's rule. Resolves `{ applied, protected,
+     * currentTime }`: the position after the merge, and whether the device keeps its own (unsent change or listening).
+     */
     async applyServerProgress({ progress }) {
       if (isWeb) return webApplyProgress(progress)
       return plugin.applyServerProgress({ progress })

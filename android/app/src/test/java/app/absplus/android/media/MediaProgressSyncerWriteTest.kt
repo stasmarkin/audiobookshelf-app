@@ -9,6 +9,7 @@ import app.absplus.android.data.MediaType
 import app.absplus.android.data.MediaTypeMetadata
 import app.absplus.android.data.PlaybackSession
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.managers.DbManager
 import app.absplus.android.player.PLAYMETHOD_DIRECTPLAY
 import app.absplus.android.player.PLAYMETHOD_LOCAL
 import app.absplus.android.player.PlayerNotificationService
@@ -57,6 +58,7 @@ class MediaProgressSyncerWriteTest {
   fun setUp() {
     Paper.init(context)
     for (book in listOf("localLibraryItems", "localMediaProgress", "playbackSession")) Paper.book(book).destroy()
+    DbManager.localLibraryItemsChanged()
     SyncEngine.initForTest(SyncDeps(
             db = db, http = syncHttp(api), activeServer = { fakeServer() }, serverState = MutableStateFlow(ServerState.OFFLINE), onlineEntries = MutableStateFlow(0L),
             serverId = MutableStateFlow("srv"), isForeground = { false }, clock = { 1L }, scope = scope, log = {},

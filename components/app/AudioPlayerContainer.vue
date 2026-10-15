@@ -546,7 +546,8 @@ export default {
     },
     /**
      * The server's progress of the downloaded item open in the player, merged natively by the one rule (its Paper copy
-     * follows). The paused player moves to it only when it was taken: an unsent local change keeps its position.
+     * follows). The paused player moves to the position native holds afterwards, which may come from an earlier sync,
+     * unless the device keeps its own (an unsent change or listening session).
      */
     async checkSyncServerProgressWithLocalProgress(localMediaProgress) {
       if (!localMediaProgress) return
@@ -554,17 +555,21 @@ export default {
       const serverMediaProgress = await this.getServerMediaProgressForCurrentSession()
       if (!serverMediaProgress?.lastUpdate) return
 
-      let applied = false
+      let result = null
       try {
-        applied = (await this.$absData.applyServerProgress({ progress: serverMediaProgress }))?.applied === true
+        result = await this.$absData.applyServerProgress({ progress: serverMediaProgress })
       } catch (error) {
         console.error('[AudioPlayerContainer] Failed to apply the server progress', error)
       }
-      if (!applied) return
-      console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: server progress taken. Server current time:', serverMediaProgress.currentTime, 'vs local', localMediaProgress.currentTime)
-      if (!this.$refs.audioPlayer?.isPlaying && serverMediaProgress.currentTime !== localMediaProgress.currentTime) {
+      if (!result || result.protected) return
+      const target = result.applied ? serverMediaProgress.currentTime : result.currentTime
+      if (typeof target !== 'number') return
+      const shown = this.$refs.audioPlayer?.currentTime ?? localMediaProgress.currentTime
+      console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: position after the merge', target, 'vs shown', shown, `(applied=${result.applied})`)
+      // Under a second apart is the same place (the last tick and the paused player's own position)
+      if (!this.$refs.audioPlayer?.isPlaying && Math.abs(target - shown) >= 1) {
         // Use seek() so the native audio player's current session is updated
-        this.$refs.audioPlayer.seek(serverMediaProgress.currentTime)
+        this.$refs.audioPlayer.seek(target)
       }
     },
     /**
