@@ -502,4 +502,20 @@ class CatalogReaderTest {
     assertEquals(listOf("b1"), ids(answer))
     assertEquals(listOf("b1", "b2"), ids(items(req = request(filter = "authors.${FilterCodec.encode("a1")}"))))
   }
+
+  @Test
+  fun authorsPagesFollowNocaseCompare() {
+    val names = listOf("alice", "Alice", "ALICE", "Bob", "bob", "_under", "[bracket", "Émile", "émile", "Лев", "лев", "😀 Smile", "Zed", "zed", "a", "")
+    runBlocking {
+      db.libraries().upsertAll(listOf(library()))
+      db.authors().upsertAll(names.mapIndexed { i, name -> authorRow("srv", "id%02d".format(names.size - i), name = name) })
+    }
+    reader.onReplicaChanged()
+    val reference = runBlocking { db.authors().forLibrary("srv", "lib1") }
+            .sortedWith(Comparator<app.absplus.android.db.replica.AuthorEntity> { a, b -> app.absplus.android.db.replica.nocaseCompare(a.name, b.name) }.thenBy { it.id })
+            .map { it.id }
+    val pages = (0..3).map { authors(limit = 5, page = it) }
+    assertEquals(reference, pages.flatMap { authorIds(it) })
+    pages.forEach { assertEquals(names.size, it.getInt("total")) }
+  }
 }

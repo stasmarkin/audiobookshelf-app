@@ -154,6 +154,14 @@ abstract class AuthorDao {
   @Query("SELECT * FROM authors WHERE serverConfigId = :sc AND libraryId = :libraryId")
   abstract suspend fun forLibrary(sc: String, libraryId: String): List<AuthorEntity>
 
+  /** NOCASE folds only ASCII and compares the rest by code point, as `nocaseCompare` and the server's sort. */
+  @Query("""SELECT * FROM authors WHERE serverConfigId = :sc AND libraryId = :libraryId
+            ORDER BY name COLLATE NOCASE, id LIMIT :limit OFFSET :offset""")
+  abstract suspend fun pageByName(sc: String, libraryId: String, limit: Int, offset: Int): List<AuthorEntity>
+
+  @Query("SELECT COUNT(*) FROM authors WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun count(sc: String, libraryId: String): Int
+
   @Query("SELECT * FROM authors WHERE serverConfigId = :sc AND id = :id")
   abstract suspend fun get(sc: String, id: String): AuthorEntity?
 

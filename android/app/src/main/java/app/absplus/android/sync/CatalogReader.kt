@@ -1,6 +1,6 @@
 package app.absplus.android.sync
 
-import app.absplus.android.db.replica.AuthorEntity
+import androidx.room.withTransaction
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
@@ -214,11 +214,12 @@ class CatalogReader(
     require(req.limit in 1..MAX_READ_LIMIT) { "limit must be 1..$MAX_READ_LIMIT" }
     require(req.page >= 0) { "page must not be negative" }
     val state = db.libraryState().get(sc, req.libraryId)
-    val ordered = db.authors().forLibrary(sc, req.libraryId)
-            .sortedWith(Comparator<AuthorEntity> { a, b -> nocaseCompare(a.name, b.name) }.thenBy { it.id })
+    val (page, total) = db.withTransaction {
+      db.authors().pageByName(sc, req.libraryId, req.limit, minOf(req.page.toLong() * req.limit, Int.MAX_VALUE.toLong()).toInt()) to db.authors().count(sc, req.libraryId)
+    }
     val results = JSONArray()
-    ordered.drop(req.page * req.limit).take(req.limit).forEach { results.put(JSONObject(it.json)) }
-    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", ordered.size).put("limit", req.limit)
+    page.forEach { results.put(JSONObject(it.json)) }
+    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
             .put("page", req.page).put("sortBy", "name").put("sortDesc", false)
             .put("replica", replica(state?.authorsReconciledAt, state?.itemsComplete ?: false))
   }
