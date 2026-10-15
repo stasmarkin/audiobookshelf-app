@@ -107,7 +107,12 @@ test('server coming online retries authorization when there is no user and syncs
     [['syncLocalSessions', false]]
   )
   assert.deepEqual(signedIn.emitted, ['server-reachable'], 'Home re-reads its shelves')
-  assert.ok(!signedIn.calls.some((c) => c[0] === 'dispatch'), 'no library reload: open pages and filters stay where they are')
+  assert.deepEqual(
+    signedIn.calls.filter((c) => c[0] === 'dispatch').map((c) => c[1]),
+    ['libraries/load', 'libraries/fetch'],
+    'libraries that failed to load while offline are re-read'
+  )
+  assert.ok(!signedIn.emitted.includes('library-changed'), 'open pages and filters stay where they are')
 
   const noLibrary = layout({ user: { id: 'user-1' }, currentLibraryId: null })
   noLibrary.view.hasMounted = true
@@ -238,4 +243,21 @@ test('the server answering before Android reports the network still connects, in
   signedIn.watch('networkConnected', true, false)
   await flush()
   assert.deepEqual(signedIn.calls, [], 'a signed-in user waits for the server, not the network')
+})
+
+test('Authors re-reads its list when the server is reachable again', async () => {
+  const page = (await readFile(new URL('../pages/bookshelf/authors.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const sandbox = { console: { ...console, log: () => {} } }
+  vm.runInNewContext(page.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
+  const handlers = {}
+  let inits = 0
+  const view = { $eventBus: { $on: (name, fn) => (handlers[name] = fn), $off: (name) => delete handlers[name] }, $socket: { $on() {}, $off() {} } }
+  for (const [name, fn] of Object.entries(sandbox.component.methods)) view[name] = fn.bind(view)
+  view.init = () => inits++
+  sandbox.component.mounted.call(view)
+  assert.equal(inits, 1)
+  handlers['server-reachable']()
+  assert.equal(inits, 2)
+  sandbox.component.beforeDestroy.call(view)
+  assert.equal(handlers['server-reachable'], undefined)
 })

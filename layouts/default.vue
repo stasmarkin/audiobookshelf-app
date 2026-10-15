@@ -222,8 +222,9 @@ export default {
       if (!this.currentLibraryId) {
         this.initLibraries()
       } else {
-        // Not library-changed: that sends item, collection and playlist pages back to lists and resets filters
-        this.$eventBus.$emit('server-reachable')
+        // Re-read libraries that may have failed to load while offline, but without library-changed: that sends item,
+        // collection and playlist pages back to lists and resets filters
+        this.initLibraries({ notify: false }).then(() => this.$eventBus.$emit('server-reachable'))
       }
       setTimeout(() => {
         this.syncLocalSessions(false)
@@ -248,7 +249,7 @@ export default {
     socketConnectionFailed(err) {
       this.$toast.error('Socket connection error: ' + err.message)
     },
-    async initLibraries() {
+    async initLibraries({ notify = true } = {}) {
       if (this.inittingLibraries) {
         return
       }
@@ -257,7 +258,7 @@ export default {
 
       AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
       await this.$store.dispatch('libraries/fetch', this.currentLibraryId)
-      this.$eventBus.$emit('library-changed')
+      if (notify) this.$eventBus.$emit('library-changed')
       this.inittingLibraries = false
     },
     async syncLocalSessions(isFirstSync) {

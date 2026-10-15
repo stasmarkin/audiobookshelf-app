@@ -80,12 +80,14 @@ export default {
     this.$socket.$on('author_updated', this.authorUpdated)
     this.$socket.$on('author_removed', this.authorRemoved)
     this.$eventBus.$on('library-changed', this.libraryChanged)
+    this.$eventBus.$on('server-reachable', this.init)
   },
   beforeDestroy() {
     this.$socket.$off('author_added', this.authorAdded)
     this.$socket.$off('author_updated', this.authorUpdated)
     this.$socket.$off('author_removed', this.authorRemoved)
     this.$eventBus.$off('library-changed', this.libraryChanged)
+    this.$eventBus.$off('server-reachable', this.init)
   }
 }
 </script>
