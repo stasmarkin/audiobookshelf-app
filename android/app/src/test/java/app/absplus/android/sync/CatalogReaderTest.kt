@@ -410,5 +410,15 @@ class CatalogReaderTest {
   }
 
   @Test
+  fun aSeriesTheReplicaLacksIsNotLoaded() {
+    fillSeries("Мир" to "Мир")
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, 70L, null, null, null, null)) }
+    reader.onReplicaChanged()
+    assertTrue("new on the server", items(req = request(sort = null, filter = "series." + FilterCodec.encode("new"))).getJSONObject("replica").isNull("reconciledAt"))
+    assertEquals(60L, items(req = request(sort = null, filter = "series." + FilterCodec.encode("s0"))).getJSONObject("replica").getLong("reconciledAt"))
+    assertEquals(60L, items(req = request(sort = null, filter = "series." + FilterCodec.encode("no-series"))).getJSONObject("replica").getLong("reconciledAt"))
+  }
+
+  @Test
   fun singleBookSubSeriesFollowsHideSetting() = assertSubSeriesCases { it.contains("Повесть") }
 }

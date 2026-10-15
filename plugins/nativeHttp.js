@@ -17,7 +17,7 @@ const UNREACHABLE_ERROR_CODES = new Set([
 ])
 
 export default function ({ store, $authRenewal }, inject) {
-  const responseError = (res) => new Error(typeof res.data === 'string' ? res.data : `HTTP ${res.status}`)
+  const responseError = (res) => Object.assign(new Error(typeof res.data === 'string' ? res.data : `HTTP ${res.status}`), { status: res.status })
 
   // Native decides whether the url belongs to the active server; a report never fails the request
   const report = (method, payload) => {

@@ -293,6 +293,8 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
       return { ...shape(data), serverConfigId: server, replica: answer?.replica ?? null, fromServer: true }
     } catch (error) {
       if (activeServer() !== server) return retry()
+      // Asked for what the replica lacks: only "not there" (404) means native's empty answer is right
+      if (missing && error?.status !== 404 && error?.response?.status !== 404) throw error
       console.warn('[data] Server read failed, showing the replica', error)
       return answer
     }

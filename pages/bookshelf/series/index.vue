@@ -4,14 +4,17 @@
 
 <script>
 export default {
-  data() {
-    return {}
-  },
-  computed: {},
-  methods: {},
-  mounted() {
-    // Set by the series page when the series could not be read (not when it is gone)
-    if (this.$route.query.error) this.$toast.error(this.$strings.ToastSeriesLoadFailed)
+  watch: {
+    // Set by the series page when the series could not be read (not when it is gone); the tab may already be open
+    '$route.query.error': {
+      immediate: true,
+      handler(error) {
+        if (!error) return
+        this.$toast.error(this.$strings.ToastSeriesLoadFailed)
+        // Not again on Back
+        this.$router.replace({ path: this.$route.path, query: {} })
+      }
+    }
   }
 }
 </script>

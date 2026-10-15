@@ -128,7 +128,7 @@ test('nativeHttp reports an unreachable server on a network exception and a resp
   assert.deepEqual(down.AbsData.reports, [['unreachable', { address: 'https://a.test.invalid/abs/api/me' }]])
 
   const busy = await nativeHttp({ respond: () => ({ status: 503, data: 'Service Unavailable' }) })
-  await assert.rejects(busy.$nativeHttp.get('/api/libraries'))
+  await assert.rejects(busy.$nativeHttp.get('/api/libraries'), (error) => error.status === 503, 'the error carries the status')
   await flush()
   assert.deepEqual(busy.AbsData.reports, [['response', { address: 'https://a.test.invalid/abs/api/libraries', status: 503 }]])
 

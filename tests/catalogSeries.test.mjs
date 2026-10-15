@@ -83,8 +83,10 @@ test('a series missing from a read replica is asked of the server while online',
   assert.equal(answer.fromServer, true)
   assert.equal(answer.series.name, 'Новая')
 
-  const gone = service({ plugin: absent, http: { get: async () => Promise.reject(Object.assign(new Error('404'), { response: { status: 404 } })) } })
+  const gone = service({ plugin: absent, http: { get: async () => Promise.reject(Object.assign(new Error('Not Found'), { status: 404 })) } })
   assert.equal((await gone.data.getSeriesById({ id: 'new' })).series, null, "a 404 leaves native's answer")
+  const broken = service({ plugin: absent, http: { get: async () => Promise.reject(Object.assign(new Error('HTTP 500'), { status: 500 })) } })
+  await assert.rejects(() => broken.data.getSeriesById({ id: 'new' }), /500/, 'any other failure is not "no such series"')
 
   const offline = service({ plugin: absent, http: fakeHttp(() => assert.fail('no server offline')), store: fakeStore({ serverState: 'offline' }) })
   assert.equal((await offline.data.getSeriesById({ id: 'new' })).series, null)
@@ -141,10 +143,15 @@ test('missing series redirects to the series tab', async () => {
   const tab = await read('../pages/bookshelf/series/index.vue')
   const component = new Function(tab.match(/<script>([\s\S]*?)<\/script>/)[1].replace('export default', 'return'))()
   const toasts = []
-  const view = (query) => ({ $route: { query }, $toast: { error: (m) => toasts.push(m) }, $strings: { ToastSeriesLoadFailed: 'Could not open the series' } })
-  component.mounted.call(view({}))
-  component.mounted.call(view({ error: 'series' }))
+  const replaced = []
+  const view = { $route: { path: '/bookshelf/series', query: {} }, $toast: { error: (m) => toasts.push(m) }, $router: { replace: (to) => replaced.push(to) }, $strings: { ToastSeriesLoadFailed: 'Could not open the series' } }
+  const watcher = component.watch['$route.query.error']
+  assert.equal(watcher.immediate, true, 'also when the tab opens with the error')
+  watcher.handler.call(view, undefined)
+  // The tab is already open: only the query changes
+  watcher.handler.call(view, 'series')
   assert.deepEqual(toasts, ['Could not open the series'])
+  assert.deepEqual(replaced, [{ path: '/bookshelf/series', query: {} }], 'dropped, so Back does not repeat it')
 
   const found = await run(() => ({ serverConfigId: 'a', series: { id: 's1', name: 'Мир', libraryId: 'l1' }, replica: replica() }))
   assert.equal(found.redirected, null)

@@ -105,10 +105,12 @@ class CatalogReader(
             .put("mediaType", mediaType).put("minified", true).put("collapseseries", req.collapseSeries)
             .put("include", "rssfeed,numepisodesincomplete")
     val filter = FilterCodec.parse(req.filter)
-    // A series whose membership still waits for its point query may miss books: read as never reconciled
-    val pendingSeries = filter?.group == "series" && filter.value != null && state != null &&
-            filter.value in JSONArray(state.pendingSeriesQueries).let { list -> (0 until list.length()).map { list.optString(it) } }
-    answer.put("replica", replica(state?.itemsReconciledAt?.takeUnless { pendingSeries }, state?.itemsComplete ?: false))
+    // A series whose membership still waits for its point query, or one the replica lacks (new on the server), may
+    // miss books: read as never reconciled
+    val seriesId = filter?.takeIf { it.group == "series" && it.value != "no-series" }?.value
+    val partialSeries = seriesId != null && state != null && (db.series().get(sc, seriesId) == null ||
+            seriesId in JSONArray(state.pendingSeriesQueries).let { list -> (0 until list.length()).map { list.optString(it) } })
+    answer.put("replica", replica(state?.itemsReconciledAt?.takeUnless { partialSeries }, state?.itemsComplete ?: false))
     val hideSingle = hideSingleBookSeries(library)
     val query = ItemsQuery(req.sort, req.desc, filter, req.collapseSeries, req.sortingIgnorePrefix, mediaType, hideSingle)
     val byProgress = req.sort?.startsWith("progress") == true || filter?.group == "progress"
