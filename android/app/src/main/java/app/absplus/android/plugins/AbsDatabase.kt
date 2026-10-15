@@ -8,6 +8,8 @@ import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.media.MediaEventManager
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.ServerReachability
 import app.absplus.android.server.RefreshResult
 import app.absplus.android.managers.SecureStorage
 import app.absplus.android.widget.WidgetRenderer
@@ -205,6 +207,10 @@ class AbsDatabase : Plugin() {
       // Requests sent for another server must not be retried with renewed credentials after the switch.
       if (DeviceManager.serverConnectionConfig?.id != serverConnectionConfig?.id) ApiHandler.invalidateAuthRequests()
       DeviceManager.serverConnectionConfig = serverConnectionConfig
+      serverConnectionConfig?.id?.let { id ->
+        ActiveServer.remember(id)
+        ServerReachability.reportSignedIn(id)
+      }
       call.resolve(JSObject(jacksonMapper.writeValueAsString(DeviceManager.serverConnectionConfig)))
     }
   }
@@ -226,6 +232,7 @@ class AbsDatabase : Plugin() {
         DeviceManager.serverConnectionConfig = null
         ApiHandler.invalidateAuthRequests()
       }
+      ActiveServer.forget(serverConnectionConfigId)
       call.resolve()
     }
   }

@@ -28,6 +28,7 @@ import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.plugins.AbsAppearance
 import app.absplus.android.plugins.AbsThemeImport
 import app.absplus.android.plugins.AbsUpdater
+import app.absplus.android.sync.SyncRuntime
 import com.getcapacitor.BridgeActivity
 
 
@@ -47,6 +48,7 @@ class MainActivity : BridgeActivity() {
 
   public override fun onCreate(savedInstanceState: Bundle?) {
     DbManager.initialize(applicationContext)
+    SyncRuntime.ensureInit(applicationContext)
 
     registerPlugin(AbsAudioPlayer::class.java)
     registerPlugin(AbsDownloader::class.java)
@@ -127,6 +129,16 @@ class MainActivity : BridgeActivity() {
     if (needed.isNotEmpty()) {
       ActivityCompat.requestPermissions(this, needed.toTypedArray(), REQUEST_PERMISSIONS)
     }
+  }
+
+  override fun onResume() {
+    super.onResume()
+    SyncRuntime.setForeground(true)
+  }
+
+  override fun onPause() {
+    SyncRuntime.setForeground(false)
+    super.onPause()
   }
 
   override fun onDestroy() {

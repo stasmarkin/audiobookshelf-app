@@ -37,6 +37,7 @@ import app.absplus.android.data.*
 import app.absplus.android.data.DeviceInfo
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
+import app.absplus.android.sync.SyncRuntime
 import app.absplus.android.managers.PlaybackRestoreStore
 import app.absplus.android.managers.PlaybackRestoreStore.LOG_TAG as RESTORE_TAG
 import app.absplus.android.managers.SleepTimerManager
@@ -387,6 +388,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
     // Initialize Paper (also starts persistent diagnostics in a fresh process)
     DbManager.initialize(ctx)
+    SyncRuntime.ensureInit(ctx)
     DLog.d(tag, "onCreate")
     DLog.marker("Playback service created")
     DLog.i(RESTORE_TAG, "Player service created (new instance - any previous player/session is gone)")

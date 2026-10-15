@@ -15,6 +15,7 @@ import app.absplus.android.models.User
 import app.absplus.android.BuildConfig
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.managers.SecureStorage
+import app.absplus.android.sync.ServerReachability
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -131,6 +132,11 @@ class ApiHandler(var ctx:Context) {
     }
   }
 
+  /** A cancelled call says nothing about the server. */
+  private fun reportFailure(call: Call) {
+    if (!call.isCanceled()) ServerReachability.reportUnreachable(call.request().url.toString())
+  }
+
   private fun makeRequest(request:Request, httpClient:OkHttpClient?, cb: (JSObject) -> Unit) {
     val client = httpClient ?: defaultClient
 
@@ -138,6 +144,7 @@ class ApiHandler(var ctx:Context) {
       override fun onFailure(call: Call, e: IOException) {
         Log.d(tag, "FAILURE TO CONNECT")
         e.printStackTrace()
+        reportFailure(call)
 
         val jsobj = JSObject()
         jsobj.put("error", "Failed to connect")
@@ -145,6 +152,7 @@ class ApiHandler(var ctx:Context) {
       }
 
       override fun onResponse(call: Call, response: Response) {
+        ServerReachability.reportResponse(call.request().url.toString(), response.code)
         response.use {
           if (it.code == 401) {
             // Handle 401 Unauthorized by attempting token refresh
@@ -230,6 +238,8 @@ class ApiHandler(var ctx:Context) {
   private fun handleRefreshRejected(serverConnectionConfigId: String) {
     // Must not throw: callers still have to report the refresh result to an in-flight request or download.
     try {
+      // Before the check below: offline on a cold start there is no current config, but the server is still remembered
+      ServerReachability.reportRefreshRejected(serverConnectionConfigId)
       if (DeviceManager.serverConnectionConfigId != serverConnectionConfigId) return
       DeviceManager.serverConnectionConfig = null
       DeviceManager.deviceData.lastServerConnectionConfigId = null
@@ -299,6 +309,7 @@ class ApiHandler(var ctx:Context) {
       val client = httpClient ?: defaultClient
       client.newCall(newRequest).enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
+          reportFailure(call)
           Log.e(tag, "retryOriginalRequest: Failed to retry request", e)
           AbsLogger.error(tag, "retryOriginalRequest: Failed to retry request after token refresh for server ${DeviceManager.serverConnectionConfigString} (error: ${e.message})")
           val errorObj = JSObject()
@@ -307,6 +318,7 @@ class ApiHandler(var ctx:Context) {
         }
 
         override fun onResponse(call: Call, response: Response) {
+          ServerReachability.reportResponse(call.request().url.toString(), response.code)
           response.use {
             if (!it.isSuccessful) {
               Log.e(tag, "retryOriginalRequest: Retry request failed with status ${it.code}")
