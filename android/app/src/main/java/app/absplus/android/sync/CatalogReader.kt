@@ -4,6 +4,7 @@ import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
 import app.absplus.android.db.replica.LibraryEntity
+import app.absplus.android.db.replica.LibraryStateEntity
 import app.absplus.android.db.replica.ReplicaDatabase
 import app.absplus.android.db.replica.SeriesEntity
 import app.absplus.android.db.replica.SeriesIndex
@@ -103,8 +104,11 @@ class CatalogReader(
             .put("sortBy", req.sort ?: JSONObject.NULL).put("sortDesc", req.desc).put("filterBy", req.filter ?: JSONObject.NULL)
             .put("mediaType", mediaType).put("minified", true).put("collapseseries", req.collapseSeries)
             .put("include", "rssfeed,numepisodesincomplete")
-            .put("replica", replica(state?.itemsReconciledAt, state?.itemsComplete ?: false))
     val filter = FilterCodec.parse(req.filter)
+    // A series whose membership still waits for its point query may miss books: read as never reconciled
+    val pendingSeries = filter?.group == "series" && filter.value != null && state != null &&
+            filter.value in JSONArray(state.pendingSeriesQueries).let { list -> (0 until list.length()).map { list.optString(it) } }
+    answer.put("replica", replica(state?.itemsReconciledAt?.takeUnless { pendingSeries }, state?.itemsComplete ?: false))
     val hideSingle = hideSingleBookSeries(library)
     val query = ItemsQuery(req.sort, req.desc, filter, req.collapseSeries, req.sortingIgnorePrefix, mediaType, hideSingle)
     val byProgress = req.sort?.startsWith("progress") == true || filter?.group == "progress"
@@ -160,12 +164,18 @@ class CatalogReader(
     for ((series, members) in slice) {
       val list = JSONArray()
       members.forEach { m -> books[m.libraryItemId]?.let { list.put(JSONObject(it.json)) } }
-      results.put(JSONObject(series.json).put("books", list))
+      results.put(seriesJson(series).put("books", list))
     }
     return JSONObject().put("serverConfigId", sc).put("results", results).put("total", ordered.size).put("limit", req.limit)
             .put("page", req.page).put("sortBy", req.sort ?: JSONObject.NULL).put("sortDesc", req.desc)
-            .put("replica", replica(state?.seriesReconciledAt, state?.itemsComplete ?: false))
+            .put("replica", replica(seriesReconciledAt(state), state?.itemsComplete ?: false))
   }
+
+  /** Series are read before the books of a pass: until the books were read once, the series have none. */
+  private fun seriesReconciledAt(state: LibraryStateEntity?) = state?.seriesReconciledAt?.takeIf { state.itemsReconciledAt != null }
+
+  /** Series kept from filterdata (hidden single-book ones) were written without their library. */
+  private fun seriesJson(series: SeriesEntity) = JSONObject(series.json).apply { if (!has("libraryId")) put("libraryId", series.libraryId) }
 
   /**
    * `series: null` when the replica lacks it; then `reconciledAt` is null while any library of the server never had its
@@ -175,15 +185,15 @@ class CatalogReader(
     val series = db.series().get(sc, id)
     val replica = if (series != null) {
       val state = db.libraryState().get(sc, series.libraryId)
-      replica(state?.seriesReconciledAt, state?.itemsComplete ?: false)
+      replica(seriesReconciledAt(state), state?.itemsComplete ?: false)
     } else {
       val states = db.libraryState().all(sc).associateBy { it.libraryId }
       val libraries = db.libraries().all(sc).map { states[it.id] }
-      val times = libraries.map { it?.seriesReconciledAt }
+      val times = libraries.map { seriesReconciledAt(it) }
       replica(if (times.isEmpty() || times.any { it == null }) null else times.filterNotNull().min(),
               libraries.isNotEmpty() && libraries.all { it?.itemsComplete == true })
     }
-    return JSONObject().put("serverConfigId", sc).put("series", series?.let { JSONObject(it.json) } ?: JSONObject.NULL)
+    return JSONObject().put("serverConfigId", sc).put("series", series?.let { seriesJson(it) } ?: JSONObject.NULL)
             .put("replica", replica)
   }
 

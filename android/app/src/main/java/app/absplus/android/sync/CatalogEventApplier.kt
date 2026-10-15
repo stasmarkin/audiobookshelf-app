@@ -77,7 +77,7 @@ class CatalogEventApplier(
         if (missing.isNotEmpty()) {
           db.series().upsertAll(missing.map { (seriesId, name) ->
             SeriesEntity(sc, seriesId, libraryId, name, name, 0, 0,
-                    mapper.writeValueAsString(mapper.createObjectNode().put("id", seriesId).put("name", name)))
+                    mapper.writeValueAsString(mapper.createObjectNode().put("id", seriesId).put("name", name).put("libraryId", libraryId)))
           })
         }
         val before = db.series().membershipOfItem(sc, id)

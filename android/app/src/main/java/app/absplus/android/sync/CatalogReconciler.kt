@@ -316,7 +316,7 @@ class CatalogReconciler(
       val old = existing[id]
       if (old != null && old.name == name) null
       else SeriesEntity(sc, id, libraryId, name, old?.nameIgnorePrefix?.takeIf { old.name == name } ?: name, 0, 0,
-              mapper.writeValueAsString(mapper.createObjectNode().put("id", id).put("name", name)))
+              mapper.writeValueAsString(mapper.createObjectNode().put("id", id).put("name", name).put("libraryId", libraryId)))
     }
     if (hidden.isNotEmpty()) {
       db.series().upsertAll(hidden)

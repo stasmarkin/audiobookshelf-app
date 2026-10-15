@@ -341,13 +341,16 @@ class CatalogReaderTest {
   /** A case of parity/subseries.json in its own replica, and our answer to the request it describes. */
   private fun subSeriesCase(case: JsonNode, sc: String): JSONObject = runBlocking {
     db.libraries().upsertAll(listOf(library(sc, hideSingle = case.path("hideSingleBookSeries").asBoolean())))
-    db.items().upsertAll(case.path("books").mapIndexed { i, b -> itemEntity(sc, b.path("id").asText(), title = b.path("title").asText(), addedAt = i.toLong()) })
+    db.items().upsertAll(case.path("books").mapIndexed { i, b ->
+      itemEntity(sc, b.path("id").asText(), title = b.path("title").asText(), addedAt = i.toLong()).copy(authorName = b.path("author").asText(""))
+    })
     db.series().upsertAll(case.path("series").map { seriesRow(sc, it.path("id").asText(), name = it.path("name").asText()) })
     db.series().insertMembers(case.path("books").flatMap { b ->
-      b.path("series").map { member(sc, it.path("id").asText(), b.path("id").asText(), it.path("sequence").asText()) }
+      b.path("series").map { member(sc, it.path("id").asText(), b.path("id").asText(), it.path("sequence").takeIf { s -> s.isTextual }?.asText()) }
     })
     reader.onReplicaChanged()
-    reader.items(sc, ItemsRequest("lib1", null, false, "series." + FilterCodec.encode(case.path("seriesId").asText()), true, false, 100, 0))
+    val sort = case.path("sort").takeIf { it.isTextual }?.asText()
+    reader.items(sc, ItemsRequest("lib1", sort, case.path("desc").asBoolean(), "series." + FilterCodec.encode(case.path("seriesId").asText()), true, false, 100, 0))
   }
 
   private fun assertSubSeriesCases(names: (String) -> Boolean) {
@@ -362,14 +365,49 @@ class CatalogReaderTest {
       assertEquals("$name: ids", expected.path("results").map { it.path("id").asText() }, (0 until results.length()).map { results.getJSONObject(it).getString("id") })
       expected.path("results").forEachIndexed { k, want ->
         val got = CatalogJson.mapper.readTree(results.getJSONObject(k).toString())
-        assertEquals("$name: series of ${want.path("id").asText()}", want.path("series"), got.path("media").path("metadata").path("series"))
+        if (want.has("series")) assertEquals("$name: series of ${want.path("id").asText()}", want.path("series"), got.path("media").path("metadata").path("series"))
         assertEquals("$name: card of ${want.path("id").asText()}", want.path("collapsedSeries"), got.path("collapsedSeries"))
       }
     }
   }
 
   @Test
-  fun subSeriesCollapseMatchesServer() = assertSubSeriesCases { !it.contains("Повесть") }
+  fun subSeriesCollapseMatchesServer() = assertSubSeriesCases { !it.contains("Повесть") && !it.startsWith("Library") && !it.startsWith("one card") }
+
+  @Test
+  fun subSeriesFollowLibrarySorts() = assertSubSeriesCases { it.startsWith("Library") }
+
+  @Test
+  fun aFlatSeriesPageKeepsTheServersOrder() = assertSubSeriesCases { it.startsWith("one card") }
+
+  @Test
+  fun hiddenSingleBookSeriesCarriesItsLibrary() {
+    fillSeries("Мир" to "Мир")
+    // As written from filterdata before 4b: no libraryId in the JSON
+    runBlocking { db.series().upsertAll(listOf(seriesRow("srv", "s0", name = "Мир").copy(json = """{"id":"s0","name":"Мир"}"""))) }
+    reader.onReplicaChanged()
+    assertEquals("lib1", runBlocking { reader.seriesById("srv", "s0") }.getJSONObject("series").getString("libraryId"))
+    assertEquals("lib1", series().getJSONArray("results").getJSONObject(0).getString("libraryId"))
+  }
+
+  @Test
+  fun seriesReadBeforeTheBooksAreNotLoaded() {
+    fillSeries("Мир" to "Мир")
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", null, false, 70L, null, null, null, null)) }
+    assertTrue(series().getJSONObject("replica").isNull("reconciledAt"))
+    assertTrue(runBlocking { reader.seriesById("srv", "s0") }.getJSONObject("replica").isNull("reconciledAt"))
+    assertTrue(runBlocking { reader.seriesById("srv", "nope") }.getJSONObject("replica").isNull("reconciledAt"))
+  }
+
+  @Test
+  fun aSeriesAwaitingItsPointQueryIsNotLoaded() {
+    fillSeries("Мир" to "Мир", "Сага" to "Сага")
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, 70L, null, null, null, null, pendingSeriesQueries = """["s0"]""")) }
+    reader.onReplicaChanged()
+    assertTrue(items(req = request(sort = null, filter = "series." + FilterCodec.encode("s0"))).getJSONObject("replica").isNull("reconciledAt"))
+    assertEquals(60L, items(req = request(sort = null, filter = "series." + FilterCodec.encode("s1"))).getJSONObject("replica").getLong("reconciledAt"))
+    assertEquals(60L, items().getJSONObject("replica").getLong("reconciledAt"))
+  }
 
   @Test
   fun singleBookSubSeriesFollowsHideSetting() = assertSubSeriesCases { it.contains("Повесть") }

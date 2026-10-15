@@ -372,9 +372,10 @@ internal fun prepareItems(
     else -> null
   }
   if (seriesFilter && sort != "sequence") primary = primary?.then(sequenceOrder(false)) ?: sequenceOrder(false)
-  if (subSeries != null) primary = subSeriesOrder(sort, desc, primary)
+  if (subSeries != null) primary = subSeriesOrder(sort, desc)
   // Without a sort the server's order is undefined; the title keeps it stable
-  return Prepared(keyed, primary ?: nocaseOrder(false) { it.displayTitle }, sort == "random")
+  // The sub-series sort never shuffles: "random" is a key no item has
+  return Prepared(keyed, primary ?: nocaseOrder(false) { it.displayTitle }, sort == "random" && subSeries == null)
 }
 
 private fun splitsWrongly(name: String, known: Collection<String>) =
@@ -508,7 +509,7 @@ private fun collapse(
 /**
  * `handleCollapseSubseries` of a series page: books of [seriesId] that are also in another series fold into a card of
  * that series, on its first book by that series' sequence; with [hideSingle] only series with more than one book here.
- * Null when that leaves one card: the server lists the books then.
+ * When that leaves one card the server lists the books instead, in the same sort.
  */
 private fun collapseSubSeries(
         filtered: List<ItemRow>,
@@ -517,7 +518,7 @@ private fun collapseSubSeries(
         progress: Map<String, MediaProgressEntity>,
         ignorePrefix: Boolean,
         hideSingle: Boolean
-): List<Keyed>? {
+): List<Keyed> {
   val natural = naturalComparator()
   val subs = LinkedHashMap<String, MutableList<Pair<SeriesItemEntity, ItemRow>>>()
   for (row in filtered) {
@@ -543,18 +544,39 @@ private fun collapseSubSeries(
     }
     if (row.id !in inCard) keyed += Keyed(QueryEntry.Item(row.id, member), row, progress[row.id], member?.sequence, titleOf(row, ignorePrefix))
   }
-  return if (keyed.size == 1 && keyed[0].entry is QueryEntry.Collapsed) null else keyed
+  if (keyed.size == 1 && keyed[0].entry is QueryEntry.Collapsed) {
+    return filtered.map { row ->
+      val member = memberOf(row)
+      Keyed(QueryEntry.Item(row.id, member), row, progress[row.id], member?.sequence, titleOf(row, ignorePrefix))
+    }
+  }
+  return keyed
 }
 
-/** The in-memory sort of `handleCollapseSubseries`: sequence then name by default, by name, or cards last by name first. */
-private fun subSeriesOrder(sort: String?, desc: Boolean, primary: Comparator<Keyed>?): Comparator<Keyed> {
+/** `VALID_COLLAPSE_SUBSERIES_SORTS`: any other sort is dropped, which is the sequence order. */
+private val SUB_SERIES_SORTS = setOf("addedAt", "size", "birthtimeMs", "mtimeMs", "media.duration", "media.metadata.publishedYear",
+        "media.metadata.authorName", "media.metadata.authorNameLF", "media.metadata.title", "sequence", "progress",
+        "progress.createdAt", "progress.finishedAt", "random")
+
+/**
+ * The in-memory sort of `handleCollapseSubseries`, whose collator compares every key as text: sequence then name by
+ * default; by name; else cards last by name (always ascending), then the sort's key read off the server's item model,
+ * which lacks most of them ("" for addedAt, birthtimeMs, mtimeMs, publishedYear, progress and random: equal keys).
+ */
+private fun subSeriesOrder(sort: String?, desc: Boolean): Comparator<Keyed> {
   val natural = naturalComparator()
   fun directed(c: Comparator<Keyed>) = if (desc) c.reversed() else c
-  val title = directed(Comparator { a, b -> natural.compare(a.displayTitle, b.displayTitle) })
-  if (sort == null || sort == "sequence") {
-    return directed(Comparator { a, b -> natural.compare(a.sequence ?: "null", b.sequence ?: "null") }).then(title)
+  fun by(key: (Keyed) -> String) = Comparator<Keyed> { a, b -> natural.compare(key(a), key(b)) }
+  val title = directed(by { it.displayTitle })
+  val known = sort?.takeIf { it in SUB_SERIES_SORTS }
+  if (known == null || known == "sequence") return directed(by { it.sequence ?: "null" }).then(title)
+  if (known == "media.metadata.title") return title
+  val key: (Keyed) -> String = when (known) {
+    "media.metadata.authorName" -> { k -> k.row.authorName }
+    "media.metadata.authorNameLF" -> { k -> k.row.authorNameLF }
+    "size" -> { k -> k.row.size.toString() }
+    "media.duration" -> { k -> jsNumber(k.row.duration) }
+    else -> { _ -> "" }
   }
-  if (sort == "media.metadata.title") return title
-  fun cardName(k: Keyed) = if (k.entry is QueryEntry.Collapsed) k.displayTitle else ""
-  return Comparator<Keyed> { a, b -> natural.compare(cardName(a), cardName(b)) }.then(primary ?: title)
+  return by { if (it.entry is QueryEntry.Collapsed) it.displayTitle else "" }.then(directed(by(key)))
 }
