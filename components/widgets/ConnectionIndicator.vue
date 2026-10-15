@@ -31,6 +31,12 @@ export default {
     },
     iconClass() {
       return TONE_CLASS[this.model.tone]
+    },
+    /** After the server refused the session, the connect form says why and opens that server. */
+    signInRoute() {
+      const { serverState, activeServerConfigId } = this.$store.state
+      if (serverState !== 'unauthorized' || !activeServerConfigId) return '/connect'
+      return `/connect?error=refreshTokenFailed&serverConnectionConfigId=${encodeURIComponent(activeServerConfigId)}`
     }
   },
   methods: {
@@ -40,7 +46,7 @@ export default {
       const message = count ? this.$getString(labelKey, [count]) : this.$strings[labelKey]
       const confirm = async (okButtonTitle) => (await Dialog.confirm({ title, message, okButtonTitle, cancelButtonTitle: this.$strings.ButtonCancel })).value
       if (action === 'signIn') {
-        if (await confirm(this.$strings.ButtonConnectToServer)) this.$router.push('/connect')
+        if (await confirm(this.$strings.ButtonConnectToServer)) this.$router.push(this.signInRoute)
       } else if (action === 'retry') {
         if (await confirm(this.$strings.ButtonRetry)) this.$absData.retryServer()
       } else if (action === 'sync') {
