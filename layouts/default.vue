@@ -254,11 +254,13 @@ export default {
         return
       }
       this.inittingLibraries = true
+      const libraryBefore = this.currentLibraryId
       await this.$store.dispatch('libraries/load')
 
       AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
       await this.$store.dispatch('libraries/fetch', this.currentLibraryId)
-      if (notify) this.$eventBus.$emit('library-changed')
+      // load switches away from a library that was removed or became inaccessible; pages must follow it
+      if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
       this.inittingLibraries = false
     },
     async syncLocalSessions(isFirstSync) {

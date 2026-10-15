@@ -261,3 +261,19 @@ test('Authors re-reads its list when the server is reachable again', async () =>
   sandbox.component.beforeDestroy.call(view)
   assert.equal(handlers['server-reachable'], undefined)
 })
+
+test('a library removed while the server was away still switches pages to the new one', async () => {
+  for (const [switched, expected] of [
+    [true, ['library-changed', 'server-reachable']],
+    [false, ['server-reachable']]
+  ]) {
+    const l = layout({ user: { id: 'user-1' }, currentLibraryId: 'lib-1' })
+    l.view.hasMounted = true
+    l.store.dispatch = async (type) => {
+      if (type === 'libraries/load' && switched) l.store.state.libraries.currentLibraryId = 'lib-2'
+    }
+    l.watch('serverState', 'online', 'offline')
+    await flush()
+    assert.deepEqual(l.emitted, expected, `library switched by load: ${switched}`)
+  }
+})
