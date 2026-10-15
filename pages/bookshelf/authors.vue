@@ -1,7 +1,7 @@
 <template>
   <div>
+    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px">{{ $strings.MessageCatalogPartial }}</div>
     <div id="bookshelf" class="w-full h-full p-4 overflow-y-auto">
-      <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px; margin-bottom: -24px">{{ $strings.MessageCatalogPartial }}</div>
       <div v-if="catalogNotLoaded" class="w-full py-16 px-6 text-center text-lg">
         <p class="py-4">{{ $strings.MessageCatalogNotLoaded }}</p>
       </div>
