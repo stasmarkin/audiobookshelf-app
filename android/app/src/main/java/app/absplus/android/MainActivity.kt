@@ -28,6 +28,7 @@ import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.plugins.AbsAppearance
 import app.absplus.android.plugins.AbsThemeImport
 import app.absplus.android.plugins.AbsUpdater
+import app.absplus.android.plugins.AbsData
 import app.absplus.android.sync.SyncRuntime
 import com.getcapacitor.BridgeActivity
 
@@ -58,6 +59,7 @@ class MainActivity : BridgeActivity() {
     registerPlugin(AbsUpdater::class.java)
     registerPlugin(AbsAppearance::class.java)
     registerPlugin(AbsThemeImport::class.java)
+    registerPlugin(AbsData::class.java)
 
     super.onCreate(savedInstanceState)
     DLog.d(tag, "onCreate")
