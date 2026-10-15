@@ -598,7 +598,12 @@ export default {
     },
     libraryItemRemoved(libraryItem) {
       if (!this.followsSocket()) return
-      if (this.entityName === 'books' || this.entityName === 'series-books') {
+      // The Library list is loaded page by page (a sparse array): reload it rather than filter what is there
+      if (this.entityName === 'books') {
+        this.resetEntities()
+        return
+      }
+      if (this.entityName === 'series-books') {
         var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
         if (indexOf >= 0) {
           this.entities = this.entities.filter((ent) => ent.id !== libraryItem.id)

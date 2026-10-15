@@ -392,3 +392,18 @@ test('an empty never-reconciled replica does not count as a loaded list', async 
   assert.equal(s.state.lastLoad, 0)
   assert.equal(await s.actions.load.call(s.self, s.ctx), true, 'asked again without force')
 })
+
+test('a server error after a switch reads the new server, not the old replica', async () => {
+  let fail
+  const store = fakeStore()
+  const plugin = fakePlugin({
+    getLibraryItems: async () => ({ serverConfigId: store.state.activeServerConfigId, results: [{ id: `native-${store.state.activeServerConfigId}` }], total: 1, replica: replica(null) })
+  })
+  const http = { get: () => new Promise((_, reject) => (fail = reject)) }
+  const { data } = service({ plugin, store, http })
+  const read = data.getLibraryItems({ libraryId: 'l1', limit: 20, page: 0 })
+  await flush()
+  store.state.activeServerConfigId = 'b'
+  fail(new Error('502'))
+  assert.deepEqual(plain((await read).results), [{ id: 'native-b' }])
+})

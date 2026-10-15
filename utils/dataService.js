@@ -292,6 +292,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
       if (activeServer() !== server) return retry()
       return { ...shape(data), serverConfigId: server, replica: answer?.replica ?? null, fromServer: true }
     } catch (error) {
+      if (activeServer() !== server) return retry()
       console.warn('[data] Server read failed, showing the replica', error)
       return answer
     }

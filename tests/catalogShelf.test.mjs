@@ -330,3 +330,15 @@ test('a list read from the server still follows the socket', async () => {
   replica.view.libraryItemRemoved({ id: 'x' })
   assert.equal(replicaResets, 0, "the replica's own notice refreshes it")
 })
+
+test('a book removed from a server-read list reloads it', async () => {
+  const shelf = await bookshelf({ answer: { results: [{ id: 'x' }, { id: 'y' }], total: 300, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+  await shelf.view.init()
+  let resets = 0
+  shelf.view.resetEntities = () => resets++
+  shelf.view.executeRebuild = () => assert.fail('no local filtering of the sparse list')
+  shelf.view.libraryItemRemoved({ id: 'x' })
+  assert.equal(resets, 1)
+  shelf.view.libraryItemRemoved({ id: 'not-loaded' })
+  assert.equal(resets, 2, 'also a book on a page not loaded yet: the total changed')
+})
