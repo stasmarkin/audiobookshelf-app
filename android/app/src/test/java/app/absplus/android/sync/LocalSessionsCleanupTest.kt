@@ -240,6 +240,11 @@ class LocalSessionsCleanupTest {
     assertEquals("epubcfi(/6/4)", body.getString("ebookLocation"))
     assertFalse(body.has("currentTime") || body.has("progress") || body.has("duration"))
     assertNull(db.outbox().head("srv"))
+    // The server's record now carries the device's lastUpdate: the row takes its position at once, or keeps 700 for good
+    val row = db.mediaProgress().get("srv", "li1", "")!!
+    assertEquals(900.0, row.currentTime, 0.0)
+    assertEquals("epubcfi(/6/4)", row.ebookLocation)
+    assertFalse(row.pending)
   }
 
   @Test

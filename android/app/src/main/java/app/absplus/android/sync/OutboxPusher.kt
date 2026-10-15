@@ -41,9 +41,9 @@ class OutboxPusher(
   private sealed interface Step {
     /**
      * [sentProgress]: the progress row a PATCH body was built from, to detect a newer write during the request.
-     * [serverValue]: a conditional PATCH not sent because the server is ahead; merged into the row once settled.
+     * [serverAhead]: the server's record that kept the conditional fields back; the row takes them once settled.
      */
-    data class Sent(val sentProgress: MediaProgressEntity? = null, val serverValue: ServerProgress? = null) : Step
+    data class Sent(val sentProgress: MediaProgressEntity? = null, val serverAhead: ServerAhead? = null) : Step
     data class Drop(val reason: String) : Step
     data class Retry(val reason: String) : Step
     data class Stop(val reason: StopReason, val message: String) : Step
@@ -67,8 +67,7 @@ class OutboxPusher(
         }
         when (val step = send(config, row)) {
           is Step.Sent -> {
-            store.onOutboxSent(row, followUp(row, step.sentProgress))
-            step.serverValue?.let { store.applyServerProgressCandidate(config.id, it) }
+            store.onOutboxSent(row, followUp(row, step.sentProgress), step.serverAhead)
             sent++
           }
           is Step.Drop -> {
@@ -139,14 +138,14 @@ class OutboxPusher(
     if (!progress.pending) return Step.Drop("progress row is not pending")
     val path = "/api/me/progress/${segment(libraryItemId)}" + if (episodeId.isEmpty()) "" else "/${segment(episodeId)}"
     var sendFields = fields
-    var serverAhead: ServerProgress? = null
+    var serverAhead: ServerAhead? = null
     val conditional = OutboxPayload.conditionalFields(row.payload).filter { it in fields }
     if (conditional.isNotEmpty()) {
       when (val outcome = http.send(config, "GET", path)) {
         is HttpOutcome.Ok -> parseServerProgress(readTree(outcome.body))?.let { server ->
           if (server.isFinished || server.currentTime >= progress.currentTime) {
-            serverAhead = server
             sendFields = fields - conditional.toSet()
+            serverAhead = ServerAhead(server, progress.lastUpdate, sendFields)
           }
         } // An unreadable record is no reason to hold the queue: sent as before the check
         is HttpOutcome.HttpError -> when (outcome.code) {
@@ -156,7 +155,7 @@ class OutboxPusher(
         else -> return classify(outcome)
       }
     }
-    if (sendFields.isEmpty()) return Step.Sent(serverValue = serverAhead)
+    if (sendFields.isEmpty()) return Step.Sent(serverAhead = serverAhead)
     val step = classify(http.send(config, "PATCH", path, mapper.writeValueAsString(patchBody(progress, sendFields))))
     return if (step is Step.Sent) Step.Sent(progress, serverAhead) else step
   }

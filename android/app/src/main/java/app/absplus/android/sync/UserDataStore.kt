@@ -323,8 +323,12 @@ class UserDataStore(
           hideFromContinueListening = false, ebookLocation = null, ebookProgress = null, lastUpdate = now,
           startedAt = now, finishedAt = null, source = PROGRESS_SOURCE_DEVICE, pending = false)
 
-  /** [row] reached the server; [followUp] is queued in the same transaction, before `pending` is recomputed. */
-  suspend fun onOutboxSent(row: OutboxEntity, followUp: OutboxEntity? = null) = settle(row, dropped = false, followUp)
+  /**
+   * [row] reached the server; [followUp] is queued in the same transaction, before `pending` is recomputed.
+   * [serverAhead]: the server's record that kept the conditional fields of a `progress_patch` from being sent.
+   */
+  suspend fun onOutboxSent(row: OutboxEntity, followUp: OutboxEntity? = null, serverAhead: ServerAhead? = null) =
+          settle(row, dropped = false, followUp, serverAhead)
 
   /** [row] will never reach the server (rejected or unreadable); a bookmark with nothing else to send is dropped too. */
   suspend fun onOutboxDropped(row: OutboxEntity) = settle(row, dropped = true, followUp = null)
@@ -342,7 +346,8 @@ class UserDataStore(
     }
   }
 
-  private suspend fun settle(row: OutboxEntity, dropped: Boolean, followUp: OutboxEntity?) {
+  private suspend fun settle(row: OutboxEntity, dropped: Boolean, followUp: OutboxEntity?, serverAhead: ServerAhead? = null) {
+    var tookServer: MediaProgressEntity? = null
     val scope = db.withTransaction {
       outbox.delete(row.id)
       if (followUp != null) enqueue(followUp.serverConfigId, followUp.kind, followUp.itemKey, followUp.payload)
@@ -376,13 +381,34 @@ class UserDataStore(
           SCOPE_PROGRESS to libraryItemId
         }
         OutboxKind.PROGRESS_PATCH -> {
+          if (serverAhead != null) tookServer = takeServerPosition(row, serverAhead)
           setProgressPending(row.serverConfigId, row.itemKey)
           SCOPE_PROGRESS to progressKeyParts(row.itemKey).first
         }
         else -> null
       }
     }
+    tookServer?.let { mirror.mirror(listOf(it), SERVER_POSITION_FIELDS) }
     scope?.let { (name, id) -> notifier.notify(name, listOf(id)) }
+  }
+
+  /**
+   * The server's values of the fields it kept, written as they are: our PATCH of the other fields gave its record our
+   * lastUpdate, so the merge rule would keep the device's older position for good. Not over a write made since the
+   * PATCH was built (it is sent next). Must run inside a transaction.
+   */
+  private suspend fun takeServerPosition(row: OutboxEntity, ahead: ServerAhead): MediaProgressEntity? {
+    val (libraryItemId, episodeId) = progressKeyParts(row.itemKey)
+    val local = progress.get(row.serverConfigId, libraryItemId, episodeId) ?: return null
+    if (local.lastUpdate > ahead.builtFromLastUpdate) return null
+    val server = ahead.server
+    val takeFinished = server.isFinished && "isFinished" !in ahead.sentFields
+    val updated = local.copy(duration = if (server.duration > 0) server.duration else local.duration,
+            progress = server.progress, currentTime = server.currentTime,
+            isFinished = if (takeFinished) true else local.isFinished,
+            finishedAt = if (takeFinished) server.finishedAt else local.finishedAt)
+    progress.upsert(updated)
+    return updated
   }
 
   private suspend fun setProgressPending(serverConfigId: String, itemKey: String) {
@@ -439,6 +465,7 @@ class UserDataStore(
     /** The progress at which playback counts as finished, as for the Paper copy. */
     const val FINISHED_PROGRESS = 0.99
     /** A reset without the server record's id is a PATCH of these. */
+    private val SERVER_POSITION_FIELDS = listOf("duration", "progress", "currentTime", "isFinished", "finishedAt")
     val RESET_FIELDS = listOf("currentTime", "progress", "isFinished", "ebookLocation", "ebookProgress")
     private val PLAYBACK_MIRROR_FIELDS = listOf("duration", "progress", "currentTime", "isFinished", "finishedAt")
     /** How long a server snapshot is assumed to be possibly older than a settled outbox row. */

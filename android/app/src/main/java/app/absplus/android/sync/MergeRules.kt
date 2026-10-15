@@ -33,6 +33,12 @@ fun mergeBookmarks(serverConfigId: String, local: List<BookmarkEntity>, server: 
 }
 
 /** A media progress record as the server sends it; [episodeId] is null for a book. */
+/**
+ * A server record ahead of the device that kept the conditional fields of a `progress_patch` back: the row takes its
+ * values unless written after [builtFromLastUpdate]. [sentFields]: what the PATCH sent (none: nothing was sent).
+ */
+data class ServerAhead(val server: ServerProgress, val builtFromLastUpdate: Long, val sentFields: List<String>)
+
 data class ServerProgress(
         val id: String,
         val libraryItemId: String,
