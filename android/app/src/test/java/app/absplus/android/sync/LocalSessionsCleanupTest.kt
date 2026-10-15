@@ -21,6 +21,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -37,6 +38,7 @@ class LocalSessionsCleanupTest {
   private val db = inMemoryUserData()
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val api = FakeApi()
+  private var now = 1L
 
   @Before
   fun setUp() {
@@ -45,7 +47,7 @@ class LocalSessionsCleanupTest {
     app.absplus.android.managers.DbManager.localLibraryItemsChanged()
     SyncEngine.initForTest(SyncDeps(
             db = db, http = syncHttp(api), activeServer = { fakeServer() }, serverState = MutableStateFlow(ServerState.OFFLINE), onlineEntries = MutableStateFlow(0L),
-            serverId = MutableStateFlow("srv"), isForeground = { false }, clock = { 1L }, scope = scope, log = {},
+            serverId = MutableStateFlow("srv"), isForeground = { false }, clock = { now }, scope = scope, log = {},
             notifyWindowMs = 10, unsentSessionKeys = PaperProgressMirror::unsentSessionKeys, mirror = PaperProgressMirror))
   }
 
@@ -307,7 +309,12 @@ class LocalSessionsCleanupTest {
     PaperProgressMirror.mirror(listOf(row))
     settle(saved(session("a")), true, listOf(ok("a")))
 
-    // The web client deleted the record; the next reconcile does not find it
+    // A list fetched before the server took the session lacks its record
+    SyncEngine.store!!.applyServerProgress("srv", emptyList(), deleteMissing = true)
+    assertNotNull("not deleted by a list older than the session", db.mediaProgress().get("srv", "li1", ""))
+
+    // The web client deleted the record; a later reconcile does not find it
+    now += UserDataStore.RECENTLY_SETTLED_MS
     SyncEngine.store!!.applyServerProgress("srv", emptyList(), deleteMissing = true)
     assertNull(db.mediaProgress().get("srv", "li1", ""))
     assertNull("and the copy's Paper progress", DeviceManager.dbManager.getLocalMediaProgress("local_li1"))

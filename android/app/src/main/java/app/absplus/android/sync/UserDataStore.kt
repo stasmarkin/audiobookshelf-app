@@ -227,6 +227,7 @@ class UserDataStore(
                                   keep: () -> Set<String> = { emptySet() }): List<MediaProgressEntity> {
     val unsent = unsentSessionKeys(serverConfigId)
     val resets = if (deleteMissing) emptyMap() else recentResetsOf(serverConfigId)
+    val recentlyAccepted = if (deleteMissing) recentlySettledKeys(serverConfigId) else emptySet()
     val (taken, deleted) = db.withTransaction {
       val taken = mutableListOf<MediaProgressEntity>()
       val seen = HashSet<String>()
@@ -250,7 +251,7 @@ class UserDataStore(
       val deleted = if (!deleteMissing) emptyList() else progress.getAll(serverConfigId).filter { row ->
         val key = progressItemKey(row.libraryItemId, row.episodeId)
         // Only a record the server had (its id, or SERVER_RECORD_SEEN) was deleted there; a row it never saw stays local
-        key !in seen && row.serverProgressId != null && !row.pending && key !in unsent && key !in kept
+        key !in seen && row.serverProgressId != null && !row.pending && key !in unsent && key !in kept && key !in recentlyAccepted
       }
       deleted.forEach { progress.delete(it.serverConfigId, it.libraryItemId, it.episodeId) }
       taken to deleted
@@ -434,7 +435,10 @@ class UserDataStore(
    * deletes the row). Nothing without a row.
    */
   suspend fun onSessionAccepted(serverConfigId: String, libraryItemId: String, episodeId: String?) {
-    db.withTransaction { markSeenByServer(serverConfigId, progressItemKey(libraryItemId, episodeId)) }
+    val key = progressItemKey(libraryItemId, episodeId)
+    // A list fetched before the server took the session lacks the record it just made: it must not delete the row
+    markSettled(serverConfigId, key)
+    db.withTransaction { markSeenByServer(serverConfigId, key) }
   }
 
   /** The server took a PATCH of the row, so it has a record now; its id comes with the next pull. */
