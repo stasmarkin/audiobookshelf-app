@@ -14,7 +14,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
 const val ITEMS_PAGE_SIZE = 500
-const val SERIES_PAGE_SIZE = 100
+/** Small pages: a series answer carries every book of each series. */
+const val SERIES_PAGE_SIZE = 25
 
 data class CatalogResult(val libraries: Int, val failedLibraries: List<String>, val stoppedBy: HttpOutcome?)
 
@@ -91,7 +92,8 @@ class CatalogReconciler(
 
   private suspend fun reconcileLibraryList(config: ServerConnectionConfig): List<LibraryEntity> {
     val sc = config.id
-    val answer = get(config, "/api/libraries").path("libraries")
+    // Without the list nothing can be told missing: deleting on an odd answer would empty the replica
+    val answer = get(config, "/api/libraries").path("libraries").takeIf { it.isArray } ?: throw Skip("no libraries in the answer")
     val existing = db.libraries().all(sc).associateBy { it.id }
     val fresh = answer.mapIndexed { position, library ->
       val old = existing[library.path("id").asText()]
@@ -137,7 +139,12 @@ class CatalogReconciler(
   private class Walk(val consistent: Boolean, val seen: Set<String>)
 
   /** Pages until the total is reached; a moving total or a repeated id restarts once. */
-  private suspend fun walk(config: ServerConnectionConfig, what: String, path: (page: Int) -> String, onPage: suspend (JsonNode) -> Unit): Walk {
+  private suspend fun walk(
+          config: ServerConnectionConfig,
+          what: String,
+          path: (page: Int) -> String,
+          onPage: suspend (results: JsonNode, attempt: Int) -> Unit
+  ): Walk {
     var attempt = 0
     while (true) {
       val seen = HashSet<String>()
@@ -148,7 +155,7 @@ class CatalogReconciler(
         val answer = get(config, path(page))
         val results = answer.path("results")
         val pageTotal = answer.path("total").asInt(0)
-        onPage(results)
+        onPage(results, attempt)
         if (total < 0) total = pageTotal else if (pageTotal != total) {
           consistent = false
           break
@@ -170,7 +177,7 @@ class CatalogReconciler(
     val sc = config.id
     val walk = walk(config, "items of $libraryId", { page ->
       "/api/libraries/$libraryId/items?limit=$ITEMS_PAGE_SIZE&page=$page&sort=addedAt&include=rssfeed&minified=1"
-    }) { results -> writeItemsPage(sc, libraryId, results, idsByName) }
+    }) { results, _ -> writeItemsPage(sc, libraryId, results, idsByName) }
     val now = clock()
     if (walk.consistent) {
       val missing = db.items().ids(sc, libraryId).filter { it !in walk.seen }
@@ -200,23 +207,30 @@ class CatalogReconciler(
     }
     if (changed.isEmpty()) return
     db.withTransaction {
-      db.items().upsertAll(changed)
-      if (idsByName != null) {
-        val state = db.libraryState().get(sc, libraryId) ?: emptyLibraryState(sc, libraryId)
-        val pending = pendingOf(state).toMutableSet()
-        for (item in changed) {
-          when (val parse = CatalogJson.parseSeriesName(item.seriesName, idsByName)) {
-            is SeriesNameParse.Parsed -> db.series().replaceMembershipOfItem(sc, item.id,
+      if (idsByName == null) {
+        db.items().upsertAll(changed)
+        return@withTransaction
+      }
+      val state = db.libraryState().get(sc, libraryId) ?: emptyLibraryState(sc, libraryId)
+      val pending = pendingOf(state).toMutableSet()
+      val rows = changed.map { item ->
+        when (val parse = CatalogJson.parseSeriesName(item.seriesName, idsByName)) {
+          is SeriesNameParse.Parsed -> {
+            db.series().replaceMembershipOfItem(sc, item.id,
                     parse.members.map { (seriesId, sequence) -> SeriesItemEntity(sc, seriesId, item.id, sequence) })
-            is SeriesNameParse.Ambiguous -> {
-              pending += parse.candidateSeriesIds
-              // The book may have left a series that is not among the candidates
-              pending += db.series().membershipOfItem(sc, item.id).map { it.seriesId }
-            }
+            item
+          }
+          is SeriesNameParse.Ambiguous -> {
+            pending += parse.candidateSeriesIds
+            // The book may have left a series that is not among the candidates
+            pending += db.series().membershipOfItem(sc, item.id).map { it.seriesId }
+            // A series no list knew yet (created after the filterdata): no hash, so the next pass reads it again
+            if (parse.candidateSeriesIds.isEmpty()) item.copy(contentHash = "") else item
           }
         }
-        if (pending != pendingOf(state)) db.libraryState().upsert(state.copy(pendingSeriesQueries = pendingJson(pending)))
       }
+      db.items().upsertAll(rows)
+      if (pending != pendingOf(state)) db.libraryState().upsert(state.copy(pendingSeriesQueries = pendingJson(pending)))
     }
     onReplicaChanged()
     notify(listOf("items:$libraryId"))
@@ -238,11 +252,19 @@ class CatalogReconciler(
     var count = 0
     for (seriesId in pending) {
       val members = ArrayList<SeriesItemEntity>()
-      walk(config, "series $seriesId", { page ->
+      var membersOf = 0
+      val walk = walk(config, "series $seriesId", { page ->
         "/api/libraries/$libraryId/items?filter=series.${FilterCodec.encode(seriesId)}&limit=$ITEMS_PAGE_SIZE&page=$page&minified=1"
-      }) { results ->
+      }) { results, attempt ->
+        // A walk started again collects anew: pages of the abandoned one may be out of date
+        if (attempt != membersOf) {
+          members.clear()
+          membersOf = attempt
+        }
         results.forEach { item -> members += CatalogJson.seriesMembershipOf(sc, item).filter { it.seriesId == seriesId } }
       }
+      // An unstable answer keeps the old membership and the query for the next pass
+      if (!walk.consistent) continue
       db.withTransaction {
         db.series().replaceMembersOfSeries(sc, seriesId, members.distinctBy { it.libraryItemId })
         updateState(sc, libraryId) { it.copy(pendingSeriesQueries = pendingJson(pendingOf(it) - seriesId)) }
@@ -260,7 +282,7 @@ class CatalogReconciler(
     var changed = false
     val walk = walk(config, "series of $libraryId", { page ->
       "/api/libraries/$libraryId/series?limit=$SERIES_PAGE_SIZE&page=$page&sort=addedAt"
-    }) { results ->
+    }) { results, _ ->
       val rows = results.map { CatalogJson.seriesEntity(sc, it) }
               .map { if (it.libraryId.isEmpty()) it.copy(libraryId = libraryId) else it }
               .filter { it != existing[it.id] }

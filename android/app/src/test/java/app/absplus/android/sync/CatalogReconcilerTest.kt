@@ -76,6 +76,7 @@ class CatalogReconcilerTest {
     val pages = itemRequests()
     assertEquals(3, pages.size)
     pages.forEachIndexed { i, r -> assertEquals("limit=500&page=$i&sort=addedAt&include=rssfeed&minified=1", r.query) }
+    assertTrue("series pages are small", api.requests.filter { it.path.endsWith("/series") }.all { it.query!!.startsWith("limit=25&") })
     assertTrue(topics.containsAll(listOf("libraries", "library:lib1", "items:lib1", "series:lib1", "state:lib1", "items:lib2")))
   }
 
@@ -347,5 +348,86 @@ class CatalogReconcilerTest {
 
     assertEquals(20, itemRequests().size)
     assertEquals(10_000, ids().size)
+  }
+
+  /** Series «A», «A, B», «B»; book b1 is «A, B #1», so all three are asked from the server. */
+  private fun ambiguousLibrary(): FakeBook {
+    server.library("lib1")
+    server.series("a", "A")
+    server.series("ab", "A, B")
+    server.series("b", "B")
+    return server.book("b1", series = listOf("ab" to "1"))
+  }
+
+  private val abFilter = "series.${FilterCodec.encode("ab")}"
+
+  @Test
+  fun pointQueryRestartKeepsOnlyTheSecondWalk() {
+    val book = ambiguousLibrary()
+    server.onItemsPage = { p ->
+      if (p.filter == abFilter) when (p.call) {
+        // The first walk sees a stale sequence and a total that then moves
+        0 -> {
+          book.series = listOf("ab" to "9")
+          p.total = 5
+        }
+        1 -> {
+          book.series = listOf("ab" to "1")
+          p.total = 1
+        }
+      }
+    }
+
+    reconcile()
+
+    assertEquals(setOf("ab" to "1"), membership("b1"))
+    assertEquals("[]", state("lib1")!!.pendingSeriesQueries)
+  }
+
+  @Test
+  fun unstablePointQueryKeepsMembershipAndPending() {
+    ambiguousLibrary()
+    reconcile()
+    assertEquals(setOf("ab" to "1"), membership("b1"))
+    runBlocking { db.libraryState().upsert(state("lib1")!!.copy(pendingSeriesQueries = "[\"ab\"]")) }
+    server.onItemsPage = { p -> if (p.filter == abFilter) p.total = 7 + p.call }
+
+    reconcile()
+
+    assertEquals("the old membership stays", setOf("ab" to "1"), membership("b1"))
+    assertTrue(state("lib1")!!.pendingSeriesQueries.contains("\"ab\""))
+  }
+
+  @Test
+  fun libraryListWithoutLibrariesDeletesNothing() {
+    server.library("lib1")
+    server.book("b1")
+    reconcile()
+    val handler = api.handler
+    api.handler = { r -> if (r.path == "/api/libraries") 200 to "{}" else handler(r) }
+
+    reconcile()
+
+    assertEquals(listOf("lib1"), runBlocking { db.libraries().all("srv") }.map { it.id })
+    assertEquals(setOf("b1"), ids())
+  }
+
+  @Test
+  fun seriesUnknownToTheListsIsReadAgainNextPass() {
+    server.library("lib1")
+    val book = server.book("b1")
+    // Created on the server after the series list and filterdata of this pass were read
+    server.onItemsPage = { p ->
+      if (p.filter == null && "new" !in server.series) {
+        server.series("new", "New")
+        book.series = listOf("new" to "1")
+      }
+    }
+    reconcile()
+    assertTrue(membership("b1").isEmpty())
+
+    reconcile()
+
+    assertEquals(setOf("new" to "1"), membership("b1"))
   }
 }
