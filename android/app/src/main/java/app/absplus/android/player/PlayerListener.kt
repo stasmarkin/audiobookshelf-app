@@ -29,7 +29,7 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
 
   override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
     // Pauses that bypass the service's pause() (focus loss, audio becoming noisy, a controller on the player itself)
-    if (!playWhenReady) playerNotificationService.onPauseRequested()
+    if (!playWhenReady) playerNotificationService.onPlayWhenReadyOff()
   }
 
   override fun onPositionDiscontinuity(

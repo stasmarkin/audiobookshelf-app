@@ -164,6 +164,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var lastStreamError = ""
   // Only the latest start that waits on something prepares the player
   private val startGate = StartGate()
+  private val pauseOrigin = PauseOrigin()
 
   private var isAndroidAuto = false
 
@@ -917,7 +918,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       return
     }
     DLog.w(tag, "Stream of $libraryItemId lost its server at ${position}s (playWhenReady=$wasPlaying) - waiting for the server")
+    // This pause is not the user's: its event, delivered after the wait is set, must not cancel the intent to play
+    pauseOrigin.beforeSelfPause(currentPlayer.playWhenReady)
     currentPlayer.pause()
+    mainHandler.post { pauseOrigin.settle() }
     // Saves the position to media_progress, and unsent listening time to its offline segment
     if (mediaProgressSyncer.listeningTimerRunning) mediaProgressSyncer.pause {}
     PlayerListener.lazyIsPlaying = false
@@ -960,6 +964,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private fun streamPermission(): StreamPermission {
     val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
     return StreamPermission(metered, deviceSettings.streamingUsingCellular)
+  }
+
+  /** The player's playWhenReady went false: a pause from outside unless the service made it itself. */
+  fun onPlayWhenReadyOff() {
+    if (pauseOrigin.isUserPause()) onPauseRequested()
   }
 
   /** Any pause: the app, a headset, the notification, audio becoming noisy, focus loss. */
