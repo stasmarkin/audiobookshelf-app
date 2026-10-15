@@ -422,7 +422,7 @@ export default {
       const startWhenReady = !payload.paused
 
       // Native plays a downloaded copy of a server id too; only a stream needs the cellular permission
-      const source = await this.resolvePlaybackSource(libraryItemId, episodeId, payload.ino)
+      const source = await this.resolvePlaybackSource(libraryItemId, episodeId, payload.ino, payload.expectedTracks)
       if (source === 'stream') {
         const hasPermission = await this.checkCellularPermission('streaming')
         if (!hasPermission) {
@@ -476,6 +476,7 @@ export default {
       console.log('Called playLibraryItem', libraryItemId)
       const preparePayload = { libraryItemId, episodeId, playWhenReady: startWhenReady, playbackRate }
       if (payload.ino) preparePayload.ino = payload.ino
+      if (payload.expectedTracks) preparePayload.expectedTracks = payload.expectedTracks
       if (startTime !== undefined && startTime !== null) preparePayload.startTime = startTime
       return AbsAudioPlayer.prepareLibraryItem(preparePayload)
         .then((data) => {
@@ -504,9 +505,11 @@ export default {
       return this.$store.state.activeServerConfigId || this.$store.getters['user/getServerConnectionConfigId'] || null
     },
     /** 'local', 'stream' or 'broken' as native would play it; without an answer the id decides, as before. */
-    async resolvePlaybackSource(libraryItemId, episodeId, ino) {
+    async resolvePlaybackSource(libraryItemId, episodeId, ino, expectedTracks) {
       try {
-        const { source } = await AbsAudioPlayer.resolvePlaybackSource({ libraryItemId, episodeId: episodeId || null, ino: ino || null })
+        const request = { libraryItemId, episodeId: episodeId || null, ino: ino || null }
+        if (expectedTracks) request.expectedTracks = expectedTracks
+        const { source } = await AbsAudioPlayer.resolvePlaybackSource(request)
         if (source) return source
       } catch (error) {
         console.error('[AudioPlayerContainer] Failed to resolve the playback source', error)

@@ -1,5 +1,8 @@
 package app.absplus.android.player
 
+import app.absplus.android.data.AudioTrack
+import app.absplus.android.data.Book
+import app.absplus.android.data.BookMetadata
 import app.absplus.android.data.DeviceInfo
 import app.absplus.android.data.LibraryItem
 import app.absplus.android.data.LocalLibraryItem
@@ -23,6 +26,13 @@ class PlaybackSourceResolverTest {
     mutableListOf(), null, null, true, config, null, null, serverId, ino
   )
 
+  private fun bookWithTracks(id: String, serverId: String, tracks: Int, config: String = "a") = LocalLibraryItem(
+    id, "internal-book", "", "", "", false, "book",
+    Book(BookMetadata("Book", null, null, null, mutableListOf(), null, null, null, null, null, null, null, false, null, null, null, null, null),
+      null, emptyList(), null, null, (0 until tracks).map { AudioTrack(it, 0.0, 1.0, "t$it", "", null, null, true, null, null) }.toMutableList(), null, null, null, tracks),
+    mutableListOf(), null, null, true, config, null, null, serverId, null
+  )
+
   private fun episode(id: String, serverEpisodeId: String?) =
     PodcastEpisode(id, 0, null, null, "Episode", null, null, null, null, null, null, null, null, null, serverEpisodeId, null)
 
@@ -33,7 +43,7 @@ class PlaybackSourceResolverTest {
   )
 
   private fun resolver(vararg items: LocalLibraryItem, broken: Set<String> = emptySet()) =
-    PlaybackSourceResolver({ items.toList() }) { item, _ -> item.id !in broken }
+    PlaybackSourceResolver({ items.toList() }, { id -> items.find { it.id == id } }) { item, _ -> item.id !in broken }
 
   @Test fun downloadedBookIsAlwaysLocal() {
     val copy = book("local_1", "li1")
@@ -118,6 +128,27 @@ class PlaybackSourceResolverTest {
     assertEquals("42", request.ino)
     assertSame(copy, (planStart(request, "a", resolver(copy)) as PlaybackSource.Local).item)
     assertEquals("local_1", StartRequest.forWrapper(copy, null, playWhenReady = true, playbackRate = 1f).libraryItemId)
+  }
+
+  @Test fun partialCopyStreams() {
+    val partial = bookWithTracks("local_1", "li1", tracks = 2)
+    assertEquals(PlaybackSource.Stream("li1", null), resolver(partial).resolve("a", "li1", null, expectedTracks = 3))
+    assertSame(partial, (resolver(partial).resolve("a", "li1", null, expectedTracks = 2) as PlaybackSource.Local).item)
+    // Without the server's count the copy plays, as before
+    assertSame(partial, (resolver(partial).resolve("a", "li1", null) as PlaybackSource.Local).item)
+    // A device id is played as it is
+    assertSame(partial, (resolver(partial).resolve("a", "local_1", null, expectedTracks = 3) as PlaybackSource.Local).item)
+    // The queue carries the count
+    val queued = StartRequest.forQueueItem(PlayerNotificationService.PlaylistQueueItem("li1", null, expectedTracks = 3), true)
+    assertEquals(PlaybackSource.Stream("li1", null), planStart(queued, "a", resolver(partial)))
+  }
+
+  // A cast device streams from the active server only: another server's copy stays a file (the UI warns about casting)
+  @Test fun castOfAnotherServersCopyStaysLocal() {
+    val foreign = book("local_f", "liF", config = "b")
+    assertSame(foreign, (planStart(StartRequest("local_f", null, playWhenReady = true, forceStream = true), "a", resolver(foreign)) as PlaybackSource.Local).item)
+    val own = book("local_1", "li1", config = "a")
+    assertEquals(PlaybackSource.Stream("li1", null), planStart(StartRequest("local_1", null, playWhenReady = true, forceStream = true), "a", resolver(own)))
   }
 
   private fun row(currentTime: Double, lastUpdate: Long, isFinished: Boolean = false) = MediaProgressEntity(

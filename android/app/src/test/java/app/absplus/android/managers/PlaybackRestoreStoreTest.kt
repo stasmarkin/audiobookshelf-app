@@ -121,7 +121,7 @@ class PlaybackRestoreStoreTest {
 
   @Test
   fun queueWithInoMatchesRestoredLocalCopy() {
-    val queue = listOf(PlaylistQueueItem("li0", null), PlaylistQueueItem("liA", null, "42", "a"))
+    val queue = listOf(PlaylistQueueItem("li0", null), PlaylistQueueItem("liA", null, "42", "a", expectedTracks = 3))
     PlaybackRestoreStore.saveQueue(ctx, queue, 1)
     val loaded = PlaybackRestoreStore.loadQueue(ctx)
     assertEquals(queue, loaded.items)

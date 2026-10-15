@@ -1,5 +1,6 @@
 package app.absplus.android.player
 
+import app.absplus.android.data.StreamingUsingCellularSetting
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import app.absplus.android.sync.LocalCopyReady
 import app.absplus.android.sync.ServerState
@@ -38,7 +39,14 @@ sealed interface AwaitingAction {
   ) : AwaitingAction
 
   /** The item finished downloading: play the copy from [position] (null: where media_progress has it). */
-  data class SwitchToLocal(val libraryItemId: String, val episodeId: String?, val position: Double?, val playWhenReady: Boolean) : AwaitingAction
+  data class SwitchToLocal(
+          val libraryItemId: String,
+          val episodeId: String?,
+          val position: Double?,
+          val playWhenReady: Boolean,
+          /** The stream still plays: its position is read again just before the file replaces it. */
+          val fromPlayer: Boolean = false
+  ) : AwaitingAction
 
   /** Resuming keeps failing although the server answers: stop as for any playback error. */
   object GiveUp : AwaitingAction
@@ -54,12 +62,19 @@ data class CurrentStream(
         val isCast: Boolean
 )
 
+/** Whether a resumed stream may play now: on a metered network the user's cellular streaming setting decides. */
+data class StreamPermission(val metered: Boolean, val cellular: StreamingUsingCellularSetting) {
+  companion object {
+    val UNMETERED = StreamPermission(false, StreamingUsingCellularSetting.ALWAYS)
+  }
+}
+
 /**
  * "Waiting for the server": a stream that lost its server, or a queue that reached an item it can only stream while the
  * server is away. Decides when to start again; never touches the player. Not thread-safe: the service calls it on the
  * main thread. An action is handed out once and ends the wait.
  */
-class AwaitingServer {
+class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) {
   private sealed interface Wait {
     val serverConfigId: String
     val playWhenReady: Boolean
@@ -76,11 +91,16 @@ class AwaitingServer {
   private data class Blocked(val item: PlaylistQueueItem, override val serverConfigId: String, override val playWhenReady: Boolean) : Wait
 
   private var wait: Wait? = null
+  // When the wait began; a resume that failed continues the same wait
+  private var waitingSince = 0L
   // A ResumeStream is out and the player has not been ready since
   private var resumeInFlight = false
   private var failedResumes = 0
 
   val isAwaiting: Boolean get() = wait != null
+
+  /** A lost stream waits (the player holds a dead stream), rather than a queue stopped before its next item. */
+  val isStreamLost: Boolean get() = wait is Lost
 
   /** The server the wait is for. */
   val serverConfigId: String? get() = wait?.serverConfigId
@@ -89,15 +109,31 @@ class AwaitingServer {
   val blockedItem: PlaylistQueueItem? get() = (wait as? Blocked)?.item
 
   /** Waits for the stream's server; GiveUp when this is the third resume in a row that failed. */
-  fun onStreamLost(libraryItemId: String, episodeId: String?, position: Double, wasPlaying: Boolean, serverConfigId: String): AwaitingAction? {
-    if (countFailedResume()) return AwaitingAction.GiveUp
-    wait = Lost(libraryItemId, episodeId, position, wasPlaying, serverConfigId)
-    return null
+  fun onStreamLost(libraryItemId: String, episodeId: String?, position: Double, wasPlaying: Boolean, serverConfigId: String): AwaitingAction? =
+          startWait(Lost(libraryItemId, episodeId, position, wasPlaying, serverConfigId))
+
+  fun onQueueBlocked(item: PlaylistQueueItem, serverConfigId: String, playWhenReady: Boolean = true): AwaitingAction? =
+          startWait(Blocked(item, serverConfigId, playWhenReady))
+
+  /**
+   * The play request of [resume] failed. The server answers but refuses: give up at once. It is away again: wait as
+   * before (a failed resume; the third in a row gives up).
+   */
+  fun onResumeFailed(resume: AwaitingAction.ResumeStream, state: ServerState): AwaitingAction? {
+    if (state == ServerState.ONLINE) {
+      cancel(CancelReason.CLOSED)
+      return AwaitingAction.GiveUp
+    }
+    val again = resume.queueItem?.let { Blocked(it, resume.serverConfigId, resume.playWhenReady) }
+            ?: Lost(resume.libraryItemId, resume.episodeId, resume.position ?: 0.0, resume.playWhenReady, resume.serverConfigId)
+    return startWait(again)
   }
 
-  fun onQueueBlocked(item: PlaylistQueueItem, serverConfigId: String, playWhenReady: Boolean = true): AwaitingAction? {
+  private fun startWait(next: Wait): AwaitingAction? {
+    val continuing = resumeInFlight
     if (countFailedResume()) return AwaitingAction.GiveUp
-    wait = Blocked(item, serverConfigId, playWhenReady)
+    if (!continuing) waitingSince = clock()
+    wait = next
     return null
   }
 
@@ -114,22 +150,31 @@ class AwaitingServer {
   }
 
   /** The user wants to play: now when the server is online, otherwise when it comes back (the service asks for a probe). */
-  fun onUserPlay(state: ServerState, activeServerConfigId: String?): AwaitingAction? {
+  fun onUserPlay(state: ServerState, activeServerConfigId: String?, permission: StreamPermission = StreamPermission.UNMETERED): AwaitingAction? {
     wait = when (val w = wait ?: return null) {
       is Lost -> w.copy(playWhenReady = true)
       is Blocked -> w.copy(playWhenReady = true)
     }
-    return onServerState(state, activeServerConfigId)
+    return resumeIfOnline(state, activeServerConfigId, permission, byUser = true)
   }
 
-  fun onServerState(state: ServerState, activeServerConfigId: String?): AwaitingAction? {
+  fun onServerState(state: ServerState, activeServerConfigId: String?, permission: StreamPermission = StreamPermission.UNMETERED): AwaitingAction? =
+          resumeIfOnline(state, activeServerConfigId, permission, byUser = false)
+
+  private fun resumeIfOnline(state: ServerState, activeServerConfigId: String?, permission: StreamPermission, byUser: Boolean): AwaitingAction? {
     val w = wait ?: return null
     if (state != ServerState.ONLINE || activeServerConfigId != w.serverConfigId) return null
+    // Never streams on cellular against the setting, as a restore does not: waits for an unmetered network
+    if (permission.metered && permission.cellular == StreamingUsingCellularSetting.NEVER) return null
+    // Asking is the app's dialog, and a long wait may have outlived the listener: continue, but paused
+    val confirmed = !(permission.metered && permission.cellular == StreamingUsingCellularSetting.ASK)
+    val fresh = byUser || clock() - waitingSince <= STALE_WAIT_MS
+    val playWhenReady = w.playWhenReady && confirmed && fresh
     wait = null
     resumeInFlight = true
     return when (w) {
-      is Lost -> AwaitingAction.ResumeStream(w.libraryItemId, w.episodeId, w.position, w.playWhenReady, w.serverConfigId)
-      is Blocked -> AwaitingAction.ResumeStream(w.item.libraryItemId, w.item.episodeId, null, w.playWhenReady, w.serverConfigId, w.item)
+      is Lost -> AwaitingAction.ResumeStream(w.libraryItemId, w.episodeId, w.position, playWhenReady, w.serverConfigId)
+      is Blocked -> AwaitingAction.ResumeStream(w.item.libraryItemId, w.item.episodeId, null, playWhenReady, w.serverConfigId, w.item)
     }
   }
 
@@ -151,7 +196,7 @@ class AwaitingServer {
       return action
     }
     if (wait != null || current == null || !same(current.libraryItemId, current.episodeId, current.serverConfigId)) return null
-    return AwaitingAction.SwitchToLocal(current.libraryItemId, current.episodeId, current.position, current.playWhenReady)
+    return AwaitingAction.SwitchToLocal(current.libraryItemId, current.episodeId, current.position, current.playWhenReady, fromPlayer = true)
   }
 
   fun onPlaybackReady() {
@@ -176,5 +221,6 @@ class AwaitingServer {
 
   private companion object {
     const val MAX_FAILED_RESUMES = 3
+    const val STALE_WAIT_MS = 30 * 60_000L
   }
 }

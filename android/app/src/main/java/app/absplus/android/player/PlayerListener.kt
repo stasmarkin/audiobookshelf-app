@@ -27,6 +27,11 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
     playerNotificationService.handlePlayerPlaybackError(error)
   }
 
+  override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+    // Pauses that bypass the service's pause() (focus loss, audio becoming noisy, a controller on the player itself)
+    if (!playWhenReady) playerNotificationService.onPauseRequested()
+  }
+
   override fun onPositionDiscontinuity(
     oldPosition: Player.PositionInfo,
     newPosition: Player.PositionInfo,

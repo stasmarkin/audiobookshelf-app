@@ -59,9 +59,10 @@ function container(native, { casting = false, confirm = true } = {}) {
 test('startLibraryItem sends the id as before and checks cellular only when native streams', async () => {
   // A server id of a downloaded book: native plays the copy, so no cellular prompt
   const downloaded = container({ resolvePlaybackSource: async () => ({ source: 'local' }) })
-  await downloaded.ctx.startLibraryItem({ libraryItemId: 'li1', ino: '42' })
+  await downloaded.ctx.startLibraryItem({ libraryItemId: 'li1', ino: '42', expectedTracks: 3 })
   assert.equal(downloaded.calls.cellular, 0)
-  assert.deepEqual(JSON.parse(JSON.stringify(downloaded.calls.resolved)), [{ libraryItemId: 'li1', episodeId: null, ino: '42' }])
+  assert.deepEqual(JSON.parse(JSON.stringify(downloaded.calls.resolved)), [{ libraryItemId: 'li1', episodeId: null, ino: '42', expectedTracks: 3 }])
+  assert.equal(downloaded.calls.prepared[0].expectedTracks, 3)
   assert.equal(downloaded.calls.prepared[0].libraryItemId, 'li1')
   assert.equal(downloaded.calls.prepared[0].ino, '42')
 

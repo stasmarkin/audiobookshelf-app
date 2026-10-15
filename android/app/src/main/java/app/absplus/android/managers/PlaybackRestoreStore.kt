@@ -39,7 +39,8 @@ object PlaybackRestoreStore {
               .put("libraryItemId", it.libraryItemId)
               .put("episodeId", it.episodeId ?: JSONObject.NULL)
               .put("ino", it.ino ?: JSONObject.NULL)
-              .put("serverConnectionConfigId", it.serverConnectionConfigId ?: JSONObject.NULL))
+              .put("serverConnectionConfigId", it.serverConnectionConfigId ?: JSONObject.NULL)
+              .put("expectedTracks", it.expectedTracks ?: JSONObject.NULL))
     }
     prefs(ctx).edit().putString(KEY_QUEUE, arr.toString()).putInt(KEY_QUEUE_INDEX, index).apply()
   }
@@ -58,9 +59,9 @@ object PlaybackRestoreStore {
       val arr = JSONArray(prefs(ctx).getString(KEY_QUEUE, null) ?: "[]")
       val items = (0 until arr.length()).map {
         val o = arr.getJSONObject(it)
-        // ino and serverConnectionConfigId are absent in queues saved by older versions
+        // ino, serverConnectionConfigId and expectedTracks are absent in queues saved by older versions
         PlaylistQueueItem(o.getString("libraryItemId"), o.optStringOrNull("episodeId"), o.optStringOrNull("ino"),
-                o.optStringOrNull("serverConnectionConfigId"))
+                o.optStringOrNull("serverConnectionConfigId"), if (o.isNull("expectedTracks")) null else o.getInt("expectedTracks"))
       }
       SavedQueue(items, prefs(ctx).getInt(KEY_QUEUE_INDEX, -1))
     } catch (e: Exception) {

@@ -3,6 +3,7 @@ package app.absplus.android.player
 import android.net.Uri
 import app.absplus.android.player.AwaitingAction.ResumeStream
 import app.absplus.android.player.AwaitingAction.SwitchToLocal
+import app.absplus.android.data.StreamingUsingCellularSetting
 import app.absplus.android.sync.LocalCopyReady
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import app.absplus.android.sync.ServerState
@@ -145,14 +146,14 @@ class AwaitingServerTest {
   @Test fun localCopyOfCurrentStreamSwitchesAtSamePosition() {
     val streaming = CurrentStream("li1", null, "a", 600.0, playWhenReady = true, isCast = false)
     val waiting = AwaitingServer()
-    assertEquals(SwitchToLocal("li1", null, 600.0, true), waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), streaming))
+    assertEquals(SwitchToLocal("li1", null, 600.0, true, fromPlayer = true), waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), streaming))
     assertNull("another item", waiting.onLocalCopyReady(LocalCopyReady("a", "li2", null), streaming))
     assertNull("another server", waiting.onLocalCopyReady(LocalCopyReady("b", "li1", null), streaming))
     assertNull("a cast device cannot play the file", waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), streaming.copy(isCast = true)))
     assertNull("nothing streams", waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), null))
     // An episode by its server episode id
     val episode = CurrentStream("p", "e1", "a", 42.0, playWhenReady = false, isCast = false)
-    assertEquals(SwitchToLocal("p", "e1", 42.0, false), waiting.onLocalCopyReady(LocalCopyReady("a", "p", "e1"), episode))
+    assertEquals(SwitchToLocal("p", "e1", 42.0, false, fromPlayer = true), waiting.onLocalCopyReady(LocalCopyReady("a", "p", "e1"), episode))
     assertNull(waiting.onLocalCopyReady(LocalCopyReady("a", "p", "e2"), episode))
   }
 
@@ -171,5 +172,72 @@ class AwaitingServerTest {
     assertTrue(blocked.isAwaiting)
     assertEquals(SwitchToLocal("li2", null, null, true), blocked.onLocalCopyReady(LocalCopyReady("a", "li2", null), null))
     assertFalse(blocked.isAwaiting)
+  }
+
+  private val metered = { setting: StreamingUsingCellularSetting -> StreamPermission(metered = true, cellular = setting) }
+
+  @Test fun resumeFailedWhileOnlineGivesUp() {
+    val waiting = AwaitingServer()
+    waiting.onStreamLost("li1", null, 50.0, true, "a")
+    val resume = waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream
+    // The server answers but refuses the play request: nothing to wait for
+    assertEquals(AwaitingAction.GiveUp, waiting.onResumeFailed(resume, ServerState.ONLINE))
+    assertFalse(waiting.isAwaiting)
+
+    val away = AwaitingServer()
+    away.onStreamLost("li1", null, 50.0, true, "a")
+    val again = away.onServerState(ServerState.ONLINE, "a") as ResumeStream
+    assertNull(away.onResumeFailed(again, ServerState.OFFLINE))
+    assertTrue("gone again: waits at the same position", away.isAwaiting)
+    assertEquals(ResumeStream("li1", null, 50.0, true, "a"), away.onServerState(ServerState.ONLINE, "a"))
+  }
+
+  @Test fun cellularNeverKeepsWaitingUntilUnmetered() {
+    val waiting = AwaitingServer()
+    waiting.onStreamLost("li1", null, 50.0, true, "a")
+    assertNull(waiting.onServerState(ServerState.ONLINE, "a", metered(StreamingUsingCellularSetting.NEVER)))
+    assertNull("a Play does not stream either", waiting.onUserPlay(ServerState.ONLINE, "a", metered(StreamingUsingCellularSetting.NEVER)))
+    assertTrue(waiting.isAwaiting)
+    assertEquals(ResumeStream("li1", null, 50.0, true, "a"), waiting.onServerState(ServerState.ONLINE, "a", StreamPermission.UNMETERED))
+  }
+
+  @Test fun cellularAskResumesPaused() {
+    val waiting = AwaitingServer()
+    waiting.onStreamLost("li1", null, 50.0, true, "a")
+    assertEquals(false, (waiting.onServerState(ServerState.ONLINE, "a", metered(StreamingUsingCellularSetting.ASK)) as ResumeStream).playWhenReady)
+    val always = AwaitingServer()
+    always.onQueueBlocked(PlaylistQueueItem("li2", null), "a")
+    assertEquals(true, (always.onServerState(ServerState.ONLINE, "a", metered(StreamingUsingCellularSetting.ALWAYS)) as ResumeStream).playWhenReady)
+  }
+
+  @Test fun longWaitResumesPaused() {
+    var now = 0L
+    val waiting = AwaitingServer { now }
+    waiting.onStreamLost("li1", null, 50.0, true, "a")
+    now = 31 * 60_000L
+    assertEquals(false, (waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream).playWhenReady)
+    // An explicit Play after a long wait plays
+    val user = AwaitingServer { now }
+    now = 0L
+    user.onStreamLost("li1", null, 50.0, true, "a")
+    now = 31 * 60_000L
+    assertEquals(true, (user.onUserPlay(ServerState.ONLINE, "a") as ResumeStream).playWhenReady)
+    // A failed resume does not restart the clock
+    val flapping = AwaitingServer { now }
+    now = 0L
+    flapping.onStreamLost("li1", null, 50.0, true, "a")
+    now = 20 * 60_000L
+    flapping.onResumeFailed(flapping.onServerState(ServerState.ONLINE, "a") as ResumeStream, ServerState.OFFLINE)
+    now = 31 * 60_000L
+    assertEquals(false, (flapping.onServerState(ServerState.ONLINE, "a") as ResumeStream).playWhenReady)
+  }
+
+  @Test fun lostStreamAndBlockedQueueAreTold() {
+    val lost = AwaitingServer()
+    lost.onStreamLost("li1", null, 50.0, true, "a")
+    assertTrue(lost.isStreamLost)
+    val blocked = AwaitingServer()
+    blocked.onQueueBlocked(PlaylistQueueItem("li2", null), "a")
+    assertFalse(blocked.isStreamLost)
   }
 }

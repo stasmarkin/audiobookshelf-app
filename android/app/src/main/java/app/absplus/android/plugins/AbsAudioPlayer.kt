@@ -268,6 +268,7 @@ class AbsAudioPlayer : Plugin() {
     val playbackRate = call.getFloat("playbackRate",1f) ?: 1f
     val startTimeOverride = call.getDouble("startTime")
     val forceStream = call.getBoolean("forceStream") == true
+    val expectedTracks = call.getInt("expectedTracks")?.takeIf { it > 0 }
 
     AbsLogger.info("AbsAudioPlayer", "prepareLibraryItem: lid=$libraryItemId, startTimeOverride=$startTimeOverride, playbackRate=$playbackRate, forceStream=$forceStream")
 
@@ -277,7 +278,7 @@ class AbsAudioPlayer : Plugin() {
     }
 
     val request = StartRequest(libraryItemId, episodeId.ifEmpty { null }, ino, startTime = startTimeOverride,
-            playWhenReady = playWhenReady, playbackRate = playbackRate, forceStream = forceStream)
+            playWhenReady = playWhenReady, playbackRate = playbackRate, forceStream = forceStream, expectedTracks = expectedTracks)
     Handler(Looper.getMainLooper()).post {
       // Must always resolve - an unresolved call leaves AudioPlayerContainer.vue's preparingPlayback guard stuck true,
       // permanently blocking all further playback.
@@ -300,17 +301,19 @@ class AbsAudioPlayer : Plugin() {
     val libraryItemId = call.getString("libraryItemId", "").toString()
     val episodeId = call.getString("episodeId")?.takeIf { it.isNotEmpty() }
     val ino = call.getString("ino")?.takeIf { it.isNotEmpty() }
+    val expectedTracks = call.getInt("expectedTracks")?.takeIf { it > 0 }
     if (libraryItemId.isEmpty()) return call.resolve(JSObject().put("source", "broken"))
     Handler(Looper.getMainLooper()).post {
       // Not bound yet: the UI falls back to deciding by the id
       if (!::playerNotificationService.isInitialized) return@post call.reject("Player service not ready")
-      val source = playerNotificationService.planFor(StartRequest(libraryItemId, episodeId, ino, playWhenReady = false))
-      val name = when (source) {
-        is PlaybackSource.Local -> "local"
-        is PlaybackSource.Stream -> "stream"
-        else -> "broken"
+      playerNotificationService.resolveSource(StartRequest(libraryItemId, episodeId, ino, playWhenReady = false, expectedTracks = expectedTracks)) { source ->
+        val name = when (source) {
+          is PlaybackSource.Local -> "local"
+          is PlaybackSource.Stream -> "stream"
+          else -> "broken"
+        }
+        call.resolve(JSObject().put("source", name))
       }
-      call.resolve(JSObject().put("source", name))
     }
   }
 
@@ -486,7 +489,8 @@ class AbsAudioPlayer : Plugin() {
         libraryItemId = item.getString("libraryItemId"),
         episodeId = optional("episodeId"),
         ino = optional("ino"),
-        serverConnectionConfigId = optional("serverConnectionConfigId")
+        serverConnectionConfigId = optional("serverConnectionConfigId"),
+        expectedTracks = if (item.isNull("expectedTracks")) null else item.optInt("expectedTracks").takeIf { it > 0 }
       ))
     }
     Handler(Looper.getMainLooper()).post {

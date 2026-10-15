@@ -71,7 +71,8 @@ Merged into `plus`, not yet in a published release.
   A series or collection queue that reaches a book that is not downloaded while the server is away waits on that
   book instead of skipping it. When the download of the book being streamed finishes, playback switches to the file
   at the same position. A book starts where it was last left on this phone, also after a seek while paused offline.
-  Rolling back to the previous version is safe: a queue saved by this version streams its entries there.
+  Rolling back to the previous version is safe: a queue saved by this version streams its entries there, and after a
+  restart it is not reattached to a downloaded book's restored session (nothing is lost).
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 

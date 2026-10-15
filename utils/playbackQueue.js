@@ -20,8 +20,16 @@ export function nativeQueueItems(items, activeServerConfigId = null) {
     if (ino) nativeItem.ino = ino
     const serverConnectionConfigId = item.localLibraryItem?.serverConnectionConfigId || activeServerConfigId
     if (serverConnectionConfigId) nativeItem.serverConnectionConfigId = serverConnectionConfigId
+    const expectedTracks = expectedTracksOf(item)
+    if (expectedTracks) nativeItem.expectedTracks = expectedTracks
     return nativeItem
   })
+}
+
+// The server's track count of a book: native streams a downloaded copy with fewer tracks (a partial download)
+function expectedTracksOf(item) {
+  if (item.episodeId || item.libraryItem?.mediaType === 'podcast') return null
+  return item.expectedTracks || item.libraryItem?.media?.numTracks || item.libraryItem?.media?.tracks?.length || null
 }
 
 // Identity of a native queue entry, for every comparison of queue entries
@@ -75,11 +83,14 @@ export function queueDisplayFromNative(saved, native, session = null) {
 
 // What a Play from a queue sends: the device copy's ids when the page knows one (as before), the server ids alongside
 export function queueItemPayload(item) {
-  return {
+  const payload = {
     ...deviceQueueItem(item),
     serverLibraryItemId: item.libraryItemId,
     serverEpisodeId: item.episodeId || null
   }
+  const expectedTracks = expectedTracksOf(item)
+  if (expectedTracks) payload.expectedTracks = expectedTracks
+  return payload
 }
 
 // Local progress takes priority when it exists, matching the precedence used elsewhere in this
@@ -106,7 +117,7 @@ export function downloadedBookItems(books, localItems, serverConnectionConfigId)
     const hasCompleteLocalCopy = localLibraryItem && localLibraryItem.media.tracks.length >= expectedTracks
     // Streamable items carry the raw book so the Up Next queue can display a title/cover for
     // them (queueItemDisplay's `item.libraryItem` branch) instead of falling back to "Unknown".
-    return [{ libraryItemId: book.id, episodeId: null, localLibraryItem: hasCompleteLocalCopy ? localLibraryItem : null, libraryItem: hasCompleteLocalCopy ? null : book }]
+    return [{ libraryItemId: book.id, episodeId: null, expectedTracks, localLibraryItem: hasCompleteLocalCopy ? localLibraryItem : null, libraryItem: hasCompleteLocalCopy ? null : book }]
   })
 }
 

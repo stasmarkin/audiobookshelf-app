@@ -20,18 +20,20 @@ sealed interface PlaybackSource {
 
 class PlaybackSourceResolver(
         private val localItems: () -> List<LocalLibraryItem>,
+        /** One copy by its device id, without reading every copy. */
+        private val localItem: (String) -> LocalLibraryItem?,
         private val hasTracks: (LocalLibraryItem, PodcastEpisode?) -> Boolean
 ) {
   /**
    * [libraryItemId] is a server id or a device `local_*` id (Local Media, queues saved by older versions). For a server
    * id the copy must belong to [serverConfigId]: the same item of another account is not this user's download. A copy
    * matches by server id or by `ino` (a book downloaded through another library it also belongs to); an episode by
-   * `serverEpisodeId`.
+   * `serverEpisodeId`. A book copy with fewer tracks than the server's [expectedTracks] is a partial download: it streams.
    */
-  fun resolve(serverConfigId: String?, libraryItemId: String, episodeId: String?, ino: String? = null): PlaybackSource {
+  fun resolve(serverConfigId: String?, libraryItemId: String, episodeId: String?, ino: String? = null, expectedTracks: Int? = null): PlaybackSource {
     if (libraryItemId.startsWith("local")) return resolveLocalId(libraryItemId, episodeId)
     if (serverConfigId == null) return PlaybackSource.Stream(libraryItemId, episodeId)
-    val ownCopies = localItems().filter { it.serverConnectionConfigId == serverConfigId }
+    val ownCopies = localItems().filter { it.serverConnectionConfigId == serverConfigId && !isPartial(it, episodeId, expectedTracks) }
     val copies = ownCopies.filter { it.libraryItemId == libraryItemId } +
             ownCopies.filter { !ino.isNullOrEmpty() && it.ino == ino && it.libraryItemId != libraryItemId }
     if (copies.isEmpty()) return PlaybackSource.Stream(libraryItemId, episodeId)
@@ -48,8 +50,11 @@ class PlaybackSourceResolver(
     return resolve(session.serverConnectionConfigId, libraryItemId, session.episodeId, session.libraryItem?.ino)
   }
 
+  private fun isPartial(copy: LocalLibraryItem, episodeId: String?, expectedTracks: Int?) =
+          expectedTracks != null && episodeId.isNullOrEmpty() && copy.mediaType == "book" && copy.media.getAudioTracks().size < expectedTracks
+
   private fun resolveLocalId(localId: String, episodeId: String?): PlaybackSource {
-    val item = localItems().find { it.id == localId } ?: return PlaybackSource.NotFound("Local library item not found")
+    val item = localItem(localId) ?: return PlaybackSource.NotFound("Local library item not found")
     if (episodeId.isNullOrEmpty()) return localOrBroken(listOf(item to null))
     val episode = episodeOf(item) { it.id == episodeId } ?: return PlaybackSource.NotFound("Podcast episode not found")
     return localOrBroken(listOf(item to episode))
@@ -79,12 +84,16 @@ data class StartRequest(
         val playWhenReady: Boolean,
         val playbackRate: Float? = null,
         /** Stream even when downloaded: a cast device cannot play a file on the phone. */
-        val forceStream: Boolean = false
+        val forceStream: Boolean = false,
+        /** The server's track count of a book, when known: a copy with fewer tracks is partial and streams. */
+        val expectedTracks: Int? = null,
+        /** Take the start position from the stream still playing, read just before the file replaces it. */
+        val followPlayer: Boolean = false
 ) {
   companion object {
     fun forQueueItem(item: PlayerNotificationService.PlaylistQueueItem, playWhenReady: Boolean, playbackRate: Float? = null) =
             StartRequest(item.libraryItemId, item.episodeId, item.ino, item.serverConnectionConfigId,
-                    playWhenReady = playWhenReady, playbackRate = playbackRate)
+                    playWhenReady = playWhenReady, playbackRate = playbackRate, expectedTracks = item.expectedTracks)
 
     /** An Android Auto browse-tree item: a server item (with its server episode) or a device copy. */
     fun forWrapper(wrapper: LibraryItemWrapper, episode: PodcastEpisode?, playWhenReady: Boolean, playbackRate: Float?) =
@@ -93,14 +102,19 @@ data class StartRequest(
   }
 }
 
-/** What [request] plays from. A forced stream of a `local_*` id streams the copy's server item when it has one. */
+/**
+ * What [request] plays from. A forced stream of a `local_*` id streams the copy's server item when the copy belongs to
+ * the active server (the stream comes from it); another server's copy stays a file.
+ */
 fun planStart(request: StartRequest, activeServerConfigId: String?, resolver: PlaybackSourceResolver): PlaybackSource {
   val isLocalId = request.libraryItemId.startsWith("local")
   if (request.forceStream && !isLocalId) return PlaybackSource.Stream(request.libraryItemId, request.episodeId)
-  val source = resolver.resolve(request.serverConfigId ?: activeServerConfigId, request.libraryItemId, request.episodeId, request.ino)
+  val source = resolver.resolve(request.serverConfigId ?: activeServerConfigId, request.libraryItemId, request.episodeId, request.ino, request.expectedTracks)
   if (!request.forceStream) return source
   return when (source) {
-    is PlaybackSource.Local -> source.item.libraryItemId?.let { PlaybackSource.Stream(it, source.episode?.serverEpisodeId) } ?: source
+    is PlaybackSource.Local -> source.item.libraryItemId
+            ?.takeIf { source.item.serverConnectionConfigId != null && source.item.serverConnectionConfigId == activeServerConfigId }
+            ?.let { PlaybackSource.Stream(it, source.episode?.serverEpisodeId) } ?: source
     else -> source
   }
 }

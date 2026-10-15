@@ -5,6 +5,7 @@ import vm from 'node:vm'
 // Load the Nuxt ES module without changing this project's CommonJS package type.
 const helperSource = await readFile(new URL('../utils/playbackQueue.js', import.meta.url), 'utf8')
 const helpers = await import(`data:text/javascript;base64,${Buffer.from(helperSource).toString('base64')}`)
+const queueItemPayloadOf = helpers.queueItemPayload
 const { downloadedBookItems, fetchSeriesBooks, nativeQueueItems, queueItemDisplay, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } = helpers
 
 const book = (id) => ({ id, mediaType: 'book', media: { numTracks: 1 } })
@@ -29,13 +30,13 @@ test('queue items preserve source order, carry server IDs for downloads and stre
   books[8].isMissing = true
   const items = downloadedBookItems(books, [local('a'), local('c'), local('invalid'), local('ebookonly'), local('foreign', { serverConnectionConfigId: 'other' }), local('badlocal', { media: { tracks: [] } })], 'server')
   assert.deepEqual(nativeQueueItems(items, 'server'), [
-    { libraryItemId: 'c', episodeId: null, serverConnectionConfigId: 'server' },
-    { libraryItemId: 'b', episodeId: null, serverConnectionConfigId: 'server' },
-    { libraryItemId: 'a', episodeId: null, serverConnectionConfigId: 'server' },
-    { libraryItemId: 'notdownloaded', episodeId: null, serverConnectionConfigId: 'server' },
+    { libraryItemId: 'c', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 },
+    { libraryItemId: 'b', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 },
+    { libraryItemId: 'a', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 },
+    { libraryItemId: 'notdownloaded', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 },
     // Another server's download, or a local record with no tracks, is never used - the book streams
-    { libraryItemId: 'foreign', episodeId: null, serverConnectionConfigId: 'server' },
-    { libraryItemId: 'badlocal', episodeId: null, serverConnectionConfigId: 'server' }
+    { libraryItemId: 'foreign', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 },
+    { libraryItemId: 'badlocal', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 }
   ])
   assert.deepEqual(
     items.map((item) => item.localLibraryItem?.id || null),
@@ -51,7 +52,7 @@ test('partial downloads stream instead of playing the incomplete local copy', ()
   const items = downloadedBookItems([partial], [local('a')], 'server')
   assert.equal(items.length, 1)
   assert.equal(items[0].localLibraryItem, null)
-  assert.deepEqual(nativeQueueItems(items), [{ libraryItemId: 'a', episodeId: null }])
+  assert.deepEqual(nativeQueueItems(items), [{ libraryItemId: 'a', episodeId: null, expectedTracks: 3 }])
   const complete = downloadedBookItems([partial], [local('a', { media: { tracks: [{}, {}, {}] } })], 'server')
   assert.equal(complete[0].localLibraryItem.id, 'local_device_a')
 })
@@ -60,7 +61,7 @@ test('a book downloaded through another library is matched by ino', () => {
   const items = downloadedBookItems([{ ...book('server-b'), ino: '42' }], [local('other-library-id', { ino: '42' })], 'server')
   assert.equal(items[0].localLibraryItem.id, 'local_device_other-library-id')
   // Native finds that copy again by ino and the copy's server
-  assert.deepEqual(nativeQueueItems(items), [{ libraryItemId: 'server-b', episodeId: null, ino: '42', serverConnectionConfigId: 'server' }])
+  assert.deepEqual(nativeQueueItems(items), [{ libraryItemId: 'server-b', episodeId: null, ino: '42', serverConnectionConfigId: 'server', expectedTracks: 1 }])
   assert.equal(downloadedBookItems([book('server-b')], [local('other-library-id', { ino: '42' })], 'server')[0].localLibraryItem, null)
 })
 
@@ -68,12 +69,16 @@ test('queue items carry server ids', () => {
   const books = [{ ...book('s1'), ino: '101' }, { ...book('s2'), ino: '102' }, book('s3')]
   const items = downloadedBookItems(books, [local('s1', { ino: '101' }), local('other-lib', { ino: '102' })], 'server')
   assert.deepEqual(nativeQueueItems(items, 'server'), [
-    { libraryItemId: 's1', episodeId: null, ino: '101', serverConnectionConfigId: 'server' },
-    { libraryItemId: 's2', episodeId: null, ino: '102', serverConnectionConfigId: 'server' },
-    { libraryItemId: 's3', episodeId: null, serverConnectionConfigId: 'server' }
+    { libraryItemId: 's1', episodeId: null, ino: '101', serverConnectionConfigId: 'server', expectedTracks: 1 },
+    { libraryItemId: 's2', episodeId: null, ino: '102', serverConnectionConfigId: 'server', expectedTracks: 1 },
+    { libraryItemId: 's3', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 }
   ])
+  // The server's track count lets native stream a partial download instead of playing it
+  const partial = downloadedBookItems([{ ...book('s4'), media: { numTracks: 3 } }], [local('s4')], 'server')
+  assert.equal(nativeQueueItems(partial)[0].expectedTracks, 3)
+  assert.equal(queueItemPayloadOf(partial[0]).expectedTracks, 3)
   // Without the active server known, a streamed item carries none
-  assert.deepEqual(nativeQueueItems([items[2]]), [{ libraryItemId: 's3', episodeId: null }])
+  assert.deepEqual(nativeQueueItems([items[2]]), [{ libraryItemId: 's3', episodeId: null, expectedTracks: 1 }])
 })
 
 test('complete series uses server sequence order, all pages, and never shelf collapse', async () => {
@@ -137,8 +142,8 @@ test('Play All streams an unfinished gap before later downloads', async () => {
   assert.equal(result.queue.currentIndex, 1)
   assert.equal(result.payload.libraryItemId, 'b')
   assert.deepEqual(nativeQueueItems(result.queue.items).slice(result.queue.currentIndex), [
-    { libraryItemId: 'b', episodeId: null },
-    { libraryItemId: 'c', episodeId: null, serverConnectionConfigId: 'server' }
+    { libraryItemId: 'b', episodeId: null, expectedTracks: 1 },
+    { libraryItemId: 'c', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 }
   ])
 })
 
@@ -163,8 +168,8 @@ test('collection middle start follows collection order; a missing download strea
   const result = await resolvePlaybackQueue(context([local('1'), local('3'), local('4')]), { libraryItemId: 'local_device_3', queueSource: { sourceType: 'collection', sourceId: 'c', books: ['4', '3', '2', '1'].map(book) } })
   assert.equal(result.queue.currentIndex, 1)
   assert.deepEqual(nativeQueueItems(result.queue.items).slice(2), [
-    { libraryItemId: '2', episodeId: null },
-    { libraryItemId: '1', episodeId: null, serverConnectionConfigId: 'server' }
+    { libraryItemId: '2', episodeId: null, expectedTracks: 1 },
+    { libraryItemId: '1', episodeId: null, serverConnectionConfigId: 'server', expectedTracks: 1 }
   ])
 })
 

@@ -75,6 +75,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.math.abs
@@ -161,6 +162,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   val awaiting = AwaitingServer()
   private var awaitingShown = false
   private var lastStreamError = ""
+  // Only the latest start that waits on something prepares the player
+  private val startGate = StartGate()
 
   private var isAndroidAuto = false
 
@@ -169,7 +172,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           val libraryItemId: String,
           val episodeId: String?,
           val ino: String? = null,
-          val serverConnectionConfigId: String? = null
+          val serverConnectionConfigId: String? = null,
+          /** The server's track count of a book; a downloaded copy with fewer tracks streams. */
+          val expectedTracks: Int? = null
   )
   // Persisted on every change so a widget/headset Play can rebuild the queue after process death
   var playlistQueue: List<PlaylistQueueItem> = emptyList()
@@ -573,15 +578,18 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     // onlineEntries, not state: state is conflated and can miss a quick OFFLINE -> ONLINE
     startScope.launch {
       ServerReachability.onlineEntries.collect {
-        perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value))
+        perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission()))
       }
     }
     // Download callbacks come from a worker thread; the collector runs on main
     startScope.launch { SyncRuntime.localCopyReady.collect { onLocalCopyReady(it) } }
     startScope.launch {
+      var previous: String? = null
       ServerReachability.serverConfigId.collect { id ->
+        if (previous != null && previous != id) startGate.invalidate()
+        previous = id
         val waitingFor = awaiting.serverConfigId
-        if (waitingFor != null && waitingFor != id) stopAwaiting(CancelReason.SERVER_SWITCHED)
+        if (waitingFor != null && waitingFor != id) onServerSwitchedWhileAwaiting()
       }
     }
   }
@@ -624,6 +632,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       override fun onReceive(context: Context?, intent: Intent?) {
         if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
           DLog.d(tag, "ACTION_AUDIO_BECOMING_NOISY received — ensuring player is paused")
+          onPauseRequested()
           try {
             if (mPlayer.playWhenReady) {
               mPlayer.playWhenReady = false
@@ -932,6 +941,32 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val action = awaiting.onQueueBlocked(item, serverConfigId, playWhenReady)
     if (action != null) return perform(action)
     showAwaiting(true)
+    // Checks the server at once instead of at the next backoff step (when there is a network)
+    ServerReachability.retryNow()
+  }
+
+  private fun onServerSwitchedWhileAwaiting() {
+    if (awaiting.isStreamLost) {
+      // The player holds a dead stream of the other server: nothing will resume it
+      DLog.i(tag, "Active server changed while a lost stream waited - closing it")
+      stopAwaiting(CancelReason.SERVER_SWITCHED)
+      clientEventEmitter?.onPlaybackFailed(lastStreamError.ifEmpty { "Server changed" })
+      closePlayback(true)
+    } else {
+      stopAwaiting(CancelReason.SERVER_SWITCHED)
+    }
+  }
+
+  private fun streamPermission(): StreamPermission {
+    val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+    return StreamPermission(metered, deviceSettings.streamingUsingCellular)
+  }
+
+  /** Any pause: the app, a headset, the notification, audio becoming noisy, focus loss. */
+  fun onPauseRequested() {
+    if (awaiting.isAwaiting) awaiting.onUserPause()
+    // A start that is still preparing then prepares paused
+    startGate.pause()
   }
 
   private fun perform(action: AwaitingAction?) {
@@ -968,14 +1003,24 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
     DLog.i(tag, "Server is back - resuming ${action.libraryItemId} at ${action.position}s (playWhenReady=${action.playWhenReady})")
     val rate = currentPlayer.playbackParameters.speed
-    startItem(StartRequest(action.libraryItemId, action.episodeId, serverConfigId = action.serverConfigId, startTime = action.position,
+    val ticket = startItem(StartRequest(action.libraryItemId, action.episodeId, serverConfigId = action.serverConfigId, startTime = action.position,
             playWhenReady = action.playWhenReady, playbackRate = rate)) { result ->
-      if (result is StartResult.Failed) mainHandler.post {
-        DLog.w(tag, "Resuming ${action.libraryItemId} failed (${result.message}) - waiting again")
-        val again = awaiting.onStreamLost(action.libraryItemId, action.episodeId, action.position ?: 0.0, action.playWhenReady, action.serverConfigId)
-        if (again != null) perform(again) else showAwaiting(true)
-      }
+      if (result is StartResult.Failed) mainHandler.post { onResumeFailed(action, result.message) }
     }
+    resumeTicket = ticket
+  }
+
+  private var resumeTicket: StartGate.Ticket? = null
+
+  // Posted after the play request: its reachability report has landed
+  private fun onResumeFailed(action: AwaitingAction.ResumeStream, message: String) {
+    val ticket = resumeTicket
+    if (ticket == null || startGate.admit(ticket) == null) return // Something else started or closed meanwhile
+    val state = ServerReachability.state.value
+    DLog.w(tag, "Resuming ${action.libraryItemId} failed ($message, server $state)")
+    if (state == ServerState.ONLINE) lastStreamError = message
+    val next = awaiting.onResumeFailed(action, state)
+    if (next != null) perform(next) else showAwaiting(true)
   }
 
   private fun onLocalCopyReady(ready: LocalCopyReady) {
@@ -994,14 +1039,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val replacedStream = session?.takeIf { !it.isLocal && it.libraryItemId == action.libraryItemId }
     val config = DeviceManager.getServerConnectionConfig(session?.serverConnectionConfigId)
     val request = StartRequest(action.libraryItemId, action.episodeId, serverConfigId = session?.serverConnectionConfigId,
-            startTime = action.position, playWhenReady = action.playWhenReady, playbackRate = currentPlayer.playbackParameters.speed)
-    // Syncs the stream's last position to the server, then closes its server session; the player stays open
+            startTime = action.position, playWhenReady = action.playWhenReady, playbackRate = currentPlayer.playbackParameters.speed,
+            followPlayer = action.fromPlayer)
+    // The stream's listened time and position are taken now (the sync takes its snapshot before sending); the answer
+    // and the close of the server session come in the background, the file does not wait for them
     mediaProgressSyncer.stop(true) {
       replacedStream?.let { stream -> apiHandler.closePlaybackSession(stream.id, config) { DLog.d(tag, "Closed streamed session ${stream.id}") } }
-      mainHandler.post {
-        startItem(request) { if (it is StartResult.Failed) DLog.e(tag, "Switch to the download of ${action.libraryItemId} failed: ${it.message}") }
-      }
     }
+    startItem(request) { if (it is StartResult.Failed) DLog.e(tag, "Switch to the download of ${action.libraryItemId} failed: ${it.message}") }
   }
 
   private fun stopAwaiting(reason: CancelReason) {
@@ -1051,37 +1096,52 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     data class Failed(val message: String) : StartResult
   }
 
-  fun sourceResolver() = PlaybackSourceResolver({ DeviceManager.dbManager.getLocalLibraryItems() }) { item, episode -> item.hasTracks(ctx, episode) }
+  fun sourceResolver() = PlaybackSourceResolver({ DeviceManager.dbManager.getLocalLibraryItems() }, { DeviceManager.dbManager.getLocalLibraryItem(it) }) { item, episode ->
+    item.hasTracks(ctx, episode)
+  }
 
-  /** What [request] would play from now; a cast session streams (it cannot play a file on the phone). */
-  fun planFor(request: StartRequest): PlaybackSource {
+  /**
+   * What [request] would play from now; a cast session streams (it cannot play a file on the phone). The copies and
+   * their files are read off the main thread; call from main.
+   */
+  suspend fun planFor(request: StartRequest): PlaybackSource {
     val effective = if (getMediaPlayer() == PLAYER_CAST) request.copy(forceStream = true) else request
-    return planStart(effective, ActiveServer.current()?.id, sourceResolver())
+    val active = ActiveServer.current()?.id
+    return withContext(Dispatchers.IO) { planStart(effective, active, sourceResolver()) }
+  }
+
+  /** [planFor] for a caller without a coroutine; [onSource] runs on main. */
+  fun resolveSource(request: StartRequest, onSource: (PlaybackSource) -> Unit) {
+    mainHandler.post { startScope.launch { onSource(planFor(request)) } }
   }
 
   /**
    * The one start of an item for the app's Play, Android Auto, a resume after the server came back and a switch to a
    * finished download: a downloaded copy always plays, the stream is the fallback. Main thread. [onResult] gets the
-   * session before it is prepared, or why nothing starts.
+   * session before it is prepared, or why nothing starts. A newer start, Close or a server switch before the session is
+   * ready replaces this one; a Pause makes it prepare paused.
    */
-  fun startItem(request: StartRequest, onResult: (StartResult) -> Unit = {}) {
+  fun startItem(request: StartRequest, onResult: (StartResult) -> Unit = {}): StartGate.Ticket {
+    val ticket = startGate.begin(request.playWhenReady)
     if (Looper.myLooper() != Looper.getMainLooper()) {
-      mainHandler.post { startItem(request, onResult) }
-      return
+      mainHandler.post { runStart(request, ticket, onResult) }
+    } else {
+      runStart(request, ticket, onResult)
     }
+    return ticket
+  }
+
+  private fun runStart(request: StartRequest, ticket: StartGate.Ticket, onResult: (StartResult) -> Unit) = startScope.launch {
     when (val plan = planFor(request)) {
       is PlaybackSource.NotFound -> onResult(StartResult.Failed(plan.message))
       is PlaybackSource.LocalBroken -> onResult(StartResult.Failed(NO_AUDIO_FILES_MESSAGE))
-      is PlaybackSource.Local -> startScope.launch {
+      is PlaybackSource.Local -> {
         val startTime = request.startTime ?: localStartTime(plan.item, plan.episode)
         val session = plan.item.getPlaybackSession(plan.episode, getDeviceInfo(), startTime)
         // Concise on purpose: the serialized item contains file paths, SAF URIs and the server connection id
         DLog.d(tag, "startItem: downloaded item ${plan.item.id} (server item ${plan.item.libraryItemId ?: "none"}${plan.episode?.let { e -> ", episode " + e.id } ?: ""}) for ${request.libraryItemId} start=${session.currentTime}s playWhenReady=${request.playWhenReady}")
         onResult(StartResult.Started(session))
-        stopSyncerThen {
-          PlayerListener.lazyIsPlaying = false
-          preparePlayer(session, request.playWhenReady, request.playbackRate)
-        }
+        stopSyncerThen { prepareAdmitted(ticket, session, request) }
       }
       is PlaybackSource.Stream -> {
         val payload = getPlayItemRequestPayload(false)
@@ -1095,13 +1155,27 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               applyStreamStart(session, request.startTime)
               DLog.d(tag, "startItem: streamed session ${session.id} for item ${session.libraryItemId}${session.episodeId?.let { e -> ", episode $e" } ?: ""} playMethod=${session.playMethod} start=${session.currentTime}s playWhenReady=${request.playWhenReady}")
               onResult(StartResult.Started(session))
-              PlayerListener.lazyIsPlaying = false
-              preparePlayer(session, request.playWhenReady, request.playbackRate)
+              prepareAdmitted(ticket, session, request)
             }
           }
         }
       }
     }
+  }
+
+  private fun prepareAdmitted(ticket: StartGate.Ticket, session: PlaybackSession, request: StartRequest) {
+    val playWhenReady = startGate.admit(ticket)
+    if (playWhenReady == null) {
+      DLog.i(tag, "Start of ${request.libraryItemId} was replaced (another start, Close or a server switch) - not preparing")
+      return
+    }
+    if (request.followPlayer) {
+      // Read just before the file replaces the stream, which kept playing meanwhile
+      val stream = currentPlaybackSession
+      if (stream != null && !stream.isLocal && stream.libraryItemId == request.libraryItemId) session.currentTime = getCurrentTimeSeconds()
+    }
+    PlayerListener.lazyIsPlaying = false
+    preparePlayer(session, playWhenReady, request.playbackRate)
   }
 
   /** Android Auto's browse-tree item (server item or device copy) through [startItem]. */
@@ -1184,76 +1258,94 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
     val wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "audiobookshelf:playlistAdvance")
     wakeLock.acquire(60_000L) // 60 second timeout
+    val ticket = startGate.begin(playWhenReady)
 
-    when (val plan = planFor(StartRequest.forQueueItem(nextItem, playWhenReady, playbackRate))) {
-      is PlaybackSource.NotFound, is PlaybackSource.LocalBroken -> {
-        // Downloads can be removed after queue setup. Never fall back to streaming.
-        DLog.e(tag, "advancePlaylistQueue: ${nextItem.libraryItemId} has no playable download ($plan)")
-        playlistQueue = emptyList()
-        playlistQueueIndex = -1
-        if (wakeLock.isHeld) wakeLock.release()
-      }
-      is PlaybackSource.Local -> startScope.launch {
-        val playbackSession = plan.item.getPlaybackSession(plan.episode, getDeviceInfo(), localStartTime(plan.item, plan.episode))
-        DLog.d(tag, "advancePlaylistQueue: local session ready for ${plan.item.id}")
-
-        fun startLocalPlayback() {
+    startScope.launch {
+      when (val plan = planFor(StartRequest.forQueueItem(nextItem, playWhenReady, playbackRate))) {
+        is PlaybackSource.NotFound, is PlaybackSource.LocalBroken -> {
+          // Downloads can be removed after queue setup. Never fall back to streaming.
+          DLog.e(tag, "advancePlaylistQueue: ${nextItem.libraryItemId} has no playable download ($plan)")
           if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
-            PlayerListener.lazyIsPlaying = false
-            preparePlayer(playbackSession, playWhenReady, playbackRate)
+            playlistQueue = emptyList()
+            playlistQueueIndex = -1
           }
           if (wakeLock.isHeld) wakeLock.release()
         }
+        is PlaybackSource.Local -> {
+          val playbackSession = plan.item.getPlaybackSession(plan.episode, getDeviceInfo(), localStartTime(plan.item, plan.episode))
+          DLog.d(tag, "advancePlaylistQueue: local session ready for ${plan.item.id}")
 
-        // No progress anywhere on the device: this item may still have progress recorded on the server only (e.g.
-        // listened to elsewhere before downloading)
-        val serverLibraryItemId = plan.item.libraryItemId
-        val serverConnectionConfig = plan.item.serverConnectionConfigId?.let { DeviceManager.getServerConnectionConfig(it) }
-        if (playbackSession.currentTime == 0.0 && !serverLibraryItemId.isNullOrEmpty() && serverConnectionConfig != null && DeviceManager.checkConnectivity(ctx)) {
-          DLog.d(tag, "advancePlaylistQueue: no local progress, checking server progress for $serverLibraryItemId")
-          apiHandler.getMediaProgress(serverLibraryItemId, plan.episode?.serverEpisodeId, serverConnectionConfig) { mediaProgress ->
-            if (mediaProgress != null && !mediaProgress.isFinished && mediaProgress.currentTime > 0.0) {
-              DLog.d(tag, "advancePlaylistQueue: found server progress, resuming from ${mediaProgress.currentTime}")
-              playbackSession.currentTime = mediaProgress.currentTime
+          fun startLocalPlayback() {
+            if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) prepareQueued(ticket, playbackSession, playbackRate)
+            if (wakeLock.isHeld) wakeLock.release()
+          }
+
+          // No progress anywhere on the device: this item may still have progress recorded on the server only (e.g.
+          // listened to elsewhere before downloading)
+          val serverLibraryItemId = plan.item.libraryItemId
+          val serverConnectionConfig = plan.item.serverConnectionConfigId?.let { DeviceManager.getServerConnectionConfig(it) }
+          if (playbackSession.currentTime == 0.0 && !serverLibraryItemId.isNullOrEmpty() && serverConnectionConfig != null && DeviceManager.checkConnectivity(ctx)) {
+            DLog.d(tag, "advancePlaylistQueue: no local progress, checking server progress for $serverLibraryItemId")
+            apiHandler.getMediaProgress(serverLibraryItemId, plan.episode?.serverEpisodeId, serverConnectionConfig) { mediaProgress ->
+              if (mediaProgress != null && !mediaProgress.isFinished && mediaProgress.currentTime > 0.0) {
+                DLog.d(tag, "advancePlaylistQueue: found server progress, resuming from ${mediaProgress.currentTime}")
+                playbackSession.currentTime = mediaProgress.currentTime
+              }
+              mainHandler.post { startLocalPlayback() }
             }
-            mainHandler.post { startLocalPlayback() }
+          } else {
+            startLocalPlayback()
           }
-        } else {
-          startLocalPlayback()
         }
-      }
-      is PlaybackSource.Stream -> {
-        if (ServerReachability.state.value != ServerState.ONLINE) {
-          blockQueue(nextItem, playWhenReady)
-          if (wakeLock.isHeld) wakeLock.release()
-          return
-        }
-        DLog.d(tag, "advancePlaylistQueue: requesting server item ${plan.libraryItemId}")
-        // Acquire WiFi lock for server items to keep network alive during API call
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        @Suppress("DEPRECATION")
-        val wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "audiobookshelf:playlistAdvance")
-        wifiLock.acquire()
+        is PlaybackSource.Stream -> {
+          if (ServerReachability.state.value != ServerState.ONLINE) {
+            blockQueueFor(ticket, nextItem)
+            if (wakeLock.isHeld) wakeLock.release()
+            return@launch
+          }
+          DLog.d(tag, "advancePlaylistQueue: requesting server item ${plan.libraryItemId}")
+          // Acquire WiFi lock for server items to keep network alive during API call
+          val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+          @Suppress("DEPRECATION")
+          val wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "audiobookshelf:playlistAdvance")
+          wifiLock.acquire()
 
-        // Stop progress syncer fire-and-forget (don't block on callback)
-        mediaProgressSyncer.stop {
-          DLog.d(tag, "advancePlaylistQueue: mediaProgressSyncer stopped (fire-and-forget)")
-        }
+          // Stop progress syncer fire-and-forget (don't block on callback)
+          mediaProgressSyncer.stop {
+            DLog.d(tag, "advancePlaylistQueue: mediaProgressSyncer stopped (fire-and-forget)")
+          }
 
-        // Immediately request next item from server without waiting for sync to complete
-        advancePlaylistQueueServerItem(nextItem, plan, playWhenReady, playbackRate, wakeLock, wifiLock, 0)
+          // Immediately request next item from server without waiting for sync to complete
+          advancePlaylistQueueServerItem(nextItem, plan, ticket, playbackRate, wakeLock, wifiLock, 0)
+        }
       }
     }
   }
 
-  private fun advancePlaylistQueueServerItem(nextItem: PlaylistQueueItem, plan: PlaybackSource.Stream, playWhenReady: Boolean, playbackRate: Float, wakeLock: PowerManager.WakeLock, wifiLock: WifiManager.WifiLock, retryCount: Int) {
-    if (playlistQueue.getOrNull(playlistQueueIndex) !== nextItem) {
+  private fun prepareQueued(ticket: StartGate.Ticket, session: PlaybackSession, playbackRate: Float) {
+    val playWhenReady = startGate.admit(ticket)
+    if (playWhenReady == null) {
+      DLog.i(tag, "advancePlaylistQueue: replaced by another start - not preparing")
+      return
+    }
+    PlayerListener.lazyIsPlaying = false
+    preparePlayer(session, playWhenReady, playbackRate)
+  }
+
+  // Waits on the queue item, unless another start or Close replaced this one meanwhile
+  private fun blockQueueFor(ticket: StartGate.Ticket, item: PlaylistQueueItem) {
+    val playWhenReady = startGate.admit(ticket) ?: return
+    blockQueue(item, playWhenReady)
+  }
+
+  private fun advancePlaylistQueueServerItem(nextItem: PlaylistQueueItem, plan: PlaybackSource.Stream, ticket: StartGate.Ticket, playbackRate: Float, wakeLock: PowerManager.WakeLock, wifiLock: WifiManager.WifiLock, retryCount: Int) {
+    if (playlistQueue.getOrNull(playlistQueueIndex) !== nextItem || startGate.admit(ticket) == null) {
       if (wifiLock.isHeld) wifiLock.release()
       if (wakeLock.isHeld) wakeLock.release()
       return
     }
     if (retryCount > 0 && ServerReachability.state.value != ServerState.ONLINE) {
-      blockQueue(nextItem, playWhenReady)
+      blockQueueFor(ticket, nextItem)
       if (wifiLock.isHeld) wifiLock.release()
       if (wakeLock.isHeld) wakeLock.release()
       return
@@ -1265,21 +1357,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         val delay = (retryCount + 1) * 2000L
         DLog.w(tag, "advancePlaylistQueue: Server play request failed for ${plan.libraryItemId}, retrying in ${delay}ms (attempt ${retryCount + 1}/3)")
         mainHandler.postDelayed({
-          advancePlaylistQueueServerItem(nextItem, plan, playWhenReady, playbackRate, wakeLock, wifiLock, retryCount + 1)
+          advancePlaylistQueueServerItem(nextItem, plan, ticket, playbackRate, wakeLock, wifiLock, retryCount + 1)
         }, delay)
       } else if (session != null) {
         DLog.d(tag, "advancePlaylistQueue: Got server session, calling preparePlayer for ${plan.libraryItemId}")
         startScope.launch {
           applyStreamStart(session, null)
-          PlayerListener.lazyIsPlaying = false
-          if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) preparePlayer(session, playWhenReady, playbackRate)
-          DLog.d(tag, "advancePlaylistQueue: preparePlayer called successfully")
+          if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) prepareQueued(ticket, session, playbackRate)
           if (wifiLock.isHeld) wifiLock.release()
           if (wakeLock.isHeld) wakeLock.release()
         }
       } else mainHandler.post {
         if (ServerReachability.state.value != ServerState.ONLINE && playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
-          blockQueue(nextItem, playWhenReady)
+          blockQueueFor(ticket, nextItem)
         } else {
           // The server answered with an error: nothing to wait for
           DLog.e(tag, "advancePlaylistQueue: Server play request failed for ${plan.libraryItemId} after ${retryCount + 1} attempts, giving up")
@@ -1602,7 +1692,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
     if (awaiting.isAwaiting) {
       // The player has nothing to play while waiting: start again now if the server is back, else probe it
-      val action = awaiting.onUserPlay(ServerReachability.state.value, ServerReachability.serverConfigId.value)
+      val action = awaiting.onUserPlay(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission())
       if (action == null) ServerReachability.retryNow() else perform(action)
       return
     }
@@ -1636,48 +1726,42 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val playbackRate = mediaManager.getSavedPlaybackRate()
     DLog.i(RESTORE_TAG, "Restoring ${if (saved.isLocal) "downloaded" else "streamed"} item ${saved.mediaItemId} | rate=$playbackRate")
 
-    // A stream downloaded since plays the copy; a copy that is gone is not streamed instead
-    val source = sourceResolver().restoreSource(saved)
-    when (source) {
-      is PlaybackSource.NotFound -> {
-        failRestore("downloaded item no longer exists (${source.message})", permanent = true)
-        return false
-      }
-      is PlaybackSource.LocalBroken -> {
-        failRestore("downloaded item has no playable files", permanent = true)
-        return false
-      }
-      is PlaybackSource.Local -> {
-        startScope.launch {
+    // A stream downloaded since plays the copy; a copy that is gone is not streamed instead. Read off the main thread
+    startScope.launch {
+      when (val source = withContext(Dispatchers.IO) { sourceResolver().restoreSource(saved) }) {
+        is PlaybackSource.NotFound -> failRestore("downloaded item no longer exists (${source.message})", permanent = true)
+        is PlaybackSource.LocalBroken -> failRestore("downloaded item has no playable files", permanent = true)
+        is PlaybackSource.Local -> {
           val session = source.item.getPlaybackSession(source.episode, getDeviceInfo(), localStartTime(source.item, source.episode))
           finishRestore(session, playWhenReady, playbackRate)
         }
-        return true
+        is PlaybackSource.Stream -> restoreStream(saved, source, playWhenReady, playbackRate)
       }
-      is PlaybackSource.Stream -> Unit
     }
-    val stream = source as PlaybackSource.Stream
+    return true
+  }
 
+  private fun restoreStream(saved: PlaybackSession, stream: PlaybackSource.Stream, playWhenReady: Boolean, playbackRate: Float) {
     val config = DeviceManager.getServerConnectionConfig(saved.serverConnectionConfigId)
     val libraryItemId = stream.libraryItemId
     if (config == null || libraryItemId.isEmpty()) {
       failRestore("server connection for streamed item no longer saved", permanent = true)
-      return false
+      return
     }
     val activeConfigId = DeviceManager.serverConnectionConfig?.id ?: DeviceManager.deviceData.lastServerConnectionConfigId
     if (activeConfigId != config.id) {
       failRestore("streamed item belongs to a server that is not the current one", permanent = false)
-      return false
+      return
     }
     if (!DeviceManager.checkConnectivity(this)) {
       failRestore("no network for streamed item", permanent = false)
-      return false
+      return
     }
     val connectivityManager = getSystemService(ConnectivityManager::class.java)
     val streamingSetting = deviceSettings.streamingUsingCellular
     if (connectivityManager?.isActiveNetworkMetered == true && streamingSetting != StreamingUsingCellularSetting.ALWAYS) {
       failRestore("streaming on cellular is not allowed without confirmation ($streamingSetting)", permanent = false)
-      return false
+      return
     }
     if (DeviceManager.serverConnectionConfig == null) {
       DLog.i(RESTORE_TAG, "Using saved server connection for restore")
@@ -1696,7 +1780,6 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         }
       }
     }
-    return true
   }
 
   private fun finishRestore(session: PlaybackSession, playWhenReady: Boolean, playbackRate: Float) {
@@ -1735,7 +1818,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   fun pause() {
-    if (awaiting.isAwaiting) awaiting.onUserPause()
+    onPauseRequested()
     currentPlayer.pause()
   }
 
@@ -1806,6 +1889,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   fun closePlayback(calledOnError: Boolean? = false) {
     if (awaiting.isAwaiting) stopAwaiting(CancelReason.CLOSED)
+    startGate.invalidate()
     playlistQueue = emptyList()
     playlistQueueIndex = -1
     DLog.d(tag, "closePlayback")
@@ -2886,6 +2970,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                       "Network capabilities changed. hasNetworkConnectivity=$hasNetworkConnectivity | isUnmeteredNetwork=$isUnmeteredNetwork"
               )
               clientEventEmitter?.onNetworkMeteredChanged(isUnmeteredNetwork)
+              // A wait held back by the cellular setting may go on now
+              if (isUnmeteredNetwork) mainHandler.post {
+                perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission()))
+              }
               if (hasNetworkConnectivity) {
                 // Force android auto loading if libraries are empty.
                 // Lack of network connectivity is most likely reason for libraries being empty
