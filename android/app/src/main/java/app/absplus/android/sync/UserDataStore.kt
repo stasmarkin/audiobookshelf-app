@@ -107,6 +107,9 @@ class UserDataStore(
 
   suspend fun progressRows(serverConfigId: String): List<MediaProgressEntity> = progress.getAll(serverConfigId)
 
+  /** The server's user object as last known (without progress, bookmarks and tokens); null when none is. */
+  suspend fun userJson(serverConfigId: String): String? = db.syncState().get(serverConfigId)?.userJson
+
   /** Marks a book or episode finished or not, with the values the Paper copy gets for the same action. */
   suspend fun markFinished(serverConfigId: String, libraryItemId: String, episodeId: String?, isFinished: Boolean) {
     val row = db.withTransaction {

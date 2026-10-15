@@ -7,7 +7,10 @@ import app.absplus.android.sync.SyncEngine
 import app.absplus.android.sync.SyncReason
 import app.absplus.android.sync.SyncRuntime
 import app.absplus.android.sync.SyncState
+import app.absplus.android.sync.UserDataJson
 import app.absplus.android.sync.UserDataStore
+import app.absplus.android.sync.parseServerProgress
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -25,8 +28,8 @@ import org.json.JSONObject
 
 /**
  * Offline-first data bridge: the active server's reachability (its state, the WebView's reports about its own requests
- * and socket, a manual retry), the user's bookmarks from userdata.db, and the sync engine (`onDataChanged`,
- * `onSyncState`, manual sync, server events the WebView received).
+ * and socket, a manual retry), the user's progress, bookmarks and user object from userdata.db with their writes, and
+ * the sync engine (`onDataChanged`, `onSyncState`, manual sync, server events the WebView received).
  */
 @CapacitorPlugin(name = "AbsData")
 class AbsData : Plugin() {
@@ -165,6 +168,111 @@ class AbsData : Plugin() {
         call.resolve()
       } catch (e: Exception) {
         call.reject(e.message ?: "Could not save the bookmark")
+      }
+    }
+  }
+
+  /**
+   * The user's data of `serverConfigId` (the active server by default): `{ user, mediaProgress, bookmarks }`, with the
+   * user object as last known (null before the first one) and progress in the server's shape.
+   */
+  @PluginMethod
+  fun getUserData(call: PluginCall) {
+    val store = SyncEngine.store
+    val serverConfigId = call.getString("serverConfigId") ?: ActiveServer.current()?.id
+    if (store == null || serverConfigId == null) {
+      call.resolve(JSObject(UserDataJson.userData(null, emptyList(), emptyList()).toString()))
+      return
+    }
+    io.launch {
+      try {
+        val data = UserDataJson.userData(store.userJson(serverConfigId), store.progressRows(serverConfigId),
+                store.visibleBookmarks(serverConfigId))
+        call.resolve(JSObject(data.toString()))
+      } catch (e: Exception) {
+        call.reject("Could not read the user's data: ${e.message}")
+      }
+    }
+  }
+
+  /** `{ mediaProgress }` of the given `libraryItemIds` (every episode of a podcast), for refreshing only those. */
+  @PluginMethod
+  fun getMediaProgress(call: PluginCall) {
+    val store = SyncEngine.store
+    val serverConfigId = call.getString("serverConfigId") ?: ActiveServer.current()?.id
+    val ids = call.getArray("libraryItemIds")?.toList<Any>()?.filterIsInstance<String>()?.toSet().orEmpty()
+    if (store == null || serverConfigId == null || ids.isEmpty()) {
+      call.resolve(JSObject().put("mediaProgress", JSArray()))
+      return
+    }
+    io.launch {
+      try {
+        val rows = store.progressRows(serverConfigId).filter { it.libraryItemId in ids }
+        call.resolve(JSObject().put("mediaProgress", JSArray(UserDataJson.progressList(rows).toString())))
+      } catch (e: Exception) {
+        call.reject("Could not read progress: ${e.message}")
+      }
+    }
+  }
+
+  @PluginMethod
+  fun markFinished(call: PluginCall) = writeProgress(call) { store, serverConfigId, libraryItemId ->
+    val isFinished = call.getBoolean("isFinished") ?: throw IllegalArgumentException("isFinished is required")
+    store.markFinished(serverConfigId, libraryItemId, call.getString("episodeId")?.ifEmpty { null }, isFinished)
+  }
+
+  @PluginMethod
+  fun resetProgress(call: PluginCall) = writeProgress(call) { store, serverConfigId, libraryItemId ->
+    store.resetProgress(serverConfigId, libraryItemId, call.getString("episodeId")?.ifEmpty { null })
+  }
+
+  @PluginMethod
+  fun updateEbookProgress(call: PluginCall) = writeProgress(call) { store, serverConfigId, libraryItemId ->
+    val ebookProgress = (call.data.opt("ebookProgress") as? Number)?.toDouble()?.takeIf { it.isFinite() }
+            ?: throw IllegalArgumentException("ebookProgress is required")
+    store.updateEbookProgress(serverConfigId, libraryItemId, call.getString("ebookLocation"), ebookProgress)
+  }
+
+  /**
+   * A progress write for `serverConfigId` (the server a downloaded copy belongs to), the active server by default; its
+   * outbox row is sent while that server is active.
+   */
+  private fun writeProgress(call: PluginCall, write: suspend (UserDataStore, String, String) -> Unit) {
+    val store = SyncEngine.store
+    val serverConfigId = call.getString("serverConfigId") ?: ActiveServer.current()?.id
+    val libraryItemId = call.getString("libraryItemId")
+    when {
+      store == null -> return call.reject("Sync is not started")
+      serverConfigId.isNullOrEmpty() -> return call.reject("No server")
+      libraryItemId.isNullOrEmpty() -> return call.reject("libraryItemId is required")
+    }
+    io.launch {
+      try {
+        write(store!!, serverConfigId!!, libraryItemId!!)
+        SyncEngine.onLocalWrite()
+        call.resolve()
+      } catch (e: Exception) {
+        call.reject(e.message ?: "Could not save the progress")
+      }
+    }
+  }
+
+  /** A server progress record the WebView got (the value on refocus); merged by the one rule. Resolves `{ applied }`. */
+  @PluginMethod
+  fun applyServerProgress(call: PluginCall) {
+    val store = SyncEngine.store
+    val serverConfigId = call.getString("serverConfigId") ?: ActiveServer.current()?.id
+    val record = call.getObject("progress")?.let { parseServerProgress(jacksonObjectMapper().readTree(it.toString())) }
+    when {
+      store == null -> return call.reject("Sync is not started")
+      serverConfigId.isNullOrEmpty() -> return call.reject("No server")
+      record == null -> return call.reject("progress with libraryItemId and lastUpdate is required")
+    }
+    io.launch {
+      try {
+        call.resolve(JSObject().put("applied", store!!.applyServerProgressCandidate(serverConfigId!!, record!!)))
+      } catch (e: Exception) {
+        call.reject(e.message ?: "Could not apply the progress")
       }
     }
   }
