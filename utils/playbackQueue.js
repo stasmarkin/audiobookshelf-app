@@ -146,8 +146,9 @@ export async function buildQueueSourceItems(context, source) {
   if (source.sourceType === 'series' || source.sourceType === 'collection') {
     const books = source.sourceType === 'series' ? await fetchSeriesBooks(context.$absData, source.libraryId, source.sourceId, context.$encode) : source.books
     const localItems = (await context.$db.getLocalLibraryItems('book')) || []
-    // The saved server's copies: offline there is no signed-in connection to compare with
-    return downloadedBookItems(books, localItems, context.$store.state.activeServerConfigId)
+    // The saved server's copies: offline there is no signed-in connection to compare with; before native named the
+    // active server, the signed-in one is it
+    return downloadedBookItems(books, localItems, context.$store.state.activeServerConfigId || context.$store.getters['user/getServerConnectionConfigId'])
   }
   throw new Error('Unknown playback queue source')
 }

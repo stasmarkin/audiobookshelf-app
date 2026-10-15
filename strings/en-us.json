@@ -625,6 +625,7 @@
   "ToastRSSFeedCloseSuccess": "RSS feed closed",
   "ToastRiceApplied": "Appearance applied",
   "ToastRiceSaved": "Preset saved",
+  "ToastSeriesLoadFailed": "Could not open the series",
   "ToastStreamingNotAllowedOnCellular": "Streaming is not allowed on cellular data",
   "UnitMinutesShort": "{0}m",
   "UnitSecondsShort": "{0}s"

@@ -15,10 +15,13 @@ import { downloadMissingItems } from '@/utils/bulkDownload'
 export default {
   async asyncData({ params, app, store, redirect }) {
     // The replica answers offline; online before the series were first read, the server does
-    const answer = await app.$absData.getSeriesById({ id: params.id }).catch((error) => {
-      console.error('Failed', error)
-      return null
-    })
+    let answer
+    try {
+      answer = await app.$absData.getSeriesById({ id: params.id })
+    } catch (error) {
+      console.error('Failed to read the series', error)
+      return redirect('/bookshelf/series?error=series')
+    }
     const series = answer?.series
     if (!series) {
       return redirect('/bookshelf/series')

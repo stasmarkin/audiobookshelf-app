@@ -74,6 +74,22 @@ test('never-reconciled series read the server while online', async () => {
   assert.deepEqual(plain(read.plugin.calls[1]), ['getSeries', { libraryId: 'l1', sort: 'name', desc: false, limit: 20, page: 0, sortingIgnorePrefix: true }])
 })
 
+test('a series missing from a read replica is asked of the server while online', async () => {
+  const absent = fakePlugin({ getSeriesById: async () => ({ serverConfigId: 'a', series: null, replica: replica(9) }) })
+  const http = fakeHttp(() => ({ id: 'new', name: 'Новая', libraryId: 'l1' }))
+  const online = service({ plugin: absent, http })
+  const answer = await online.data.getSeriesById({ id: 'new' })
+  assert.deepEqual(http.paths, ['/api/series/new'])
+  assert.equal(answer.fromServer, true)
+  assert.equal(answer.series.name, 'Новая')
+
+  const gone = service({ plugin: absent, http: { get: async () => Promise.reject(Object.assign(new Error('404'), { response: { status: 404 } })) } })
+  assert.equal((await gone.data.getSeriesById({ id: 'new' })).series, null, "a 404 leaves native's answer")
+
+  const offline = service({ plugin: absent, http: fakeHttp(() => assert.fail('no server offline')), store: fakeStore({ serverState: 'offline' }) })
+  assert.equal((await offline.data.getSeriesById({ id: 'new' })).series, null)
+})
+
 test('in the browser series reads go to $axios in native shape', async () => {
   const gets = []
   const $axios = {
@@ -118,7 +134,17 @@ test('missing series redirects to the series tab', async () => {
   assert.equal(missing.redirected, '/bookshelf/series')
   assert.deepEqual(missing.committed, [])
   const failed = await run(() => Promise.reject(new Error('bridge')))
-  assert.equal(failed.redirected, '/bookshelf/series')
+  assert.equal(failed.redirected, '/bookshelf/series?error=series', 'a failed read is told apart from a series that is gone')
+  assert.equal(missing.redirected, '/bookshelf/series', 'a series that is gone leaves quietly')
+
+  // The Series tab tells about the failed read
+  const tab = await read('../pages/bookshelf/series/index.vue')
+  const component = new Function(tab.match(/<script>([\s\S]*?)<\/script>/)[1].replace('export default', 'return'))()
+  const toasts = []
+  const view = (query) => ({ $route: { query }, $toast: { error: (m) => toasts.push(m) }, $strings: { ToastSeriesLoadFailed: 'Could not open the series' } })
+  component.mounted.call(view({}))
+  component.mounted.call(view({ error: 'series' }))
+  assert.deepEqual(toasts, ['Could not open the series'])
 
   const found = await run(() => ({ serverConfigId: 'a', series: { id: 's1', name: 'Мир', libraryId: 'l1' }, replica: replica() }))
   assert.equal(found.redirected, null)

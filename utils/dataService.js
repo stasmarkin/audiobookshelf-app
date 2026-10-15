@@ -281,8 +281,8 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
    * Before the sign-in $nativeHttp has no server address, so native's answer stands; it must be signed in to the
    * active server, and an answer that arrives after a switch is dropped and the read [retry]-ed for the new server.
    */
-  const withServerFallback = async (answer, path, shape, retry) => {
-    const needsServer = answer?.replica?.reconciledAt == null || answer?.unsupportedFilter === true
+  const withServerFallback = async (answer, path, shape, retry, missing = false) => {
+    const needsServer = missing || answer?.replica?.reconciledAt == null || answer?.unsupportedFilter === true
     const http = typeof nativeHttp === 'function' ? nativeHttp() : null
     const server = activeServer()
     const signedInHere = !!server && store.state?.user?.serverConnectionConfig?.id === server
@@ -371,7 +371,8 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
       return { ...seriesShape(data), serverConfigId: activeServer(), replica: webReplica() }
     }
     const answer = await fromNative(() => plugin.getSeriesById({ id }))
-    return withServerFallback(answer, path, seriesShape, () => getSeriesById({ id }))
+    // A series made on the server since the last sync is not in the replica yet; a 404 there leaves native's answer
+    return withServerFallback(answer, path, seriesShape, () => getSeriesById({ id }), !answer?.series)
   }
 
   // Without this the indicator stays hidden until something else asks

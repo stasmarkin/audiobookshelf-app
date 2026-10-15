@@ -87,6 +87,14 @@ const seriesReader = (answer) => {
   return { calls, getLibraryItems: async (args) => (calls.push(args), answer(args)) }
 }
 
+test('before native names the active server, copies of the signed-in server count', async () => {
+  const ctx = context([local('1')])
+  ctx.$store.state.activeServerConfigId = null
+  ctx.$absData = seriesReader(() => ({ results: [book('1')], total: 1 }))
+  const result = await resolvePlaybackQueue(ctx, { libraryItemId: '1', queueSource: { sourceType: 'series', sourceId: 's', libraryId: 'l' } })
+  assert.equal(result.queue.items[0].localLibraryItem?.id, 'local_device_1')
+})
+
 test('fetchSeriesBooks pages through $absData in server sequence order and never collapses', async () => {
   const books = Array.from({ length: 230 }, (_, i) => book(String(230 - i)))
   const absData = seriesReader(({ page }) => ({ results: books.slice(page * 100, page * 100 + 100), total: 230 }))
