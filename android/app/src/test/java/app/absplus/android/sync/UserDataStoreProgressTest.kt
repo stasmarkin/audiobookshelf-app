@@ -290,7 +290,7 @@ class UserDataStoreProgressTest {
     store.applyServerProgress("srv", emptyList())
     assertEquals("a snapshot never deletes", 3, db.mediaProgress().getAll("srv").size)
 
-    store.applyServerProgress("srv", emptyList(), deleteMissing = true, keep = setOf(progressItemKey("li3", null)))
+    store.applyServerProgress("srv", emptyList(), deleteMissing = true) { setOf(progressItemKey("li3", null)) }
 
     assertEquals(listOf("li2", "li3"), db.mediaProgress().getAll("srv").map { it.libraryItemId }.sorted())
     assertNull("the copy's progress goes too, or the next import would bring it back", paper())

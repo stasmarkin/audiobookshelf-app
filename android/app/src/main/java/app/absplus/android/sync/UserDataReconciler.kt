@@ -17,15 +17,17 @@ class UserDataReconciler(
         private val http: SyncHttp,
         private val store: UserDataStore,
         private val db: UserDataDatabase,
-        private val clock: () -> Long = System::currentTimeMillis
+        private val clock: () -> Long = System::currentTimeMillis,
+        private val paperImport: PaperProgressImport? = null
 ) {
   private val mapper = jacksonObjectMapper()
 
   /**
    * A full pull of the user's data. From server 2.36.0 GET /api/me/progress and /api/me/bookmarks; before that, and
    * when a split endpoint is missing (404: a server that reports a newer version than it runs), one GET /api/me, which
-   * also brings the user object. Nothing is applied unless both lists were read. Only this pull deletes progress rows
-   * the server no longer has.
+   * also brings the user object. Nothing is applied unless both lists were read. Rows imported from Paper since this
+   * server's last reconcile are sent first when newer ([PaperProgressImport]); then only this pull deletes progress
+   * rows the server no longer has.
    */
   suspend fun reconcileUser(config: ServerConnectionConfig): Result<Unit> {
     var user: JsonNode? = null
@@ -55,9 +57,12 @@ class UserDataReconciler(
     }
     val progress = parseProgressList(progressNode) ?: return Result.failure(SyncFailure("no progress in the response"))
     val bookmarks = parseBookmarks(bookmarksNode) ?: return Result.failure(SyncFailure("no bookmarks in the response"))
-    store.applyServerProgress(config.id, progress, deleteMissing = true)
+    val imported = paperImport?.unsettled(config.id).orEmpty()
+    store.pushNewerImported(config.id, imported, progress)
+    store.applyServerProgress(config.id, progress, deleteMissing = true) { paperImport?.unsettled(config.id).orEmpty() }
     store.applyServerBookmarks(config.id, bookmarks)
     if (user != null) saveUser(config.id, user, lastMeAt = clock())
+    paperImport?.settle(config.id, imported)
     return Result.success(Unit)
   }
 

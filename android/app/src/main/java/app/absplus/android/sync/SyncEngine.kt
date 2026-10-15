@@ -1,12 +1,14 @@
 package app.absplus.android.sync
 
 import android.content.Context
+import app.absplus.android.data.LocalMediaProgress
 import app.absplus.android.data.ServerConnectionConfig
 import app.absplus.android.db.userdata.UserDataDatabase
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.server.ApiHandler
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -71,7 +74,10 @@ class SyncDeps(
         val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS,
         /** See [UserDataStore]: items whose listening sessions still wait for `local-all`. */
         val unsentSessionKeys: (serverConfigId: String) -> Set<String> = { emptySet() },
-        val mirror: ProgressMirror = ProgressMirror.None
+        val mirror: ProgressMirror = ProgressMirror.None,
+        val paperImport: PaperProgressImport? = null,
+        /** Every Paper `LocalMediaProgress`, read for [paperImport] on start. */
+        val paperProgress: () -> List<LocalMediaProgress> = { emptyList() }
 )
 
 /**
@@ -106,8 +112,9 @@ object SyncEngine {
             client,
             refresh = { id, onResult -> handler.refreshAuthTokens(id, null, onResult) },
             tokenFor = { id -> DeviceManager.getServerConnectionConfig(id)?.token })
+    val db = UserDataDatabase.get(context.applicationContext)
     start(SyncDeps(
-            db = UserDataDatabase.get(context.applicationContext),
+            db = db,
             http = http,
             activeServer = ActiveServer::current,
             serverState = ServerReachability.state,
@@ -122,14 +129,17 @@ object SyncEngine {
             logError = { AbsLogger.error("SyncEngine", it) },
             ownerOf = { id -> DeviceManager.getServerConnectionConfig(id)?.userId },
             unsentSessionKeys = PaperProgressMirror::unsentSessionKeys,
-            mirror = PaperProgressMirror))
+            mirror = PaperProgressMirror,
+            paperImport = PaperProgressImport(db,
+                    context.applicationContext.getSharedPreferences(PaperProgressImport.PREFS, Context.MODE_PRIVATE)),
+            paperProgress = { DeviceManager.dbManager.getAllLocalMediaProgress() }))
   }
 
   private fun start(deps: SyncDeps) {
     val started = Core(deps)
     core = started
     started.start()
-    started.syncNow(SyncReason.APP_START)
+    started.startUp()
   }
 
   fun syncNow(reason: SyncReason) {
@@ -151,6 +161,9 @@ object SyncEngine {
    * it; false before [init]. For writes that must not hold up their caller, such as playback ticks.
    */
   fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = core?.launchWrite(block) ?: false
+
+  /** Imports [paper] like on start (a downloaded copy relinked to another server item); false before [init]. */
+  fun importPaperProgress(paper: List<LocalMediaProgress>): Boolean = core?.importPaperProgress(paper) ?: false
 
   /**
    * A server event the WebView received while [serverConfigId] was active; dropped when another server is active now.
@@ -183,7 +196,7 @@ object SyncEngine {
     private lateinit var pusher: OutboxPusher
     val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId }, ownerOf = deps.ownerOf,
             recentlySettledMs = deps.recentlySettledMs, unsentSessionKeys = deps.unsentSessionKeys, mirror = deps.mirror)
-    private val reconciler = UserDataReconciler(deps.http, store, deps.db, deps.clock)
+    private val reconciler = UserDataReconciler(deps.http, store, deps.db, deps.clock, deps.paperImport)
 
     private val lock = Any()
     private val runMutex = Mutex()
@@ -202,6 +215,8 @@ object SyncEngine {
     private val jobs = mutableListOf<Job>()
     /** Writes run one at a time in the order they were requested: a later tick must not be overwritten by an earlier one. */
     private val writes = Channel<suspend (UserDataStore) -> Unit>(Channel.UNLIMITED)
+    /** Runs wait for the Paper import of the start: a reconcile before it could delete a row it is about to write. */
+    private val startupImport = CompletableDeferred<Unit>()
 
     init {
       pusher = OutboxPusher(deps.db, deps.http, store, deps.clock, deps.log)
@@ -218,10 +233,6 @@ object SyncEngine {
             deps.logError("Write failed: $e")
           }
         }
-      }
-      jobs += scope.launch {
-        // Not the state itself: a quick OFFLINE and back is conflated away there, and its push would be missed
-        deps.onlineEntries.collect { if (deps.serverState.value == ServerState.ONLINE) syncNow(SyncReason.ONLINE) }
       }
       jobs += scope.launch {
         var previous = deps.serverId.value
@@ -264,6 +275,37 @@ object SyncEngine {
       job.start()
     }
 
+    /** Paper progress newer than userdata.db is imported before the first sync, off the caller's thread. */
+    fun startUp() {
+      val import = deps.paperImport ?: return firstSync()
+      launchWrite {
+        try {
+          val count = import.import(deps.paperProgress())
+          if (count > 0) deps.log("Imported $count Paper progress rows")
+        } finally {
+          firstSync()
+        }
+      }
+    }
+
+    private fun firstSync() {
+      startupImport.complete(Unit)
+      // The current state is the start's own sync below; every later entry into ONLINE syncs again. Not the state
+      // itself: a quick OFFLINE and back is conflated away there, and its push would be missed.
+      val seen = deps.onlineEntries.value
+      jobs += scope.launch {
+        deps.onlineEntries.filter { it != seen }.collect {
+          if (deps.serverState.value == ServerState.ONLINE) syncNow(SyncReason.ONLINE)
+        }
+      }
+      syncNow(SyncReason.APP_START)
+    }
+
+    fun importPaperProgress(paper: List<LocalMediaProgress>): Boolean {
+      val import = deps.paperImport ?: return false
+      return launchWrite { import.import(paper) }
+    }
+
     fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = writes.trySend(block).isSuccess
 
     fun onLocalWrite() {
@@ -300,6 +342,8 @@ object SyncEngine {
       val self = coroutineContext[Job]
       var finished = false
       try {
+        // Requests made meanwhile pile up into one run
+        startupImport.await()
         while (true) {
           val reconcile = synchronized(lock) {
             if (!wantPush) {

@@ -194,12 +194,12 @@ class UserDataStore(
    * Merges the server's progress records by [mergeProgress]. A row whose item has unsent listening sessions counts as
    * pending. [deleteMissing] (a full pull only, never a snapshot that may predate a just-sent PATCH): a row the server
    * has no record of is deleted, with the Paper progress of its copy, unless it is pending, has unsent sessions or is
-   * in [keep].
+   * in [keep] (read in the deleting transaction, so a key remembered by an import that just committed is seen).
    *
    * @return the rows taken from the server
    */
   suspend fun applyServerProgress(serverConfigId: String, list: List<ServerProgress>, deleteMissing: Boolean = false,
-                                  keep: Set<String> = emptySet()): List<MediaProgressEntity> {
+                                  keep: () -> Set<String> = { emptySet() }): List<MediaProgressEntity> {
     val unsent = unsentSessionKeys(serverConfigId)
     val (taken, deleted) = db.withTransaction {
       val taken = mutableListOf<MediaProgressEntity>()
@@ -218,9 +218,10 @@ class UserDataStore(
             progress.upsert(local.copy(serverProgressId = server.id))
         }
       }
+      val kept = if (deleteMissing) keep() else emptySet()
       val deleted = if (!deleteMissing) emptyList() else progress.getAll(serverConfigId).filter { row ->
         val key = progressItemKey(row.libraryItemId, row.episodeId)
-        key !in seen && !row.pending && key !in unsent && key !in keep
+        key !in seen && !row.pending && key !in unsent && key !in kept
       }
       deleted.forEach { progress.delete(it.serverConfigId, it.libraryItemId, it.episodeId) }
       taken to deleted
@@ -230,6 +231,27 @@ class UserDataStore(
     val changed = (taken + deleted).map { it.libraryItemId }.distinct()
     if (changed.isNotEmpty()) notifier.notify(SCOPE_PROGRESS, changed)
     return taken
+  }
+
+  /**
+   * Imported rows ([keys]) that the server has no record of, or an older one, are queued to be sent: they hold what
+   * was done on the device before this release or on a rolled-back version. Runs before the merge and the deletion of
+   * rows missing on the server. A pending row already has its own outbox rows.
+   */
+  suspend fun pushNewerImported(serverConfigId: String, keys: Set<String>, server: List<ServerProgress>) {
+    if (keys.isEmpty()) return
+    val byKey = server.associateBy { progressItemKey(it.libraryItemId, it.episodeId) }
+    db.withTransaction {
+      for (key in keys) {
+        val (libraryItemId, episodeId) = progressKeyParts(key)
+        val row = progress.get(serverConfigId, libraryItemId, episodeId) ?: continue
+        if (row.pending) continue
+        val remote = byKey[key]
+        if (remote != null && row.lastUpdate <= remote.lastUpdate) continue
+        enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, key, OutboxPayload.progressPatch(PaperProgressImport.IMPORT_FIELDS))
+        setProgressPending(serverConfigId, key)
+      }
+    }
   }
 
   /** One server record (socket event, the server value on refocus); whether it was taken. */
