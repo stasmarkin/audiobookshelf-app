@@ -306,7 +306,17 @@ internal fun prepareItems(
   return Prepared(keyed, primary ?: nocaseOrder(false) { it.displayTitle }, sort == "random")
 }
 
-private fun titleOf(row: ItemRow, ignorePrefix: Boolean) = if (ignorePrefix) row.titleIgnorePrefix else row.title
+private fun titleOf(row: ItemRow, ignorePrefix: Boolean) = if (ignorePrefix) withoutPrefix(row.title, row.titleIgnorePrefix) else row.title
+
+/**
+ * The server sorts on its `titleIgnorePrefix` column, the title without the prefix ("Good Book"), while its JSON has
+ * the prefix moved to the end ("Good Book, The"); the column is recovered from the two.
+ */
+internal fun withoutPrefix(original: String, prefixAtEnd: String): String {
+  if (prefixAtEnd == original || !prefixAtEnd.contains(", ")) return prefixAtEnd
+  val prefix = prefixAtEnd.substringAfterLast(", ")
+  return prefixAtEnd.dropLast(prefix.length + 2)
+}
 
 private fun rowFilter(
         filter: CatalogFilter?,
@@ -394,7 +404,7 @@ private fun collapse(
     var found = false
     for ((member, row) in books) {
       if (!found && row.id !in included) {
-        included[row.id] = QueryEntry.Collapsed(row.id, entity.id, entity.name, entity.nameIgnorePrefix, member.sequence, numBooks,
+        included[row.id] = QueryEntry.Collapsed(row.id, entity.id, entity.name, withoutPrefix(entity.name, entity.nameIgnorePrefix), member.sequence, numBooks,
                 books.map { it.second.id })
         excluded.remove(row.id)
         found = true

@@ -139,6 +139,19 @@ class LibraryQueryTest {
   }
 
   @Test
+  fun ignoredPrefixIsDroppedNotMovedToTheEnd() {
+    // JSON titleIgnorePrefix is "Saga, The"; the server sorts on "Saga", which comes before "Saga Interlude"
+    val rows = listOf(itemRow("i", title = "Saga Interlude"), itemRow("t", title = "The Saga").copy(titleIgnorePrefix = "Saga, The"))
+    val q = ItemsQuery("media.metadata.title", false, null, false, sortingIgnorePrefix = true, mediaType = "book")
+    assertEquals(listOf("t", "i"), ids(order(rows, q)))
+
+    val series = SeriesIndex.of(listOf(seriesRow("srv", "s1", name = "The Saga").copy(nameIgnorePrefix = "Saga, The")),
+            listOf(member("srv", "s1", "i", "1")))
+    val card = order(rows, q.copy(collapseSeries = true), series = series).filterIsInstance<QueryEntry.Collapsed>().single()
+    assertEquals("Saga", card.nameIgnorePrefix)
+  }
+
+  @Test
   fun podcastsSortByAuthorWithEmptyLast() {
     val rows = listOf(itemRow("a", authorName = "", mediaType = "podcast"), itemRow("b", authorName = "Zed", mediaType = "podcast"),
             itemRow("c", authorName = "amy", mediaType = "podcast"))

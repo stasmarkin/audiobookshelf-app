@@ -1,58 +1,81 @@
 {
  "authors": [
   {
-   "id": "9355a315-9e8c-4905-9c83-d872cdeee1c1",
-   "name": "John Smithson"
-  },
-  {
    "id": "3a4c7ac0-2817-4a28-937b-3c33365a0098",
    "name": "Ann Lee"
+  },
+  {
+   "id": "9d147308-8e4b-4494-8ba5-e669b998dbc7",
+   "name": "bob lowercase"
   },
   {
    "id": "f60ea66b-f000-4850-9c4d-9f27a2947fe0",
    "name": "John Smith"
   },
   {
-   "id": "dfc30133-696d-43d0-93ae-5cb1e03645fe",
-   "name": "Анна Иванова"
+   "id": "9355a315-9e8c-4905-9c83-d872cdeee1c1",
+   "name": "John Smithson"
   },
   {
    "id": "d64c7f7e-5492-417e-ab8f-5a8e0b630d10",
    "name": "Zed Alpha"
   },
   {
-   "id": "9d147308-8e4b-4494-8ba5-e669b998dbc7",
-   "name": "bob lowercase"
+   "id": "dfc30133-696d-43d0-93ae-5cb1e03645fe",
+   "name": "Анна Иванова"
   }
  ],
  "series": [
-  {
-   "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
-   "name": "Мир"
-  },
-  {
-   "id": "7aedacc5-33da-4205-a9d5-a9472d433f2d",
-   "name": "Трилогия"
-  },
   {
    "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
    "name": "The Saga"
   },
   {
+   "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
+   "name": "Мир"
+  },
+  {
    "id": "e533af1f-dbeb-4ab9-af4d-f5ac928cfa65",
    "name": "Повесть"
+  },
+  {
+   "id": "7aedacc5-33da-4205-a9d5-a9472d433f2d",
+   "name": "Трилогия"
   }
  ],
- "genres": [],
- "tags": [],
- "narrators": [],
- "languages": [],
- "publishers": [],
- "publishedDecades": [],
- "bookCount": 0,
- "authorCount": 0,
- "seriesCount": 0,
+ "genres": [
+  "Fantasy",
+  "Mystery",
+  "Sci-Fi",
+  "Фэнтези"
+ ],
+ "tags": [
+  "?ü",
+  "fav",
+  "to+read"
+ ],
+ "narrators": [
+  "Nar One",
+  "Nar Two"
+ ],
+ "languages": [
+  "English",
+  "Русский"
+ ],
+ "publishers": [
+  "Pub A",
+  "Pub B"
+ ],
+ "publishedDecades": [
+  "1850",
+  "1990",
+  "2000",
+  "2020"
+ ],
+ "bookCount": 50,
+ "authorCount": 6,
+ "seriesCount": 4,
  "podcastCount": 0,
  "numIssues": 0,
- "loadedAt": 1792076681374
+ "loadedAt": 1792077653953
 }

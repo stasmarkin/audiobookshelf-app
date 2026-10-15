@@ -1,6 +1,6 @@
 {
  "server": "2.37.1",
- "recordedAt": 1792076710068,
+ "recordedAt": 1792077654030,
  "cases": [
   {
    "name": "sort media.metadata.title desc=false",
@@ -2458,36 +2458,47 @@
     }
    ],
    "sample": {
-    "id": "9a02779f-645d-467b-9f9d-be1071cb4b98",
-    "ino": "92289",
+    "id": "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+    "collapsedSeries": {
+     "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
+     "numBooks": 4,
+     "libraryItemIds": [
+      "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+      "e408574f-0019-46fb-900c-f6da629d56d3",
+      "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
+      "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0"
+     ],
+     "sequence": "1",
+     "name": "The Saga",
+     "nameIgnorePrefix": "Saga"
+    },
+    "ino": "92271",
     "oldLibraryItemId": null,
     "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
     "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
-    "path": "/audiobooks/Book 23",
-    "relPath": "Book 23",
+    "path": "/audiobooks/Book 14",
+    "relPath": "Book 14",
     "isFile": false,
-    "mtimeMs": 1792076589289,
-    "ctimeMs": 1792076589289,
-    "birthtimeMs": 1792076589259,
-    "addedAt": 1792076682450,
-    "updatedAt": 1792076690674,
+    "mtimeMs": 1792076588999,
+    "ctimeMs": 1792076588999,
+    "birthtimeMs": 1792076588972,
+    "addedAt": 1792076682738,
+    "updatedAt": 1792076690529,
     "isMissing": false,
     "isInvalid": false,
     "mediaType": "book",
     "media": {
-     "id": "b5d25c63-ec94-421a-9f39-b0789e238962",
+     "id": "0b604f9c-55da-4194-abe5-40d9f6b2efee",
      "metadata": {
-      "title": "10 Rules",
-      "titleIgnorePrefix": "10 Rules",
+      "title": "The Saga Begins",
+      "titleIgnorePrefix": "Saga Begins, The",
       "subtitle": null,
-      "authorName": "Ann Lee, John Smith",
-      "authorNameLF": "Lee, Ann, Smith, John",
-      "narratorName": "",
-      "seriesName": "",
-      "genres": [
-       "Mystery"
-      ],
-      "publishedYear": null,
+      "authorName": "John Smith",
+      "authorNameLF": "Smith, John",
+      "narratorName": "Nar One, Nar Two",
+      "seriesName": "The Saga #1",
+      "genres": [],
+      "publishedYear": "2001",
       "publishedDate": null,
       "publisher": null,
       "description": null,
@@ -2498,18 +2509,15 @@
       "abridged": false
      },
      "coverPath": null,
-     "tags": [
-      "fav",
-      "?ü"
-     ],
+     "tags": [],
      "numTracks": 1,
      "numAudioFiles": 1,
      "numChapters": 0,
-     "duration": 23,
-     "size": 23445
+     "duration": 14,
+     "size": 14445
     },
     "numFiles": 1,
-    "size": 23445
+    "size": 14445
    }
   },
   {
@@ -2575,56 +2583,69 @@
     }
    ],
    "sample": {
-    "id": "0202b773-ecf3-438a-beef-372ead576b16",
-    "ino": "92247",
+    "id": "e408574f-0019-46fb-900c-f6da629d56d3",
+    "collapsedSeries": {
+     "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
+     "numBooks": 4,
+     "libraryItemIds": [
+      "e408574f-0019-46fb-900c-f6da629d56d3",
+      "6ec015e7-c9cf-4313-ab04-99a3d021cb1e"
+     ],
+     "sequence": "2",
+     "name": "The Saga",
+     "nameIgnorePrefix": "Saga"
+    },
+    "ino": "92273",
     "oldLibraryItemId": null,
     "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
     "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
-    "path": "/audiobooks/Book 02",
-    "relPath": "Book 02",
+    "path": "/audiobooks/Book 15",
+    "relPath": "Book 15",
     "isFile": false,
-    "mtimeMs": 1792076588594,
-    "ctimeMs": 1792076588594,
-    "birthtimeMs": 1792076588541,
-    "addedAt": 1792076683216,
-    "updatedAt": 1792076690306,
+    "mtimeMs": 1792076589030,
+    "ctimeMs": 1792076589030,
+    "birthtimeMs": 1792076588999,
+    "addedAt": 1792076682704,
+    "updatedAt": 1792076690546,
     "isMissing": false,
     "isInvalid": false,
     "mediaType": "book",
     "media": {
-     "id": "b4a2615d-63be-48a5-afcb-971a3b2f2665",
+     "id": "2b61ffa4-7f15-4c79-b490-1c24a1115ad9",
      "metadata": {
-      "title": "A Quiet Place",
-      "titleIgnorePrefix": "Quiet Place, A",
+      "title": "The Saga Continues",
+      "titleIgnorePrefix": "Saga Continues, The",
       "subtitle": null,
-      "authorName": "Ann Lee, John Smith",
-      "authorNameLF": "Lee, Ann, Smith, John",
-      "narratorName": "Nar One, Nar Two",
-      "seriesName": "",
+      "authorName": "John Smithson",
+      "authorNameLF": "Smithson, John",
+      "narratorName": "",
+      "seriesName": "The Saga #2",
       "genres": [
-       "Фэнтези",
        "Fantasy"
       ],
-      "publishedYear": null,
+      "publishedYear": "1999",
       "publishedDate": null,
-      "publisher": null,
+      "publisher": "Pub A",
       "description": null,
       "isbn": null,
       "asin": null,
       "language": null,
-      "explicit": false,
+      "explicit": true,
       "abridged": false
      },
      "coverPath": null,
-     "tags": [],
+     "tags": [
+      "fav",
+      "?ü"
+     ],
      "numTracks": 1,
      "numAudioFiles": 1,
      "numChapters": 0,
-     "duration": 2,
-     "size": 2421
+     "duration": 15,
+     "size": 15453
     },
     "numFiles": 1,
-    "size": 2421
+    "size": 15453
    }
   },
   {
@@ -2725,36 +2746,47 @@
     }
    ],
    "sample": {
-    "id": "9a02779f-645d-467b-9f9d-be1071cb4b98",
-    "ino": "92289",
+    "id": "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+    "collapsedSeries": {
+     "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
+     "numBooks": 4,
+     "libraryItemIds": [
+      "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+      "e408574f-0019-46fb-900c-f6da629d56d3",
+      "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
+      "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0"
+     ],
+     "sequence": "1",
+     "name": "The Saga",
+     "nameIgnorePrefix": "Saga"
+    },
+    "ino": "92271",
     "oldLibraryItemId": null,
     "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
     "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
-    "path": "/audiobooks/Book 23",
-    "relPath": "Book 23",
+    "path": "/audiobooks/Book 14",
+    "relPath": "Book 14",
     "isFile": false,
-    "mtimeMs": 1792076589289,
-    "ctimeMs": 1792076589289,
-    "birthtimeMs": 1792076589259,
-    "addedAt": 1792076682450,
-    "updatedAt": 1792076690674,
+    "mtimeMs": 1792076588999,
+    "ctimeMs": 1792076588999,
+    "birthtimeMs": 1792076588972,
+    "addedAt": 1792076682738,
+    "updatedAt": 1792076690529,
     "isMissing": false,
     "isInvalid": false,
     "mediaType": "book",
     "media": {
-     "id": "b5d25c63-ec94-421a-9f39-b0789e238962",
+     "id": "0b604f9c-55da-4194-abe5-40d9f6b2efee",
      "metadata": {
-      "title": "10 Rules",
-      "titleIgnorePrefix": "10 Rules",
+      "title": "The Saga Begins",
+      "titleIgnorePrefix": "Saga Begins, The",
       "subtitle": null,
-      "authorName": "Ann Lee, John Smith",
-      "authorNameLF": "Lee, Ann, Smith, John",
-      "narratorName": "",
-      "seriesName": "",
-      "genres": [
-       "Mystery"
-      ],
-      "publishedYear": null,
+      "authorName": "John Smith",
+      "authorNameLF": "Smith, John",
+      "narratorName": "Nar One, Nar Two",
+      "seriesName": "The Saga #1",
+      "genres": [],
+      "publishedYear": "2001",
       "publishedDate": null,
       "publisher": null,
       "description": null,
@@ -2765,18 +2797,15 @@
       "abridged": false
      },
      "coverPath": null,
-     "tags": [
-      "fav",
-      "?ü"
-     ],
+     "tags": [],
      "numTracks": 1,
      "numAudioFiles": 1,
      "numChapters": 0,
-     "duration": 23,
-     "size": 23445
+     "duration": 14,
+     "size": 14445
     },
     "numFiles": 1,
-    "size": 23445
+    "size": 14445
    }
   },
   {
@@ -2807,56 +2836,68 @@
     }
    ],
    "sample": {
-    "id": "0202b773-ecf3-438a-beef-372ead576b16",
-    "ino": "92247",
+    "id": "fd83d054-f537-463c-b7e8-ee8a6b17d765",
+    "collapsedSeries": {
+     "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
+     "numBooks": 5,
+     "libraryItemIds": [
+      "fd83d054-f537-463c-b7e8-ee8a6b17d765",
+      "44a764a3-c0a7-4666-ba7c-8fa18b45c08d"
+     ],
+     "sequence": "1.5",
+     "name": "Мир",
+     "nameIgnorePrefix": "Мир"
+    },
+    "ino": "92259",
     "oldLibraryItemId": null,
     "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
     "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
-    "path": "/audiobooks/Book 02",
-    "relPath": "Book 02",
+    "path": "/audiobooks/Book 08",
+    "relPath": "Book 08",
     "isFile": false,
-    "mtimeMs": 1792076588594,
-    "ctimeMs": 1792076588594,
-    "birthtimeMs": 1792076588541,
-    "addedAt": 1792076683216,
-    "updatedAt": 1792076690306,
+    "mtimeMs": 1792076588806,
+    "ctimeMs": 1792076588806,
+    "birthtimeMs": 1792076588780,
+    "addedAt": 1792076682990,
+    "updatedAt": 1792076690420,
     "isMissing": false,
     "isInvalid": false,
     "mediaType": "book",
     "media": {
-     "id": "b4a2615d-63be-48a5-afcb-971a3b2f2665",
+     "id": "dad6f646-f481-4478-b279-fca3abb2a045",
      "metadata": {
-      "title": "A Quiet Place",
-      "titleIgnorePrefix": "Quiet Place, A",
+      "title": "Мир: середина",
+      "titleIgnorePrefix": "Мир: середина",
       "subtitle": null,
-      "authorName": "Ann Lee, John Smith",
-      "authorNameLF": "Lee, Ann, Smith, John",
-      "narratorName": "Nar One, Nar Two",
-      "seriesName": "",
+      "authorName": "John Smithson",
+      "authorNameLF": "Smithson, John",
+      "narratorName": "Nar One",
+      "seriesName": "Мир #1.5",
       "genres": [
-       "Фэнтези",
-       "Fantasy"
+       "Mystery"
       ],
-      "publishedYear": null,
+      "publishedYear": "1999",
       "publishedDate": null,
       "publisher": null,
       "description": null,
       "isbn": null,
       "asin": null,
-      "language": null,
+      "language": "Русский",
       "explicit": false,
       "abridged": false
      },
      "coverPath": null,
-     "tags": [],
+     "tags": [
+      "fav"
+     ],
      "numTracks": 1,
      "numAudioFiles": 1,
      "numChapters": 0,
-     "duration": 2,
-     "size": 2421
+     "duration": 8,
+     "size": 8469
     },
     "numFiles": 1,
-    "size": 2421
+    "size": 8469
    }
   },
   {
@@ -2961,57 +3002,73 @@
     }
    ],
    "sample": {
-    "id": "030c8cf5-5c80-4184-883c-b82d5138af26",
-    "ino": "92245",
+    "id": "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+    "collapsedSeries": {
+     "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
+     "numBooks": 5,
+     "libraryItemIds": [
+      "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+      "fd83d054-f537-463c-b7e8-ee8a6b17d765",
+      "44a764a3-c0a7-4666-ba7c-8fa18b45c08d",
+      "be592fa5-9e66-4b4c-a194-5458e95e74a9",
+      "4f4107c4-4c23-4664-90a7-b0bba68d9a96"
+     ],
+     "sequence": "1",
+     "name": "Мир",
+     "nameIgnorePrefix": "Мир"
+    },
+    "ino": "92257",
     "oldLibraryItemId": null,
     "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
     "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
-    "path": "/audiobooks/Book 01",
-    "relPath": "Book 01",
+    "path": "/audiobooks/Book 07",
+    "relPath": "Book 07",
     "isFile": false,
-    "mtimeMs": 1792076588540,
-    "ctimeMs": 1792076588540,
-    "birthtimeMs": 1792076588404,
-    "addedAt": 1792076683257,
-    "updatedAt": 1792076690281,
+    "mtimeMs": 1792076588780,
+    "ctimeMs": 1792076588780,
+    "birthtimeMs": 1792076588741,
+    "addedAt": 1792076683024,
+    "updatedAt": 1792076690402,
     "isMissing": false,
     "isInvalid": false,
     "mediaType": "book",
     "media": {
-     "id": "ea3cab77-7bd2-47c2-97d9-92b6f19aae31",
+     "id": "4de90c47-31f4-4fa8-8ba5-4d1416554196",
      "metadata": {
-      "title": "The Last Light",
-      "titleIgnorePrefix": "Last Light, The",
+      "title": "Мир: начало",
+      "titleIgnorePrefix": "Мир: начало",
       "subtitle": null,
-      "authorName": "John Smithson",
-      "authorNameLF": "Smithson, John",
-      "narratorName": "Nar Two",
-      "seriesName": "",
+      "authorName": "John Smith",
+      "authorNameLF": "Smith, John",
+      "narratorName": "",
+      "seriesName": "Мир #1, Трилогия #3",
       "genres": [
-       "Sci-Fi"
+       "Фэнтези",
+       "Fantasy"
       ],
-      "publishedYear": "1999",
+      "publishedYear": "2001",
       "publishedDate": null,
       "publisher": "Pub B",
       "description": null,
       "isbn": null,
       "asin": null,
-      "language": "English",
+      "language": null,
       "explicit": false,
       "abridged": false
      },
      "coverPath": null,
      "tags": [
-      "to+read"
+      "fav",
+      "?ü"
      ],
      "numTracks": 1,
      "numAudioFiles": 1,
      "numChapters": 0,
-     "duration": 1,
-     "size": 1413
+     "duration": 7,
+     "size": 7461
     },
     "numFiles": 1,
-    "size": 1413
+    "size": 7461
    }
   },
   {
@@ -4004,56 +4061,56 @@
    },
    "total": 50,
    "ids": [
-    "eb10e738-837c-4629-bbdd-7b0d7ef12194",
-    "fd83d054-f537-463c-b7e8-ee8a6b17d765",
-    "95fd3d0e-b40c-4baf-8fed-bd40a4fd32e7",
-    "d572070b-758d-47d3-96e2-3b625844edf3",
-    "d81747df-b1b2-4fb0-bdaf-51d497baab29",
-    "a1806b73-7f5c-488c-aecb-aa73345bf63d",
-    "ccbae3d4-63eb-4eff-85b2-911093527fa5",
     "7e082b17-ceea-4042-b029-5939cf505189",
-    "aade03bb-1a50-4f1f-b41e-971b89c3bd33",
-    "87b248cc-d8f5-4ca8-9db8-b39cd43a3181",
-    "cb0e55a0-c0af-4c85-9d37-6781782f4cf0",
-    "48da075f-dea1-4483-9c04-ea637dcb2fce",
-    "be592fa5-9e66-4b4c-a194-5458e95e74a9",
-    "c3a6674c-0558-4973-ae69-2396aed9f77f",
-    "c5f8b326-880f-4b81-bd50-2fb84ea4b835",
-    "3ee07960-6b82-423b-b8bc-a910a1fe5122",
-    "5271ed20-33df-4688-a02a-f5cd15d77b2b",
-    "3e3d4052-ca3c-44eb-ac5f-28da48bdc022",
-    "5cb71aca-b8d8-488b-8054-14e0b9af952b",
-    "41d15748-f9da-4778-936b-ae85f496ad54",
-    "c70c5d7e-8a48-4c90-ab5e-3e61b624a3ff",
-    "b392d64a-a455-4bbe-8719-4eaa02a97d81",
-    "881f22ed-3a16-4f73-a6b6-4a48b7a9c675",
-    "da9282ef-1144-4d70-aede-b772c9ba7185",
-    "702fa6ec-ae88-4214-9637-f4ab0c83a238",
-    "1c499dfc-061d-4c48-8726-c8e12af6aec1",
-    "13fefdce-2707-4ab3-9bde-5c2290a17535",
-    "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0",
-    "a023b68a-8468-4bb4-9ca1-c8bdb85a6bf3",
-    "3c3070fc-b8a2-47bc-9cf8-95c2f30fc021",
-    "42708d3d-83b7-428b-9078-f2a8e73f6015",
-    "4f4107c4-4c23-4664-90a7-b0bba68d9a96",
-    "030c8cf5-5c80-4184-883c-b82d5138af26",
-    "e408574f-0019-46fb-900c-f6da629d56d3",
-    "953b60bb-1fac-4a39-a28d-8c5f8d9ac447",
-    "9a02779f-645d-467b-9f9d-be1071cb4b98",
-    "3cf01d39-2330-483b-a0cd-99662675e17a",
-    "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
-    "c1c9eba0-79d0-4c5b-866b-34b209007d2a",
-    "1066735a-0da2-4caf-aafc-cad72a41ee09",
-    "85b83e0b-6502-4605-9e8d-3ce469bb074b",
     "40c27509-5499-4a96-a54c-1a644faaa4d1",
-    "ef87b07b-0fd6-4878-b942-e836e2ba3548",
-    "44a764a3-c0a7-4666-ba7c-8fa18b45c08d",
     "beebc0fc-9cd1-49e7-8c0c-552595f86bfa",
-    "a7b96ea3-cdfd-4dc4-b62a-c04e9537028b",
-    "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
-    "0202b773-ecf3-438a-beef-372ead576b16",
+    "c1c9eba0-79d0-4c5b-866b-34b209007d2a",
+    "b392d64a-a455-4bbe-8719-4eaa02a97d81",
     "03a8886c-167f-4b3e-82da-dd435185455d",
-    "bc76ed66-8729-43d4-a5a2-8a7d0aa02931"
+    "44a764a3-c0a7-4666-ba7c-8fa18b45c08d",
+    "5271ed20-33df-4688-a02a-f5cd15d77b2b",
+    "5cb71aca-b8d8-488b-8054-14e0b9af952b",
+    "aade03bb-1a50-4f1f-b41e-971b89c3bd33",
+    "fd83d054-f537-463c-b7e8-ee8a6b17d765",
+    "953b60bb-1fac-4a39-a28d-8c5f8d9ac447",
+    "13fefdce-2707-4ab3-9bde-5c2290a17535",
+    "3e3d4052-ca3c-44eb-ac5f-28da48bdc022",
+    "4f4107c4-4c23-4664-90a7-b0bba68d9a96",
+    "41d15748-f9da-4778-936b-ae85f496ad54",
+    "cb0e55a0-c0af-4c85-9d37-6781782f4cf0",
+    "87b248cc-d8f5-4ca8-9db8-b39cd43a3181",
+    "c5f8b326-880f-4b81-bd50-2fb84ea4b835",
+    "48da075f-dea1-4483-9c04-ea637dcb2fce",
+    "a7b96ea3-cdfd-4dc4-b62a-c04e9537028b",
+    "a023b68a-8468-4bb4-9ca1-c8bdb85a6bf3",
+    "030c8cf5-5c80-4184-883c-b82d5138af26",
+    "3c3070fc-b8a2-47bc-9cf8-95c2f30fc021",
+    "3cf01d39-2330-483b-a0cd-99662675e17a",
+    "702fa6ec-ae88-4214-9637-f4ab0c83a238",
+    "3ee07960-6b82-423b-b8bc-a910a1fe5122",
+    "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+    "be592fa5-9e66-4b4c-a194-5458e95e74a9",
+    "bc76ed66-8729-43d4-a5a2-8a7d0aa02931",
+    "85b83e0b-6502-4605-9e8d-3ce469bb074b",
+    "d572070b-758d-47d3-96e2-3b625844edf3",
+    "9a02779f-645d-467b-9f9d-be1071cb4b98",
+    "d81747df-b1b2-4fb0-bdaf-51d497baab29",
+    "c3a6674c-0558-4973-ae69-2396aed9f77f",
+    "1c499dfc-061d-4c48-8726-c8e12af6aec1",
+    "1066735a-0da2-4caf-aafc-cad72a41ee09",
+    "0202b773-ecf3-438a-beef-372ead576b16",
+    "ef87b07b-0fd6-4878-b942-e836e2ba3548",
+    "a1806b73-7f5c-488c-aecb-aa73345bf63d",
+    "42708d3d-83b7-428b-9078-f2a8e73f6015",
+    "881f22ed-3a16-4f73-a6b6-4a48b7a9c675",
+    "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+    "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0",
+    "da9282ef-1144-4d70-aede-b772c9ba7185",
+    "95fd3d0e-b40c-4baf-8fed-bd40a4fd32e7",
+    "e408574f-0019-46fb-900c-f6da629d56d3",
+    "eb10e738-837c-4629-bbdd-7b0d7ef12194",
+    "c70c5d7e-8a48-4c90-ab5e-3e61b624a3ff",
+    "6ec015e7-c9cf-4313-ab04-99a3d021cb1e"
    ],
    "collapsed": [],
    "sample": null
@@ -4069,26 +4126,26 @@
    },
    "total": 20,
    "ids": [
-    "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
-    "e408574f-0019-46fb-900c-f6da629d56d3",
-    "42708d3d-83b7-428b-9078-f2a8e73f6015",
+    "d81747df-b1b2-4fb0-bdaf-51d497baab29",
+    "a7b96ea3-cdfd-4dc4-b62a-c04e9537028b",
+    "3cf01d39-2330-483b-a0cd-99662675e17a",
     "c70c5d7e-8a48-4c90-ab5e-3e61b624a3ff",
-    "c5f8b326-880f-4b81-bd50-2fb84ea4b835",
+    "b392d64a-a455-4bbe-8719-4eaa02a97d81",
     "0202b773-ecf3-438a-beef-372ead576b16",
     "a1806b73-7f5c-488c-aecb-aa73345bf63d",
-    "b392d64a-a455-4bbe-8719-4eaa02a97d81",
-    "a7b96ea3-cdfd-4dc4-b62a-c04e9537028b",
-    "aade03bb-1a50-4f1f-b41e-971b89c3bd33",
+    "95fd3d0e-b40c-4baf-8fed-bd40a4fd32e7",
+    "42708d3d-83b7-428b-9078-f2a8e73f6015",
     "be592fa5-9e66-4b4c-a194-5458e95e74a9",
     "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+    "c5f8b326-880f-4b81-bd50-2fb84ea4b835",
     "03a8886c-167f-4b3e-82da-dd435185455d",
-    "3ee07960-6b82-423b-b8bc-a910a1fe5122",
     "eb10e738-837c-4629-bbdd-7b0d7ef12194",
+    "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
+    "e408574f-0019-46fb-900c-f6da629d56d3",
     "87b248cc-d8f5-4ca8-9db8-b39cd43a3181",
-    "953b60bb-1fac-4a39-a28d-8c5f8d9ac447",
-    "95fd3d0e-b40c-4baf-8fed-bd40a4fd32e7",
-    "3cf01d39-2330-483b-a0cd-99662675e17a",
-    "d81747df-b1b2-4fb0-bdaf-51d497baab29"
+    "3ee07960-6b82-423b-b8bc-a910a1fe5122",
+    "aade03bb-1a50-4f1f-b41e-971b89c3bd33",
+    "953b60bb-1fac-4a39-a28d-8c5f8d9ac447"
    ],
    "collapsed": [],
    "sample": null
@@ -4390,36 +4447,47 @@
     }
    ],
    "sample": {
-    "id": "9a02779f-645d-467b-9f9d-be1071cb4b98",
-    "ino": "92289",
+    "id": "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+    "collapsedSeries": {
+     "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
+     "numBooks": 4,
+     "libraryItemIds": [
+      "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+      "e408574f-0019-46fb-900c-f6da629d56d3",
+      "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
+      "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0"
+     ],
+     "sequence": "1",
+     "name": "The Saga",
+     "nameIgnorePrefix": "Saga"
+    },
+    "ino": "92271",
     "oldLibraryItemId": null,
     "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
     "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
-    "path": "/audiobooks/Book 23",
-    "relPath": "Book 23",
+    "path": "/audiobooks/Book 14",
+    "relPath": "Book 14",
     "isFile": false,
-    "mtimeMs": 1792076589289,
-    "ctimeMs": 1792076589289,
-    "birthtimeMs": 1792076589259,
-    "addedAt": 1792076682450,
-    "updatedAt": 1792076690674,
+    "mtimeMs": 1792076588999,
+    "ctimeMs": 1792076588999,
+    "birthtimeMs": 1792076588972,
+    "addedAt": 1792076682738,
+    "updatedAt": 1792076690529,
     "isMissing": false,
     "isInvalid": false,
     "mediaType": "book",
     "media": {
-     "id": "b5d25c63-ec94-421a-9f39-b0789e238962",
+     "id": "0b604f9c-55da-4194-abe5-40d9f6b2efee",
      "metadata": {
-      "title": "10 Rules",
-      "titleIgnorePrefix": "10 Rules",
+      "title": "The Saga Begins",
+      "titleIgnorePrefix": "Saga Begins, The",
       "subtitle": null,
-      "authorName": "Ann Lee, John Smith",
-      "authorNameLF": "Lee, Ann, Smith, John",
-      "narratorName": "",
-      "seriesName": "",
-      "genres": [
-       "Mystery"
-      ],
-      "publishedYear": null,
+      "authorName": "John Smith",
+      "authorNameLF": "Smith, John",
+      "narratorName": "Nar One, Nar Two",
+      "seriesName": "The Saga #1",
+      "genres": [],
+      "publishedYear": "2001",
       "publishedDate": null,
       "publisher": null,
       "description": null,
@@ -4430,18 +4498,15 @@
       "abridged": false
      },
      "coverPath": null,
-     "tags": [
-      "fav",
-      "?ü"
-     ],
+     "tags": [],
      "numTracks": 1,
      "numAudioFiles": 1,
      "numChapters": 0,
-     "duration": 23,
-     "size": 23445
+     "duration": 14,
+     "size": 14445
     },
     "numFiles": 1,
-    "size": 23445
+    "size": 14445
    }
   }
  ]

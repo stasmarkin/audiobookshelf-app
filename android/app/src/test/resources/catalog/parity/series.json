@@ -1,5 +1,29 @@
 [
  {
+  "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
+  "name": "The Saga",
+  "nameIgnorePrefix": "Saga, The",
+  "addedAt": 1792076690520,
+  "members": [
+   {
+    "libraryItemId": "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "e408574f-0019-46fb-900c-f6da629d56d3",
+    "sequence": "2"
+   },
+   {
+    "libraryItemId": "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
+    "sequence": "2.5"
+   },
+   {
+    "libraryItemId": "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0",
+    "sequence": "3"
+   }
+  ]
+ },
+ {
   "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
   "name": "Мир",
   "nameIgnorePrefix": "Мир",
@@ -28,6 +52,18 @@
   ]
  },
  {
+  "id": "e533af1f-dbeb-4ab9-af4d-f5ac928cfa65",
+  "name": "Повесть",
+  "nameIgnorePrefix": "Повесть",
+  "addedAt": 1792076690600,
+  "members": [
+   {
+    "libraryItemId": "5cb71aca-b8d8-488b-8054-14e0b9af952b",
+    "sequence": null
+   }
+  ]
+ },
+ {
   "id": "7aedacc5-33da-4205-a9d5-a9472d433f2d",
   "name": "Трилогия",
   "nameIgnorePrefix": "Трилогия",
@@ -44,42 +80,6 @@
    {
     "libraryItemId": "ccbae3d4-63eb-4eff-85b2-911093527fa5",
     "sequence": "3"
-   }
-  ]
- },
- {
-  "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
-  "name": "The Saga",
-  "nameIgnorePrefix": "Saga, The",
-  "addedAt": 1792076690520,
-  "members": [
-   {
-    "libraryItemId": "c872985a-0bdd-47a8-b22c-6cb68e3a8a7f",
-    "sequence": "1"
-   },
-   {
-    "libraryItemId": "e408574f-0019-46fb-900c-f6da629d56d3",
-    "sequence": "2"
-   },
-   {
-    "libraryItemId": "6ec015e7-c9cf-4313-ab04-99a3d021cb1e",
-    "sequence": "2.5"
-   },
-   {
-    "libraryItemId": "12a6be5c-70e7-41f6-ba87-2b8e31ae7fd0",
-    "sequence": "3"
-   }
-  ]
- },
- {
-  "id": "e533af1f-dbeb-4ab9-af4d-f5ac928cfa65",
-  "name": "Повесть",
-  "nameIgnorePrefix": "Повесть",
-  "addedAt": 1792076690600,
-  "members": [
-   {
-    "libraryItemId": "5cb71aca-b8d8-488b-8054-14e0b9af952b",
-    "sequence": null
    }
   ]
  }
