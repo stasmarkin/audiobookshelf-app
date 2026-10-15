@@ -59,7 +59,9 @@ export default {
       pageRetry: createPageRetry(),
       catalogNotLoaded: false,
       requiresServer: false,
-      totalChanged: false
+      totalChanged: false,
+      fromServer: false,
+      resetGeneration: 0
     }
   },
   watch: {
@@ -220,6 +222,7 @@ export default {
           // An empty answer from a replica never reconciled is "not downloaded yet", not "no books"
           this.catalogNotLoaded = payload.replica?.reconciledAt == null && !payload.total && !payload.fromServer
           this.requiresServer = !!payload.unsupportedFilter
+          this.fromServer = !!payload.fromServer
         }
       } else {
         const entityPath = this.entityName === 'series-books' ? `items` : this.entityName
@@ -262,12 +265,8 @@ export default {
           if (this.entityComponentRefs[index]) {
             this.entityComponentRefs[index].setEntity(this.entities[index])
 
-            if (this.isBookEntity) {
-              const localLibraryItem = this.findLocalCopy(this.entities[index])
-              if (localLibraryItem) {
-                this.entityComponentRefs[index].setLocalLibraryItem(localLibraryItem)
-              }
-            }
+            // Also null: a re-read can put another book on a card that showed a downloaded one
+            if (this.isBookEntity) this.entityComponentRefs[index].setLocalLibraryItem(this.findLocalCopy(this.entities[index]))
           }
         }
       }
@@ -376,6 +375,7 @@ export default {
       this.totalEntities = 0
       this.currentPage = 0
       this.initialized = false
+      this.resetGeneration++
       this.catalogNotLoaded = false
       this.requiresServer = false
 
@@ -535,15 +535,33 @@ export default {
       if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
       this.refreshDebouncer.schedule(this.refreshLoadedPages)
     },
-    /** Reads the loaded pages again in place; a changed total rebuilds the list at the same scroll position. */
+    /** The pages of the rows in view and one on each side. */
+    pagesNearView() {
+      const firstIndex = Math.floor((this.currScrollTop || 0) / this.shelfHeight) * this.entitiesPerShelf
+      const lastIndex = Math.ceil(((this.currScrollTop || 0) + this.bookshelfHeight) / this.shelfHeight) * this.entitiesPerShelf
+      const first = Math.max(0, Math.floor(firstIndex / this.booksPerFetch) - 1)
+      const last = Math.floor(lastIndex / this.booksPerFetch) + 1
+      return { first, last }
+    },
+    /**
+     * Reads the pages near the view again in place (the others load again when scrolled to); a changed total
+     * rebuilds the list at the same scroll position. A reset meanwhile ends it.
+     */
     async refreshLoadedPages() {
       if (this.isDestroyed || !this.initialized) return
       if (this.isFetchingEntities) {
         this.refreshDebouncer.schedule(this.refreshLoadedPages)
         return
       }
+      const generation = this.resetGeneration
+      const { first, last } = this.pagesNearView()
+      const loaded = Object.keys(this.pagesLoaded).map(Number)
+      loaded.filter((page) => page < first || page > last).forEach((page) => delete this.pagesLoaded[page])
       this.totalChanged = false
-      for (const page of Object.keys(this.pagesLoaded).map(Number)) await this.fetchEntities(page)
+      for (const page of loaded.filter((page) => page >= first && page <= last)) {
+        await this.fetchEntities(page)
+        if (generation !== this.resetGeneration) return
+      }
       if (!this.totalChanged) return
       const wrapper = document.getElementById('bookshelf-wrapper')
       const scrollTop = wrapper ? wrapper.scrollTop : 0
@@ -553,9 +571,12 @@ export default {
         this.handleScroll(scrollTop)
       }
     },
+    /** The Library tab follows native's catalog notice, unless its list came from the server (never reconciled yet). */
+    followsSocket() {
+      return this.entityName !== 'books' || this.fromServer
+    },
     libraryItemAdded(libraryItem) {
-      // The Library tab follows native's catalog notice instead
-      if (this.entityName === 'books') return
+      if (!this.followsSocket()) return
       console.log('libraryItem added', libraryItem)
       // TODO: Check if item would be on this shelf
       this.resetEntities()
@@ -570,18 +591,14 @@ export default {
           if (this.entityComponentRefs[indexOf]) {
             this.entityComponentRefs[indexOf].setEntity(libraryItem)
 
-            if (this.isBookEntity) {
-              var localLibraryItem = this.findLocalCopy(libraryItem)
-              if (localLibraryItem) {
-                this.entityComponentRefs[indexOf].setLocalLibraryItem(localLibraryItem)
-              }
-            }
+            if (this.isBookEntity) this.entityComponentRefs[indexOf].setLocalLibraryItem(this.findLocalCopy(libraryItem))
           }
         }
       }
     },
     libraryItemRemoved(libraryItem) {
-      if (this.entityName === 'series-books') {
+      if (!this.followsSocket()) return
+      if (this.entityName === 'books' || this.entityName === 'series-books') {
         var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
         if (indexOf >= 0) {
           this.entities = this.entities.filter((ent) => ent.id !== libraryItem.id)
@@ -592,7 +609,7 @@ export default {
       }
     },
     libraryItemsAdded(libraryItems) {
-      if (this.entityName === 'books') return
+      if (!this.followsSocket()) return
       console.log('items added', libraryItems)
       // TODO: Check if item would be on this shelf
       this.resetEntities()

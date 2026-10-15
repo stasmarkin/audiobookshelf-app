@@ -420,7 +420,8 @@ export default {
     /** Offline, a server item without a downloaded copy cannot be opened or played (the replica lists it anyway). */
     notAvailableOffline() {
       if (this.isLocal || this.localLibraryItem || this.collapsedSeries || !this.libraryItem) return false
-      return this.store.state.serverState !== 'online'
+      // Not while the first check is pending ('unknown'): only a server known to be away
+      return ['offline', 'unauthorized'].includes(this.store.state.serverState)
     }
   },
   methods: {
@@ -446,7 +447,8 @@ export default {
         }
         var mediaMetadata = libraryItem.media.metadata
         if (mediaMetadata.series) {
-          var newSeries = mediaMetadata.series.find((se) => se.id === this.series.id)
+          // A list filtered by series carries the one series as an object; an expanded item carries them all
+          var newSeries = Array.isArray(mediaMetadata.series) ? mediaMetadata.series.find((se) => se.id === this.series.id) : mediaMetadata.series.id === this.series.id ? mediaMetadata.series : null
           if (newSeries) {
             // update selected series
             libraryItem.media.metadata.series = newSeries

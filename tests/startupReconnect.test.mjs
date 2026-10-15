@@ -500,3 +500,29 @@ test('libraries are read again after connecting', async () => {
     assert.equal(loads.length, pending ? 2 : 1)
   }
 })
+
+test('signing in after an offline start announces the library to the server-only tabs', async () => {
+  for (const [signedInBefore, expected] of [
+    [false, true],
+    [true, false]
+  ]) {
+    const l = layout({ serverState: 'online', user: signedInBefore ? { id: 'user-1' } : null, currentLibraryId: 'lib-1' })
+    const config = { id: 'server-a', name: 'Synthetic', address: 'https://a.test.invalid', token: 'access-1' }
+    Object.assign(l.view, {
+      $db: { getDeviceData: async () => ({ deviceSettings: {}, lastServerConnectionConfigId: 'server-a', serverConnectionConfigs: [config] }), setServerConnectionConfig: async (c) => c },
+      $nativeHttp: { post: async () => ({ user: { id: 'user-1', token: 'x', librariesAccessible: [] }, userDefaultLibraryId: 'lib-1', serverSettings: { version: '2.30.0' }, ereaderDevices: [] }) },
+      $isValidVersion: () => true,
+      $authRenewal: { latestToken: () => null },
+      $localStore: { getLastLibraryId: async () => 'lib-1' },
+      $socket: { connect() {}, on() {}, off() {} }
+    })
+    const calls = []
+    l.view.initLibraries = async (args) => calls.push(args)
+    l.store.commit = (type, payload) => {
+      if (type === 'setAttemptingConnection') l.store.state.attemptingConnection = payload
+      if (type === 'user/setUser') l.store.state.user.user = payload
+    }
+    await l.component.methods.attemptConnection.call(l.view)
+    assert.deepEqual(plain(calls), [{ force: true, notify: expected }], `signed in before: ${signedInBefore}`)
+  }
+})

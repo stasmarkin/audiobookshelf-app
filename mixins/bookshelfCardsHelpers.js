@@ -84,10 +84,7 @@ export default {
         instance.setEntity(entity)
 
         if (this.isBookEntity && !entity.isLocal) {
-          var localLibraryItem = this.findLocalCopy(entity)
-          if (localLibraryItem) {
-            instance.setLocalLibraryItem(localLibraryItem)
-          }
+          instance.setLocalLibraryItem(this.findLocalCopy(entity))
         }
       }
     }

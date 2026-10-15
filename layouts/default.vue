@@ -138,6 +138,8 @@ export default {
         return
       }
       this.attemptingConnection = true
+      // Tabs that need the signed-in user (series, collections, playlists, authors) are empty until it is there
+      const wasSignedIn = !!this.user
 
       const deviceData = await this.$db.getDeviceData()
       let serverConfig = null
@@ -215,7 +217,7 @@ export default {
 
       AbsLogger.info({ tag: 'default', message: `attemptConnection: Successful connection to last saved server config (${serverConnectionConfig.name})` })
       // The replica may have been read before the sign-in (or be empty): read again, now able to fall back to the server
-      await this.initLibraries({ force: true, notify: this.currentLibraryId !== libraryBefore })
+      await this.initLibraries({ force: true, notify: !wasSignedIn || this.currentLibraryId !== libraryBefore })
       this.attemptingConnection = false
     },
     serverCameOnline() {

@@ -278,15 +278,19 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   /**
    * A library never reconciled (`replica.reconciledAt` null) or a filter the replica cannot answer reads the server
    * while it is online, as before the replica; the server's answer keeps native's `replica` and says `fromServer`.
-   * Before the sign-in $nativeHttp has no server address, so native's answer stands.
+   * Before the sign-in $nativeHttp has no server address, so native's answer stands; it must be signed in to the
+   * active server, and an answer that arrives after a switch is dropped and the read [retry]-ed for the new server.
    */
-  const withServerFallback = async (answer, path, shape) => {
+  const withServerFallback = async (answer, path, shape, retry) => {
     const needsServer = answer?.replica?.reconciledAt == null || answer?.unsupportedFilter === true
     const http = typeof nativeHttp === 'function' ? nativeHttp() : null
-    if (!needsServer || !http || store.state?.serverState !== 'online' || !store.state?.user?.serverConnectionConfig) return answer
+    const server = activeServer()
+    const signedInHere = !!server && store.state?.user?.serverConnectionConfig?.id === server
+    if (!needsServer || !http || store.state?.serverState !== 'online' || !signedInHere) return answer
     try {
       const data = await http.get(path)
-      return { ...shape(data), serverConfigId: answer?.serverConfigId ?? activeServer(), replica: answer?.replica ?? null, fromServer: true }
+      if (activeServer() !== server) return retry()
+      return { ...shape(data), serverConfigId: server, replica: answer?.replica ?? null, fromServer: true }
     } catch (error) {
       console.warn('[data] Server read failed, showing the replica', error)
       return answer
@@ -296,7 +300,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   const getLibraries = async () => {
     if (isWeb) return { ...librariesShape(await $axios.$get('/api/libraries')), serverConfigId: activeServer(), replica: webReplica() }
     const answer = await fromNative(() => plugin.getLibraries())
-    return withServerFallback(answer, '/api/libraries', librariesShape)
+    return withServerFallback(answer, '/api/libraries', librariesShape, getLibraries)
   }
 
   /** Rejects 'not found' when neither the replica nor (online) the server has the library. */
@@ -311,7 +315,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
         answer = { ...libraryShape(null), serverConfigId: activeServer(), replica: webReplica() }
       }
     } else {
-      answer = await withServerFallback(await fromNative(() => plugin.getLibrary({ id })), path, libraryShape)
+      answer = await withServerFallback(await fromNative(() => plugin.getLibrary({ id })), path, libraryShape, () => fromNative(() => plugin.getLibrary({ id })))
     }
     if (!answer?.library) throw new Error('not found')
     return answer
@@ -329,7 +333,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     }
     const request = { libraryId, sort, desc: !!desc, filter: filter && filter !== 'all' ? filter : null, collapseseries: !!collapseseries, limit, page, sortingIgnorePrefix: !!sortingIgnorePrefix }
     const answer = await fromNative(() => plugin.getLibraryItems(request))
-    return withServerFallback(answer, itemsPath(request), (data) => data || {})
+    return withServerFallback(answer, itemsPath(request), (data) => data || {}, () => getLibraryItems(args))
   }
 
   // Without this the indicator stays hidden until something else asks

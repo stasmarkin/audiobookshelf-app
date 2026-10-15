@@ -16,8 +16,8 @@ Merged into `plus`, not yet in a published release.
   says the catalog isn't downloaded yet. Offline, books without a downloaded copy are dimmed, marked "Not available
   offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
   limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
-  the server; an author or narrator whose name contains a comma is not found by the author or narrator filter
-  offline; the "supplementary e-book" filter needs the server. The Series, Authors, Collections and Playlists tabs
+  the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
+  the server (offline the tab says so). The Series, Authors, Collections and Playlists tabs
   are unchanged.
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer

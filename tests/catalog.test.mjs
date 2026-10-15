@@ -349,3 +349,46 @@ test('socket catalog events are forwarded with the server captured on arrival', 
     { event: 'backup_applied', payload: {}, serverConfigId: 'b' }
   ])
 })
+
+test('a server answer that arrives after a switch is dropped', async () => {
+  let release
+  const plugin = fakePlugin({
+    getLibraryItems: async () => ({ serverConfigId: store.state.activeServerConfigId, results: [{ id: `native-${store.state.activeServerConfigId}` }], total: 1, replica: replica(null) })
+  })
+  const store = fakeStore()
+  const http = { get: () => new Promise((resolve) => (release = resolve)) }
+  const { data } = service({ plugin, store, http })
+  const read = data.getLibraryItems({ libraryId: 'l1', limit: 20, page: 0 })
+  await flush()
+  // Switched to b, which this session is not signed in to
+  store.state.activeServerConfigId = 'b'
+  release({ results: [{ id: 'from-a' }], total: 1 })
+  const answer = await read
+  assert.deepEqual(plain(answer.results), [{ id: 'native-b' }])
+  assert.equal(answer.fromServer, undefined)
+
+  // Signed in to another server than the active one: no server read at all
+  const other = service({ plugin: fakePlugin({ getLibraryItems: async () => ({ serverConfigId: 'a', results: [], total: 0, replica: replica(null) }) }), store: fakeStore() })
+  other.store.state.user.serverConnectionConfig = { id: 'z' }
+  await other.data.getLibraryItems({ libraryId: 'l1', limit: 20, page: 0 })
+  assert.deepEqual(other.http.paths, [])
+})
+
+test('a narrator with a comma online goes to the server', async () => {
+  // Native answers unsupportedFilter for it (LibraryQuery): online the server, offline "requires the server"
+  const plugin = fakePlugin({ getLibraryItems: async () => ({ serverConfigId: 'a', results: [], total: 0, unsupportedFilter: true, replica: replica(9) }) })
+  const http = fakeHttp(() => ({ results: [{ id: 'x' }], total: 1 }))
+  const filter = `narrators.${encodeURIComponent(Buffer.from('Doe, Jane').toString('base64'))}`
+  const { data } = service({ plugin, http })
+  const answer = await data.getLibraryItems({ libraryId: 'l1', filter, limit: 20, page: 0 })
+  assert.equal(answer.fromServer, true)
+  assert.ok(http.paths[0].includes(`filter=${filter}`))
+})
+
+test('an empty never-reconciled replica does not count as a loaded list', async () => {
+  const s = await librariesStore({ libraries: [] })
+  s.self.$absData.getLibraries = async () => ({ libraries: [], replica: { reconciledAt: null } })
+  await s.actions.load.call(s.self, s.ctx)
+  assert.equal(s.state.lastLoad, 0)
+  assert.equal(await s.actions.load.call(s.self, s.ctx), true, 'asked again without force')
+})

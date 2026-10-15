@@ -170,7 +170,7 @@ test('a copy of another account is not matched', async () => {
   assert.equal(view.findLocalCopy({ id: 'li1' }).id, 'local_a')
   // The card helper attaches copies through the same lookup
   const mixin = await read('../mixins/bookshelfCardsHelpers.js')
-  assert.match(mixin, /var localLibraryItem = this\.findLocalCopy\(entity\)/)
+  assert.match(mixin, /instance\.setLocalLibraryItem\(this\.findLocalCopy\(entity\)\)/)
 })
 
 test('library tab reads books through $absData and is not gated by the live user', async () => {
@@ -255,4 +255,78 @@ test('undownloaded card offline is marked and not playable', async () => {
   const grid = await read('../components/cards/LazyBookCard.vue')
   const play = grid.slice(grid.indexOf('async play()'), grid.indexOf('async playEpisode()'))
   assert.doesNotMatch(play, /startTime/)
+})
+
+test('a re-read card loses the downloaded copy of the book that was on it', async () => {
+  const shelf = await bookshelf({ answer: { results: [{ id: 'A' }], total: 1, replica: { reconciledAt: 5, complete: true } } })
+  await shelf.view.init()
+  shelf.view.localLibraryItems = [{ id: 'local_A', libraryItemId: 'A', serverConnectionConfigId: 'a' }]
+  const locals = []
+  shelf.view.entityComponentRefs[0] = { setEntity() {}, setLocalLibraryItem: (lli) => locals.push(lli?.id ?? null) }
+  await shelf.view.fetchEntities(0)
+  // The list moved: B (not downloaded) now sits where A was
+  shelf.view.$absData.getLibraryItems = async () => ({ results: [{ id: 'B' }], total: 1, replica: { reconciledAt: 5, complete: true } })
+  await shelf.view.fetchEntities(0)
+  assert.deepEqual(locals, ['local_A', null])
+})
+
+test('a series-filtered item can be set on a card twice', async () => {
+  const source = await read('../components/cards/LazyBookCard.vue')
+  const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
+  const component = new Function('Capacitor', script)({})
+  const view = { ...component.data() }
+  for (const [name, def] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: (def.get || def).bind(view), configurable: true })
+  const item = (sequence) => ({ id: 'li1', media: { metadata: { title: 'A', series: { id: 's1', name: 'S', sequence } } } })
+  component.methods.setEntity.call(view, item('1'))
+  component.methods.setEntity.call(view, item('2'))
+  assert.equal(view.libraryItem.media.metadata.series.sequence, '2')
+})
+
+test('the offline marker waits for the first server check', async () => {
+  for (const path of ['../components/cards/LazyBookCard.vue', '../components/cards/LazyListBookCard.vue']) {
+    assert.equal((await card(path, { serverState: 'unknown' })).notAvailableOffline, false, path)
+    assert.equal((await card(path, { serverState: 'unauthorized' })).notAvailableOffline, true, path)
+  }
+})
+
+test('a refresh reads only pages near the view and stops at a reset', async () => {
+  const shelf = await bookshelf({ answer: { results: [{ id: 'A' }], total: 1000, replica: { reconciledAt: 5, complete: true } } })
+  const { view } = shelf
+  await view.init()
+  Object.defineProperty(view, 'shelfHeight', { get: () => 100, configurable: true })
+  Object.assign(view, { entitiesPerShelf: 2, booksPerFetch: 20, bookshelfHeight: 500, currScrollTop: 2000, initialized: true })
+  view.pagesLoaded = { 0: true, 1: true, 2: true, 3: true, 4: true, 9: true }
+  const fetched = []
+  let resets = 0
+  view.resetEntities = async () => {
+    resets++
+    view.resetGeneration++
+  }
+  view.fetchEntities = async (page) => {
+    fetched.push(page)
+    // A filter change resets the list while the refresh is running
+    if (page === 1) await view.resetEntities()
+  }
+  await view.refreshLoadedPages()
+  assert.deepEqual(fetched, [1], 'stopped after the reset')
+  assert.equal(resets, 1, 'no second reset of its own')
+  assert.ok(!view.pagesLoaded[9], 'a page far from the view loads again when scrolled to')
+})
+
+test('a list read from the server still follows the socket', async () => {
+  const fromServer = await bookshelf({ answer: { results: [], total: 0, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+  await fromServer.view.init()
+  let resets = 0
+  fromServer.view.resetEntities = () => resets++
+  fromServer.view.libraryItemAdded({ id: 'x' })
+  fromServer.view.libraryItemsAdded([{ id: 'x' }])
+  assert.equal(resets, 2)
+
+  const replica = await bookshelf({ answer: { results: [], total: 0, replica: { reconciledAt: 5, complete: true } } })
+  await replica.view.init()
+  let replicaResets = 0
+  replica.view.resetEntities = () => replicaResets++
+  replica.view.libraryItemAdded({ id: 'x' })
+  replica.view.libraryItemRemoved({ id: 'x' })
+  assert.equal(replicaResets, 0, "the replica's own notice refreshes it")
 })

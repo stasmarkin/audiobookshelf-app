@@ -96,7 +96,8 @@ export const actions = {
         }
 
         commit('set', libraries)
-        commit('setLastLoad', Date.now())
+        // An empty replica that was never reconciled is no answer: the next load must ask again
+        if (libraries.length || data.replica?.reconciledAt != null) commit('setLastLoad', Date.now())
         return true
       })
       .catch((error) => {
