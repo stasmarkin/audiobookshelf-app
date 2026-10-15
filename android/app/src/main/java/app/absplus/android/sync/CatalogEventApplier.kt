@@ -23,7 +23,8 @@ enum class CatalogEventResult { APPLIED, IGNORED, NEEDS_RECONCILE }
 class CatalogEventApplier(
         private val db: ReplicaDatabase,
         private val notify: (Collection<String>) -> Unit,
-        private val onReplicaChanged: () -> Unit
+        private val onReplicaChanged: () -> Unit,
+        private val beforeItemWrite: suspend () -> Unit = {}
 ) {
   private val mapper = CatalogJson.mapper
 
@@ -66,6 +67,7 @@ class CatalogEventApplier(
       if (old != null && payload.path("updatedAt").asLong() < old.updatedAt) return@withTransaction CatalogEventResult.IGNORED
       val item = payload.deepCopy<JsonNode>() as ObjectNode
       if (!item.has("rssFeed") && old?.rssFeedJson != null) item.set<JsonNode>("rssFeed", mapper.readTree(old.rssFeedJson))
+      beforeItemWrite()
       db.items().upsertAll(listOf(CatalogJson.itemEntity(sc, item)))
       topics += "items:$libraryId"
       val series = item.path("media").path("metadata").path("series")

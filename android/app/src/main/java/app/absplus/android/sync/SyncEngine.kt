@@ -3,10 +3,12 @@ package app.absplus.android.sync
 import android.content.Context
 import app.absplus.android.data.LocalMediaProgress
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.db.replica.ReplicaDatabase
 import app.absplus.android.db.userdata.UserDataDatabase
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.server.ApiHandler
+import com.fasterxml.jackson.databind.JsonNode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -34,7 +36,14 @@ import kotlin.coroutines.coroutineContext
 
 enum class SyncReason { APP_START, ONLINE, SOCKET_INIT, FOREGROUND, MANUAL, LOCAL_WRITE }
 
-data class SyncState(val running: Boolean, val pendingCount: Int, val lastError: String?, val lastSyncAt: Long?)
+data class SyncState(
+        val running: Boolean,
+        val pendingCount: Int,
+        val lastError: String?,
+        val lastSyncAt: Long?,
+        /** A pass over the catalog into replica.db is running. */
+        val catalogRunning: Boolean = false
+)
 
 data class DataChange(val scope: String, val ids: List<String>)
 
@@ -52,6 +61,22 @@ const val RECONCILE_MIN_INTERVAL_MS = 30_000L
  * refresh): nothing else would trigger it. Restarts after a run that is not stopped this way.
  */
 val UNREACHABLE_RETRY_MS = listOf(30_000L, 60_000L, 300_000L)
+
+/** Catalog events kept while a pass runs; more drop them all and schedule another pass instead. */
+const val CATALOG_EVENT_BUFFER = 1_000
+
+/** Where `AbsData.setCurrentLibrary` keeps the library a catalog pass starts with. */
+object CatalogPrefs {
+  const val PREFS = "absplus_sync"
+  const val CURRENT_LIBRARY = "currentLibraryId"
+}
+
+class CatalogDeps(
+        val db: ReplicaDatabase,
+        val currentLibraryId: () -> String?,
+        /** Runs inside the write of a catalog item event, after its check; for tests of concurrent events. */
+        internal val beforeEventWrite: suspend () -> Unit = {}
+)
 
 class SyncDeps(
         val db: UserDataDatabase,
@@ -77,7 +102,8 @@ class SyncDeps(
         val mirror: ProgressMirror = ProgressMirror.None,
         val paperImport: PaperProgressImport? = null,
         /** Every Paper `LocalMediaProgress`, read for [paperImport] on start. */
-        val paperProgress: () -> List<LocalMediaProgress> = { emptyList() }
+        val paperProgress: () -> List<LocalMediaProgress> = { emptyList() },
+        val catalog: CatalogDeps? = null
 )
 
 /**
@@ -98,6 +124,9 @@ object SyncEngine {
   /** The store for user actions; null before [init]. */
   val store: UserDataStore? get() = core?.store
 
+  /** Reads of the catalog replica; null before [init]. */
+  val catalog: CatalogReader? get() = core?.catalogReader
+
   /** [apiHandler] is created on the first token refresh: its secure storage is not needed before that. */
   @Synchronized
   fun init(context: Context, apiHandler: () -> ApiHandler) {
@@ -113,6 +142,8 @@ object SyncEngine {
             refresh = { id, onResult -> handler.refreshAuthTokens(id, null, onResult) },
             tokenFor = { id -> DeviceManager.getServerConnectionConfig(id)?.token })
     val db = UserDataDatabase.get(context.applicationContext)
+    val replica = ReplicaDatabase.get(context.applicationContext)
+    val catalogPrefs = context.applicationContext.getSharedPreferences(CatalogPrefs.PREFS, Context.MODE_PRIVATE)
     start(SyncDeps(
             db = db,
             http = http,
@@ -132,7 +163,8 @@ object SyncEngine {
             mirror = PaperProgressMirror,
             paperImport = PaperProgressImport(db,
                     context.applicationContext.getSharedPreferences(PaperProgressImport.PREFS, Context.MODE_PRIVATE)),
-            paperProgress = { DeviceManager.dbManager.getAllLocalMediaProgress() }))
+            paperProgress = { DeviceManager.dbManager.getAllLocalMediaProgress() },
+            catalog = CatalogDeps(replica, currentLibraryId = { catalogPrefs.getString(CatalogPrefs.CURRENT_LIBRARY, null) })))
   }
 
   private fun start(deps: SyncDeps) {
@@ -151,7 +183,10 @@ object SyncEngine {
     core?.onLocalWrite()
   }
 
-  /** The WebView's socket dropped; in the background this makes the next foreground return consider a reconcile. */
+  /**
+   * The WebView's socket dropped: its reconnect (`SOCKET_INIT`) passes over the catalog again, since events of the gap
+   * are lost; in the background this also makes the next foreground return consider a reconcile.
+   */
   fun onSocketLost() {
     core?.onSocketLost()
   }
@@ -204,6 +239,22 @@ object SyncEngine {
     val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId }, ownerOf = deps.ownerOf,
             recentlySettledMs = deps.recentlySettledMs, unsentSessionKeys = deps.unsentSessionKeys, mirror = deps.mirror)
     private val reconciler = UserDataReconciler(deps.http, store, deps.db, deps.clock, deps.paperImport)
+    val catalogReader: CatalogReader? = deps.catalog?.let { catalog ->
+      CatalogReader(catalog.db, { deps.db.mediaProgress().getAll(it) }, { sc, ids -> deps.db.mediaProgress().getForItems(sc, ids) },
+              { notifier.version("progress") + notifier.version("playback") }, deps.clock)
+    }
+    private val catalogReconciler = deps.catalog?.let { catalog ->
+      CatalogReconciler(catalog.db, deps.http, deps.clock, { notifier.notify("catalog", it) }, { catalogReader?.onReplicaChanged() }, deps.log)
+    }
+    private val catalogApplier = deps.catalog?.let { catalog ->
+      CatalogEventApplier(catalog.db, { notifier.notify("catalog", it) }, { catalogReader?.onReplicaChanged() }, catalog.beforeEventWrite)
+    }
+    /** Catalog events apply one at a time in arrival order, never under [runMutex]. */
+    private val catalogEventMutex = Mutex()
+    private val bufferLock = Any()
+    private var catalogPassing = false
+    private val catalogBuffer = ArrayList<Triple<String, String, JsonNode>>()
+    private var catalogBufferOverflow = false
 
     private val lock = Any()
     private val runMutex = Mutex()
@@ -216,6 +267,10 @@ object SyncEngine {
     /** Start of the last reconcile that succeeded; a failed one does not cover later requests. */
     private var lastReconcileOkStartAt: Long? = null
     private var reconcileRunning = false
+    private var catalogJob: Job? = null
+    private var catalogAgain = false
+    /** The socket dropped and has not reconnected yet: its reconnect passes over the catalog again. */
+    private var socketDown = false
     private var unreachableRetries = 0
     private var backoffJob: Job? = null
     private var snapshotFollowUp: Job? = null
@@ -252,14 +307,26 @@ object SyncEngine {
     }
 
     fun stop() {
-      synchronized(lock) { runner?.cancel() }
+      synchronized(lock) {
+        runner?.cancel()
+        catalogJob?.cancel()
+      }
       backoffJob?.cancel()
       snapshotFollowUp?.cancel()
       jobs.forEach { it.cancel() }
     }
 
     fun syncNow(reason: SyncReason) {
+      var passCatalog = false
       val job = synchronized(lock) {
+        if (reason == SyncReason.SOCKET_INIT) {
+          // Decided by the socket's state, not by when it dropped: before, during or after a pass alike
+          if (socketDown && deps.isForeground()) {
+            if (catalogJob != null) catalogAgain = true else passCatalog = true
+          }
+          socketDown = false
+        }
+        if (reason == SyncReason.MANUAL && deps.isForeground() && catalogJob != null) catalogAgain = true
         when {
           reason == SyncReason.LOCAL_WRITE -> Unit
           !deps.isForeground() -> reconcileDeferred = true
@@ -275,11 +342,12 @@ object SyncEngine {
           }
         }
         wantPush = true
-        if (runner != null) return
+        if (runner != null) null
         // Lazy, so the job is known as the runner before its first line runs on any dispatcher
-        scope.launch(start = CoroutineStart.LAZY) { drain() }.also { runner = it }
+        else scope.launch(start = CoroutineStart.LAZY) { drain() }.also { runner = it }
       }
-      job.start()
+      job?.start()
+      if (passCatalog) startCatalogPass()
     }
 
     /** Paper progress newer than userdata.db is imported before the first sync, off the caller's thread. */
@@ -334,11 +402,17 @@ object SyncEngine {
     }
 
     fun onSocketLost() {
-      if (!deps.isForeground()) synchronized(lock) { socketLostInBackground = true }
+      synchronized(lock) {
+        socketDown = true
+        if (!deps.isForeground()) socketLostInBackground = true
+      }
     }
 
-    /** Serialized with runs, so an event never merges between a push and the settling of its rows. */
-    suspend fun applyEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean = runMutex.withLock {
+    /** User events are serialized with runs, so an event never merges between a push and the settling of its rows. */
+    suspend fun applyEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean =
+            if (name in CATALOG_EVENTS) applyCatalogEvent(name, payloadJson, serverConfigId) else applyUserEvent(name, payloadJson, serverConfigId)
+
+    private suspend fun applyUserEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean = runMutex.withLock {
       val active = deps.activeServer()?.id ?: return@withLock false
       if (serverConfigId != active) return@withLock false
       when (name) {
@@ -423,14 +497,16 @@ object SyncEngine {
           }
         }
         val result = pusher.pushAll(config)
+        if (reconcile) startCatalogPass()
         if (result.stoppedBy != null) error = error ?: result.stoppedBy.name.lowercase()
         when {
           result.stoppedBy == StopReason.BACKOFF -> scheduleBackoff(config.id)
           result.stoppedBy == StopReason.UNREACHABLE && deps.serverState.value == ServerState.ONLINE -> scheduleUnreachableRetry()
           else -> unreachableRetries = 0
         }
+        // A copy: a catalog pass may be running and owns catalogRunning
         _syncState.update {
-          SyncState(running = false, pendingCount = result.remaining, lastError = error,
+          it.copy(running = false, pendingCount = result.remaining, lastError = error,
                   lastSyncAt = if (error == null) deps.clock() else it.lastSyncAt)
         }
       } finally {
@@ -474,6 +550,10 @@ object SyncEngine {
       synchronized(lock) {
         runner?.cancel()
         runner = null
+        catalogJob?.cancel()
+        catalogJob = null
+        catalogAgain = false
+        socketDown = false
         wantPush = false
         wantReconcile = false
         lastReconcileAt = null
@@ -482,7 +562,122 @@ object SyncEngine {
       }
       backoffJob?.cancel()
       snapshotFollowUp?.cancel()
+      clearCatalogBuffer()
+      _syncState.update { it.copy(catalogRunning = false) }
       refreshPendingCount()
+    }
+
+    private fun clearCatalogBuffer() = synchronized(bufferLock) {
+      catalogBuffer.clear()
+      catalogBufferOverflow = false
+      catalogPassing = false
+    }
+
+    /** A pass over the catalog, off [runMutex]; one at a time, a request during it may ask for one more. */
+    private fun startCatalogPass() {
+      val reconciler = catalogReconciler ?: return
+      val job = synchronized(lock) {
+        if (catalogJob != null) return
+        scope.launch(start = CoroutineStart.LAZY) { runCatalog(reconciler) }.also { catalogJob = it }
+      }
+      job.start()
+    }
+
+    private suspend fun runCatalog(reconciler: CatalogReconciler) {
+      val self = coroutineContext[Job]
+      try {
+        while (true) {
+          val config = deps.activeServer() ?: return
+          _syncState.update { it.copy(catalogRunning = true) }
+          synchronized(bufferLock) { catalogPassing = true }
+          val result = try {
+            reconciler.reconcile(config, deps.catalog?.currentLibraryId?.invoke())
+          } catch (e: CancellationException) {
+            clearCatalogBuffer()
+            throw e
+          }
+          if (result.stoppedBy != null) deps.logError("Catalog ${config.id} stopped: ${result.stoppedBy}")
+          else deps.log("Catalog ${config.id}: ${result.libraries} libraries, failed ${result.failedLibraries}")
+          applyBufferedEvents()
+          val again = synchronized(lock) {
+            val more = catalogAgain
+            catalogAgain = false
+            when {
+              more && deps.isForeground() -> true
+              else -> {
+                if (more) reconcileDeferred = true
+                // In the same block as the check: a request after it sees no pass and starts one
+                if (catalogJob === self) catalogJob = null
+                false
+              }
+            }
+          }
+          if (!again) return
+        }
+      } finally {
+        synchronized(lock) { if (catalogJob === self) catalogJob = null }
+        if (synchronized(lock) { catalogJob == null }) _syncState.update { it.copy(catalogRunning = false) }
+      }
+    }
+
+    /** Events that came during the pass, in order, after its pages: a page read before an event never overwrites it. */
+    private suspend fun applyBufferedEvents() {
+      var reconcile = false
+      catalogEventMutex.withLock {
+        val (events, overflow) = synchronized(bufferLock) {
+          val list = catalogBuffer.toList()
+          val overflow = catalogBufferOverflow
+          catalogBuffer.clear()
+          catalogBufferOverflow = false
+          catalogPassing = false
+          list to overflow
+        }
+        if (overflow) synchronized(lock) { catalogAgain = true }
+        val active = deps.activeServer()?.id
+        for ((serverConfigId, name, payload) in events) {
+          if (serverConfigId != active) continue
+          try {
+            if (catalogApplier?.apply(serverConfigId, name, payload) == CatalogEventResult.NEEDS_RECONCILE) reconcile = true
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            deps.logError("Catalog event $name failed: $e")
+          }
+        }
+      }
+      if (reconcile) syncNow(SyncReason.MANUAL)
+    }
+
+    private suspend fun applyCatalogEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean {
+      val applier = catalogApplier ?: return false
+      val active = deps.activeServer()?.id ?: return false
+      if (serverConfigId != active) return false
+      val payload = try {
+        CatalogJson.mapper.readTree(payloadJson) ?: return false
+      } catch (e: Exception) {
+        return false
+      }
+      val result = catalogEventMutex.withLock {
+        val buffered = synchronized(bufferLock) {
+          if (!catalogPassing) return@synchronized false
+          if (catalogBuffer.size >= CATALOG_EVENT_BUFFER) {
+            catalogBuffer.clear()
+            catalogBufferOverflow = true
+          } else {
+            catalogBuffer += Triple(active, name, payload)
+          }
+          true
+        }
+        if (buffered) null else applier.apply(active, name, payload)
+      }
+      return when (result) {
+        null, CatalogEventResult.APPLIED -> true
+        CatalogEventResult.IGNORED -> false
+        CatalogEventResult.NEEDS_RECONCILE -> {
+          syncNow(SyncReason.MANUAL)
+          true
+        }
+      }
     }
 
     private fun refreshPendingCount() {

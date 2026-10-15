@@ -30,4 +30,14 @@ class DataChangeNotifierTest {
     assertEquals("bookmarks" to listOf("li5"), emitted.last())
     assertEquals(3, emitted.size)
   }
+
+  @Test
+  fun versionGrowsBeforeTheEvent() = runTest {
+    val notifier = DataChangeNotifier(500, backgroundScope) { _, _ -> }
+    assertEquals(0L, notifier.version("progress"))
+    notifier.notify("progress", listOf("li1"))
+    notifier.notify("progress", listOf("li2"))
+    assertEquals("counted at once, not after the window", 2L, notifier.version("progress"))
+    assertEquals(0L, notifier.version("catalog"))
+  }
 }
