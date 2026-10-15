@@ -93,14 +93,30 @@ class OutboxCoalescerTest {
     assertEquals(OutboxPlan(emptyList(), patch(0, "isFinished"), null), progress)
   }
 
-  @Test
-  fun progressDeleteFoldsWithNothing() {
-    val delete = row(0, OutboxKind.PROGRESS_DELETE, OutboxPayload.progressDelete("mp1"))
-    assertEquals(OutboxPlan(emptyList(), delete, null), coalesce(listOf(patch(1, "currentTime")), delete, inFlightId = null))
+  private fun delete(id: Long) = row(id, OutboxKind.PROGRESS_DELETE, OutboxPayload.progressDelete("mp1"))
 
-    // A patch after a reset keeps the reset queued before it
-    val afterReset = coalesce(listOf(delete.copy(id = 1)), patch(0, "currentTime"), inFlightId = null)
-    assertEquals(OutboxPlan(emptyList(), patch(0, "currentTime"), null), afterReset)
+  private data class Case(val name: String, val queued: List<OutboxEntity>, val incoming: OutboxEntity, val inFlightId: Long?,
+                          val expected: OutboxPlan)
+
+  @Test
+  fun progressDeleteAndPatchNeverFoldAcrossEachOther() {
+    val cases = listOf(
+            Case("patch then delete: the delete drops the patch", listOf(patch(1, "currentTime")), delete(0), null,
+                    OutboxPlan(listOf(1L), delete(0), null)),
+            Case("delete then patch: both stay, the patch after the delete", listOf(delete(1)), patch(0, "currentTime"), null,
+                    OutboxPlan(emptyList(), patch(0, "currentTime"), null)),
+            Case("patch, delete, patch: only the patch after the delete folds",
+                    listOf(patch(1, "isFinished"), delete(2), patch(3, "ebookLocation")), patch(0, "currentTime"), null,
+                    OutboxPlan(listOf(3L), patch(0, "currentTime", "ebookLocation"), null)),
+            Case("patch in flight, then delete: the in-flight patch is kept", listOf(patch(1, "currentTime")), delete(0), 1L,
+                    OutboxPlan(emptyList(), delete(0), null)),
+            Case("delete in flight, then patch: still not folded with patches before it",
+                    listOf(delete(1), patch(2, "isFinished")), patch(0, "currentTime"), 1L,
+                    OutboxPlan(listOf(2L), patch(0, "currentTime", "isFinished"), null))
+    )
+    for (case in cases) {
+      assertEquals(case.name, case.expected, coalesce(case.queued, case.incoming, case.inFlightId))
+    }
   }
 
   @Test

@@ -40,22 +40,24 @@ data class OutboxPlan(val deleteIds: List<Long>, val insert: OutboxEntity?, val 
  * The row in flight ([inFlightId], already in an HTTP request) is never folded or cancelled: the new action queues
  * after it. Only an add that was never attempted (`attempts == 0`) can absorb a rename or cancel out with a removal;
  * once attempted, the server may have applied it even if the answer was lost, so the removal is sent separately.
- * `progress_delete` folds with nothing.
+ * A `progress_delete` drops the queued patches of the item; a patch never folds across a queued delete.
  */
 fun coalesce(existing: List<OutboxEntity>, incoming: OutboxEntity, inFlightId: Long?): OutboxPlan {
-  val queued = existing.filter {
-    it.serverConfigId == incoming.serverConfigId && it.itemKey == incoming.itemKey && it.id != inFlightId
-  }
+  val queued = existing.filter { it.matches(incoming) && it.id != inFlightId }
   val unsentAdd = queued.lastOrNull { it.kind == OutboxKind.BOOKMARK_ADD && it.attempts == 0 }
   val updates = queued.filter { it.kind == OutboxKind.BOOKMARK_UPDATE }
 
   return when (incoming.kind) {
     OutboxKind.PROGRESS_PATCH -> {
-      // The body is read from the row at send time, so one row with every changed field replaces the queued ones
-      val patches = queued.filter { it.kind == OutboxKind.PROGRESS_PATCH }
+      // The body is read from the row at send time, so one row with every changed field replaces the queued ones.
+      // Never across a reset: a patch queued before the DELETE has to stay before it
+      val lastDelete = existing.filter { it.matches(incoming) && it.kind == OutboxKind.PROGRESS_DELETE }.maxOfOrNull { it.id }
+      val patches = queued.filter { it.kind == OutboxKind.PROGRESS_PATCH && (lastDelete == null || it.id > lastDelete) }
       val fields = (patches + incoming).flatMap { OutboxPayload.progressPatchFields(it.payload).orEmpty() }
       OutboxPlan(patches.map { it.id }, incoming.copy(payload = OutboxPayload.progressPatch(fields)), null)
     }
+    // The reset makes queued changes of the same progress pointless
+    OutboxKind.PROGRESS_DELETE -> OutboxPlan(queued.filter { it.kind == OutboxKind.PROGRESS_PATCH }.map { it.id }, incoming, null)
     OutboxKind.BOOKMARK_UPDATE ->
       if (unsentAdd != null) OutboxPlan(updates.map { it.id }, null, unsentAdd.copy(payload = incoming.payload))
       else OutboxPlan(updates.map { it.id }, incoming, null)
@@ -68,3 +70,5 @@ fun coalesce(existing: List<OutboxEntity>, incoming: OutboxEntity, inFlightId: L
     else -> OutboxPlan(emptyList(), incoming, null)
   }
 }
+
+private fun OutboxEntity.matches(other: OutboxEntity) = serverConfigId == other.serverConfigId && itemKey == other.itemKey
