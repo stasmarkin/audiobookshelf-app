@@ -14,7 +14,7 @@ Base: PR #1923, `bb5f30c706d3ca76d35ceaa5cb619bd1eab6f29b`. The separately fetch
 - Collections already have a Play button and an ordered `collection.books` response. `CollectionBooksTable` copies that order into `BookTableRow`; rows currently play independently.
 - The series page delegates to `LazyBookshelf`. The shelf fetches pages of 20 and can collapse subseries. `bookshelfCardsHelpers` creates cards with `new ComponentClass`, without a parent; source context must be passed explicitly in props.
 - `LazyListBookCard.play` starts audiobooks. `LazyBookCard.play` is empty and its audiobook Play button is disabled; podcast episode playback is separate. Item detail and other playback emitters have no source context and should clear a queue.
-- Complete series retrieval uses the existing `/api/libraries/:id/items` endpoint, `filter=series.<encoded ID>`, `sort=sequence`, `desc=0`, without collapse. Fetch every page, independent of shelf state. The server supports sequence sorting and places absent sequences last; no client numeric sort is needed.
+- Complete series retrieval reads `$absData.getLibraryItems` with `filter=series.<encoded ID>`, `sort=sequence`, `desc=false`, without collapse, 100 books a call: since offline-first 4b the series queue is built from the catalog replica (`replica.db`), and only while the library's catalog was never synced does it read the server's `/api/libraries/:id/items` with the same parameters. Fetch every page, independent of shelf state. The server supports sequence sorting and places absent sequences last; no client numeric sort is needed.
 
 Server source inspected: [LibraryController](https://github.com/advplyr/audiobookshelf/blob/master/server/controllers/LibraryController.js), [libraryItemsBookFilters](https://github.com/advplyr/audiobookshelf/blob/master/server/utils/queries/libraryItemsBookFilters.js).
 
@@ -77,7 +77,7 @@ Remaining optional device checks: explicitly confirm Doze state with ADB/logcat,
 ## Remaining limitations
 
 - Android only. No iOS continuous playback was added.
-- Series setup still needs server connectivity for canonical full membership/order, as do the existing source pages. Once installed, the local queue advances without JS or server playback requests. No offline source catalog or queue persistence across process death was added.
+- Series setup reads the catalog replica, so it works offline once the catalog was synced; downloaded copies are matched to the active saved server (`activeServerConfigId`), which is known offline, not to the signed-in connection, which is not. Once installed, the local queue advances without JS or server playback requests. No queue persistence across process death was added.
 - Undownloaded entries are omitted, so the next downloaded entry may skip a gap in the series/collection.
 - If a queued download disappears after setup, playback stops rather than streaming or trying another item.
 - Source edits during playback do not rebuild the queue. A new source Play request refreshes it. Interrupted/duplicate pagination fails instead of starting an incomplete queue.

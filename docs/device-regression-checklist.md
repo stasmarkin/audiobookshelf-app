@@ -112,6 +112,10 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 32. **Server changes while connected:** delete a book in the web client: it disappears from the open Library tab within a few seconds. Delete another with the app closed: it is gone after the next start's sync.
 33. **Another saved server offline:** switch to another saved server in airplane mode: the Library tab shows that server's catalog, not the previous one's.
 34. **Fresh install offline:** a fresh install that signed in once but was cut off before the first catalog sync finished shows "The catalog isn't downloaded yet" in airplane mode, not "No books".
+35. **Series in airplane mode:** turn airplane mode on. The Series tab shows the series sorted by name with their progress; a series page lists its books in sequence order (1, 1.5, 2, 10), and with "Collapse Series" on in its menu the books that also belong to another series fold into one card of that series with its sequence range, as online.
+36. **Series Play offline:** in airplane mode, Play a series of three books with the first two downloaded (choose Play if "Download or stream" asks): the first unfinished book plays from the phone (Diagnostics: a local start), the queue then plays the second from the phone and waits for the server on the third (as in 24). The add-to-queue button of the series adds its unfinished books.
+37. **Series renamed while connected:** rename a series in the web client: the open Series tab follows within a few seconds without a restart.
+38. **Series gone:** delete a series on the server, then open a stale link or the page from history: the app returns to the Series tab instead of an error page.
 
 ## Emulator baseline (for comparison)
 

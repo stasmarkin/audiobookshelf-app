@@ -7,6 +7,13 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Series offline:** the Series tab and a series' page read the same catalog copy, so they open without the server
+  with the last synced series, their books in series order and, with "Collapse Series" on in the series page menu,
+  the books of other series folded into one card as on the server. Play and the add-to-queue button of a series work
+  offline too: downloaded books play from the phone and a book that is not downloaded waits for the server. Fixed:
+  offline, the series Play prompt ("Download or stream") counted the downloaded books as missing. A series that no
+  longer exists now goes back to the Series tab instead of an error page. Until a library's series have been copied
+  once, both read the server as before.
 - **Library tab offline:** the app now keeps a copy of each library's catalog (libraries, books, series and the
   filter lists) on the phone and the Library tab reads it, so it opens without the server, also on a cold start in
   airplane mode, with the last synced state and the same filters, sorting and collapsed series as online. The copy is
@@ -17,8 +24,7 @@ Merged into `plus`, not yet in a published release.
   offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
   limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
   the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
-  the server (offline the tab says so). The Series, Authors, Collections and Playlists tabs
-  are unchanged.
+  the server (offline the tab says so). The Authors, Collections and Playlists tabs are unchanged.
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer
   uses the broadcast symbol. Tabs keep equal widths, the labels name each destination for screen readers, and the
