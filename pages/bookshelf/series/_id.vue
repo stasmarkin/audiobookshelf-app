@@ -14,12 +14,14 @@ import { downloadMissingItems } from '@/utils/bulkDownload'
 
 export default {
   async asyncData({ params, app, store, redirect }) {
-    var series = await app.$nativeHttp.get(`/api/series/${params.id}`).catch((error) => {
+    // The replica answers offline; online before the series were first read, the server does
+    const answer = await app.$absData.getSeriesById({ id: params.id }).catch((error) => {
       console.error('Failed', error)
-      return false
+      return null
     })
+    const series = answer?.series
     if (!series) {
-      return redirect('/oops?message=Series not found')
+      return redirect('/bookshelf/series')
     }
     store.commit('globals/setSeries', series)
     return {

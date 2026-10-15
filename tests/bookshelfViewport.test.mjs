@@ -164,6 +164,7 @@ const setup = async ({ wrapped, total = 13, listView = true, delay = () => 5, ht
     state: { user: { user: { id: 'u1' } }, globals: { bookshelfListView: listView, series: { libraryId: 'lib' } }, libraries: { currentLibraryId: 'lib' }, lastBookshelfScrollData: {} },
     getters: {
       getServerSetting: () => false,
+      getHasActiveServer: true,
       'user/getUserSetting': (k) => ({ mobileOrderBy: 'media.metadata.title', mobileOrderDesc: false, mobileFilterBy: 'all', collapseSeries: false, collapseBookSeries: false }[k]),
       'libraries/getBookCoverAspectRatio': 1.6,
       'libraries/getCurrentLibraryMediaType': 'book',
@@ -187,7 +188,9 @@ const setup = async ({ wrapped, total = 13, listView = true, delay = () => 5, ht
       )
     }
   }
-  Object.assign(Vue.prototype, { $store: store, $nativeHttp: http, $db: { getLocalLibraryItems: async () => [] }, $eventBus: emitter(), $socket: emitter(), $encode: (s) => s, $platform: 'android', $strings: {} })
+  // A series page reads its books from the catalog replica (offline-first 4b), page by page as the server did
+  const absData = { getLibraryItems: ({ page, limit }) => http.get(`?page=${page}&limit=${limit}`), onDataChanged: () => () => {} }
+  Object.assign(Vue.prototype, { $store: store, $absData: absData, $db: { getLocalLibraryItems: async () => [] }, $eventBus: emitter(), $socket: emitter(), $encode: (s) => s, $platform: 'android', $strings: {} })
   const origError = console.error
   console.error = (...a) => errors.push(a.join(' '))
   console.log = () => {}

@@ -87,7 +87,7 @@ test('a burst of catalog changes refreshes the shelf once', async () => {
 })
 
 /** LazyBookshelf's script as a plain object over fakes ($absData, store, DOM helpers stubbed). */
-async function bookshelf({ hasActiveServer = true, user = null, currentLibraryId = 'l1', activeServerConfigId = 'a', answer = null } = {}) {
+async function bookshelf({ hasActiveServer = true, user = null, currentLibraryId = 'l1', activeServerConfigId = 'a', answer = null, page = 'books', seriesId = null, settings = {} } = {}) {
   const source = await read('../components/bookshelf/LazyBookshelf.vue')
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
   const component = new Function('bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'shouldRefreshShelf', 'createDebouncer', script)(
@@ -100,25 +100,29 @@ async function bookshelf({ hasActiveServer = true, user = null, currentLibraryId
   const reads = []
   const emitted = []
   const refreshes = []
+  const subscriptions = []
   const store = {
     state: { user: { user }, activeServerConfigId, libraries: { currentLibraryId }, globals: { bookshelfListView: false }, lastBookshelfScrollData: {} },
     getters: {
       getHasActiveServer: hasActiveServer,
       getServerSetting: () => false,
-      'user/getUserSetting': (k) => ({ mobileOrderBy: 'media.metadata.title', mobileOrderDesc: false, mobileFilterBy: 'all', collapseSeries: false }[k]),
+      'user/getUserSetting': (k) => ({ mobileOrderBy: 'media.metadata.title', mobileOrderDesc: false, mobileFilterBy: 'all', collapseSeries: false, collapseBookSeries: false, ...settings }[k]),
       'libraries/getCurrentLibraryMediaType': 'book',
       'libraries/getBookCoverAspectRatio': 1.6
     }
   }
   const view = {
     ...component.data(),
-    page: 'books',
+    page,
+    seriesId,
+    $encode: encode,
     $store: store,
     $eventBus: { $emit: (name, value) => emitted.push([name, value]), $on() {}, $off() {} },
     $db: { getLocalLibraryItems: async () => [] },
     $absData: {
       getLibraryItems: async (args) => (reads.push(args), answer ?? { results: [], total: 0, replica: { reconciledAt: 5, complete: true } }),
-      onDataChanged: () => () => {}
+      getSeries: async (args) => (reads.push({ series: args }), answer ?? { results: [], total: 0, replica: { reconciledAt: 5, complete: true } }),
+      onDataChanged: (cb) => (subscriptions.push(cb), () => {})
     },
     $nativeHttp: { get: async () => assert.fail('the Library tab does not read the server directly') },
     mountEntites() {},
@@ -127,7 +131,7 @@ async function bookshelf({ hasActiveServer = true, user = null, currentLibraryId
   }
   for (const [name, def] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: (def.get || def).bind(view), configurable: true })
   for (const [name, fn] of Object.entries(component.methods)) if (!(name in view)) view[name] = fn.bind(view)
-  return { component, view, reads, emitted, refreshes, store }
+  return { component, view, reads, emitted, refreshes, store, subscriptions }
 }
 
 test('no current library with an active server shows catalog-not-loaded', async () => {
@@ -176,11 +180,13 @@ test('a copy of another account is not matched', async () => {
 test('library tab reads books through $absData and is not gated by the live user', async () => {
   const shelf = await read('../components/bookshelf/LazyBookshelf.vue')
   const fetch = shelf.slice(shelf.indexOf('async fetchEntities(page)'), shelf.indexOf('/** The downloaded copy'))
-  const books = fetch.slice(fetch.indexOf("if (this.entityName === 'books') {"), fetch.indexOf('} else {'))
-  assert.match(books, /this\.\$absData\s*\.getLibraryItems\(/)
-  assert.doesNotMatch(books, /\$nativeHttp/)
-  assert.match(fetch, /const entityPath = this\.entityName === 'series-books' \? `items` : this\.entityName/, 'books never take the server path')
-  assert.match(shelf, /canLoad\(\) \{\n\s*return this\.entityName === 'books' \? !!this\.\$store\.getters\.getHasActiveServer : !!this\.user/)
+  const catalog = shelf.slice(shelf.indexOf('readCatalogPage(page) {'), shelf.indexOf('/** The downloaded copy'))
+  assert.match(catalog, /this\.\$absData\.getLibraryItems\(/)
+  assert.doesNotMatch(catalog, /\$nativeHttp/)
+  assert.match(fetch, /if \(this\.readsCatalog\) \{/, 'books never take the server path')
+  assert.match(shelf, /canLoad\(\) \{\n\s*return this\.readsCatalog \? !!this\.\$store\.getters\.getHasActiveServer : !!this\.user/)
+  assert.match(shelf, /readsCatalog\(\) \{\n\s*return CATALOG_ENTITIES\.includes\(this\.entityName\)/)
+  assert.match(shelf, /const CATALOG_ENTITIES = \['books', 'series', 'series-books'\]/)
   for (const gate of ['async init()', 'async retryPage(page)', 'scroll(e)', 'async resetEntities()']) {
     const body = shelf.slice(shelf.indexOf(gate), shelf.indexOf('\n    },', shelf.indexOf(gate)))
     assert.match(body, /this\.canLoad/, `${gate} is gated by canLoad`)
@@ -342,3 +348,39 @@ test('a book removed from a server-read list reloads it', async () => {
   shelf.view.libraryItemRemoved({ id: 'not-loaded' })
   assert.equal(resets, 2, 'also a book on a page not loaded yet: the total changed')
 })
+
+test('empty series replica offline shows catalog-not-loaded', async () => {
+  const never = await bookshelf({ page: 'series', user: null, answer: { results: [], total: 0, replica: { reconciledAt: null, complete: false } } })
+  await never.view.init()
+  assert.equal(never.view.catalogNotLoaded, true)
+  assert.deepEqual({ ...never.reads[0].series, limit: 0 }, { libraryId: 'l1', sort: 'name', desc: false, limit: 0, page: 0, sortingIgnorePrefix: false }, 'read without a signed-in user')
+
+  const read = await bookshelf({ page: 'series', answer: { results: [], total: 0, replica: { reconciledAt: 5, complete: true } } })
+  await read.view.init()
+  assert.equal(read.view.catalogNotLoaded, false, 'a read replica without series is the usual "No series"')
+})
+
+test('a series page lists its books through $absData and follows the catalog', async () => {
+  const shelf = await bookshelf({ page: 'series-books', seriesId: 's1', settings: { collapseBookSeries: true } })
+  await shelf.view.init()
+  globalThis.document = { getElementById: () => null, addEventListener() {} }
+  globalThis.screen = {}
+  shelf.view.$socket = { $on() {} }
+  shelf.view.initListeners()
+  delete globalThis.document
+  delete globalThis.screen
+  assert.deepEqual({ ...shelf.reads[0], limit: 0 }, { libraryId: 'l1', sort: null, desc: false, filter: `series.${encode('s1')}`, collapseseries: true, limit: 0, page: 0, sortingIgnorePrefix: false })
+  assert.equal(shelf.subscriptions.length, 1, 'subscribed to native notices')
+
+  let refreshed = 0
+  shelf.view.refreshDebouncer = { schedule: () => refreshed++, cancel() {} }
+  shelf.view.dataChanged({ scope: 'catalog', ids: ['series:l1'] })
+  shelf.view.dataChanged({ scope: 'catalog', ids: ['items:l2'] })
+  assert.equal(refreshed, 1)
+
+  const socketResets = []
+  shelf.view.resetEntities = () => socketResets.push(1)
+  shelf.view.libraryItemAdded({ id: 'x' })
+  assert.deepEqual(socketResets, [], "the replica's notice refreshes it, not the socket")
+})
+

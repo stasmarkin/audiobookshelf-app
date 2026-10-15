@@ -64,7 +64,7 @@ export function catalogTopics(event, payload, currentLibraryId) {
  *   Paper progress of downloaded copies. Writes ("finished", reset, e-book position) go to native and work offline.
  * - Another saved server becoming active clears the user's data in the store and reads that server's; an answer that
  *   was asked for the previous server is dropped.
- * - The catalog (libraries, items) is read from native replica.db, at most 100 entities a call. While a library was
+ * - The catalog (libraries, items, series) is read from native replica.db, at most 100 entities a call. While a library was
  *   never reconciled (or the filter needs data the replica lacks) and the server is online, the same request goes to
  *   the server instead. `onDataChanged {scope:'catalog'}` keeps the libraries in the store current.
  * - In the browser (`platform: 'web'`, development only) there is no native side: everything goes straight to the
@@ -337,6 +337,43 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     return withServerFallback(answer, itemsPath(request), (data) => data || {}, () => getLibraryItems(args))
   }
 
+  const seriesQuery = ({ sort, desc, limit, page }) => {
+    const parts = []
+    if (sort) parts.push(`sort=${encodeURIComponent(sort)}`, `desc=${desc ? 1 : 0}`)
+    parts.push(`limit=${limit}`, `page=${page}`, 'minified=1', 'include=rssfeed,numEpisodesIncomplete')
+    return parts.join('&')
+  }
+
+  const getSeries = async (args) => {
+    const { libraryId, sort = null, desc = false, limit, page = 0, sortingIgnorePrefix = false } = args
+    if (isWeb) {
+      const params = { limit, page, minified: 1, include: 'rssfeed,numEpisodesIncomplete' }
+      if (sort) Object.assign(params, { sort, desc: desc ? 1 : 0 })
+      const data = await $axios.$get(`/api/libraries/${encodeURIComponent(libraryId)}/series`, { params })
+      return { ...data, serverConfigId: activeServer(), replica: webReplica() }
+    }
+    const request = { libraryId, sort, desc: !!desc, limit, page, sortingIgnorePrefix: !!sortingIgnorePrefix }
+    const answer = await fromNative(() => plugin.getSeries(request))
+    const path = `/api/libraries/${encodeURIComponent(libraryId)}/series?${seriesQuery(request)}`
+    return withServerFallback(answer, path, (data) => data || {}, () => getSeries(args))
+  }
+
+  const getSeriesById = async ({ id }) => {
+    const path = `/api/series/${encodeURIComponent(id)}`
+    const seriesShape = (data) => ({ series: data ?? null })
+    if (isWeb) {
+      let data = null
+      try {
+        data = await $axios.$get(path)
+      } catch (error) {
+        if (error?.response?.status !== 404) throw error
+      }
+      return { ...seriesShape(data), serverConfigId: activeServer(), replica: webReplica() }
+    }
+    const answer = await fromNative(() => plugin.getSeriesById({ id }))
+    return withServerFallback(answer, path, seriesShape, () => getSeriesById({ id }))
+  }
+
   // Without this the indicator stays hidden until something else asks
   getServerState().catch((error) => console.error('[data] Could not read the server state', error))
   if (!isWeb && plugin.getSyncState) {
@@ -448,6 +485,10 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
      * `limit` at most 100.
      */
     getLibraryItems,
+    /** A page of a library's series, each with all its books, in the server's shape plus `replica`; `limit` at most 100. */
+    getSeries,
+    /** `{ serverConfigId, series, replica }`; `series: null` when neither the replica nor (online) the server has it. */
+    getSeriesById,
     /** The library native reconciles first. */
     async setCurrentLibrary({ libraryId }) {
       if (isWeb || !plugin.setCurrentLibrary) return

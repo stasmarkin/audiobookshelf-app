@@ -121,13 +121,13 @@ export function downloadedBookItems(books, localItems, serverConnectionConfigId)
   })
 }
 
-export async function fetchSeriesBooks(http, libraryId, seriesId, encode) {
+// All books of a series in sequence order from the catalog ($absData: the replica, or the server before it was read)
+export async function fetchSeriesBooks(absData, libraryId, seriesId, encode) {
   const books = []
   const ids = new Set()
   const limit = 100
   for (let page = 0; ; page++) {
-    const query = new URLSearchParams({ filter: `series.${encode(seriesId)}`, sort: 'sequence', desc: '0', limit: String(limit), page: String(page), minified: '1' })
-    const payload = await http.get(`/api/libraries/${libraryId}/items?${query}`)
+    const payload = await absData.getLibraryItems({ libraryId, filter: `series.${encode(seriesId)}`, sort: 'sequence', desc: false, limit, page })
     if (!Array.isArray(payload?.results) || !Number.isFinite(payload.total)) throw new Error('Failed to load the complete series')
     for (const book of payload.results) {
       if (ids.has(book.id)) throw new Error('Series changed while loading. Please try again.')
@@ -144,9 +144,10 @@ export async function buildQueueSourceItems(context, source) {
   // up front by the Play-prompt flow to decide whether to prompt without a second fetch here).
   if (source.items) return source.items
   if (source.sourceType === 'series' || source.sourceType === 'collection') {
-    const books = source.sourceType === 'series' ? await fetchSeriesBooks(context.$nativeHttp, source.libraryId, source.sourceId, context.$encode) : source.books
+    const books = source.sourceType === 'series' ? await fetchSeriesBooks(context.$absData, source.libraryId, source.sourceId, context.$encode) : source.books
     const localItems = (await context.$db.getLocalLibraryItems('book')) || []
-    return downloadedBookItems(books, localItems, context.$store.getters['user/getServerConnectionConfigId'])
+    // The saved server's copies: offline there is no signed-in connection to compare with
+    return downloadedBookItems(books, localItems, context.$store.state.activeServerConfigId)
   }
   throw new Error('Unknown playback queue source')
 }

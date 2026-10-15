@@ -17,7 +17,7 @@ function context(localItems = []) {
     $platform: 'android',
     $encode: (value) => Buffer.from(value).toString('base64'),
     $db: { getLocalLibraryItems: async () => localItems },
-    $store: { getters: { 'user/getServerConnectionConfigId': 'server', 'globals/getLocalMediaProgressById': () => null, 'user/getUserMediaProgress': () => null } }
+    $store: { state: { activeServerConfigId: 'server' }, getters: { 'user/getServerConnectionConfigId': 'server', 'globals/getLocalMediaProgressById': () => null, 'user/getUserMediaProgress': () => null } }
   }
 }
 
@@ -81,41 +81,50 @@ test('queue items carry server ids', () => {
   assert.deepEqual(nativeQueueItems([items[2]]), [{ libraryItemId: 's3', episodeId: null, expectedTracks: 1 }])
 })
 
-test('complete series uses server sequence order, all pages, and never shelf collapse', async () => {
+// The series' books come from the catalog replica through $absData (offline-first 4b), 100 a call
+const seriesReader = (answer) => {
   const calls = []
-  const books = Array.from({ length: 205 }, (_, i) => book(String(205 - i)))
-  const http = {
-    get: async (url) => {
-      calls.push(url)
-      const query = new URL(url, 'http://test').searchParams
-      assert.equal(query.get('sort'), 'sequence')
-      assert.equal(query.get('desc'), '0')
-      assert.equal(query.get('collapseseries'), null)
-      assert.equal(query.get('filter'), 'series.encoded')
-      const page = Number(query.get('page'))
-      return { results: books.slice(page * 100, page * 100 + 100), total: 205 }
-    }
-  }
-  assert.deepEqual(await fetchSeriesBooks(http, 'library', 'series', () => 'encoded'), books)
-  assert.equal(calls.length, 3)
+  return { calls, getLibraryItems: async (args) => (calls.push(args), answer(args)) }
+}
+
+test('fetchSeriesBooks pages through $absData in server sequence order and never collapses', async () => {
+  const books = Array.from({ length: 230 }, (_, i) => book(String(230 - i)))
+  const absData = seriesReader(({ page }) => ({ results: books.slice(page * 100, page * 100 + 100), total: 230 }))
+  assert.deepEqual(await fetchSeriesBooks(absData, 'library', 'series', () => 'encoded'), books)
+  assert.deepEqual(
+    absData.calls,
+    [0, 1, 2].map((page) => ({ libraryId: 'library', filter: 'series.encoded', sort: 'sequence', desc: false, limit: 100, page }))
+  )
 })
 
 test('incomplete, failed or repeated series pages fail instead of playing a partial queue', async () => {
-  await assert.rejects(fetchSeriesBooks({ get: async () => ({ results: [], total: 5 }) }, 'l', 's', String))
+  await assert.rejects(fetchSeriesBooks(seriesReader(() => ({ results: [], total: 5 })), 'l', 's', String))
   await assert.rejects(
     fetchSeriesBooks(
-      {
-        get: async () => {
-          throw new Error('offline')
-        }
-      },
+      seriesReader(() => {
+        throw new Error('offline')
+      }),
       'l',
       's',
       String
     ),
     /offline/
   )
-  await assert.rejects(fetchSeriesBooks({ get: async () => ({ results: [book('a')], total: 5 }) }, 'l', 's', String), /changed/)
+  await assert.rejects(fetchSeriesBooks(seriesReader(() => ({ results: [book('a')], total: 5 })), 'l', 's', String), /Series changed while loading/)
+})
+
+test('series queue offline recognizes downloaded copies', async () => {
+  // Offline there is no signed-in connection; the copies belong to the active saved server
+  const ctx = context([local('1'), local('3')])
+  ctx.$store.getters['user/getServerConnectionConfigId'] = null
+  ctx.$absData = seriesReader(() => ({ results: ['1', '2', '3'].map(book), total: 3 }))
+  const result = await resolvePlaybackQueue(ctx, { libraryItemId: '1', queueSource: { sourceType: 'series', sourceId: 's', libraryId: 'l' } })
+  assert.deepEqual(
+    result.queue.items.map((item) => item.localLibraryItem?.id || null),
+    ['local_device_1', null, 'local_device_3']
+  )
+  assert.equal(result.payload.libraryItemId, 'local_device_1')
+  assert.equal(result.payload.startTime, undefined, 'native picks where a book starts')
 })
 
 test('Play All starts at the first unfinished book, local progress taking precedence over server progress', async () => {
@@ -157,7 +166,7 @@ test('Play All with everything finished, or nothing playable, reports it instead
 
 test('starting a middle series book constructs the full queue and points at that book', async () => {
   const ctx = context(['1', '2', '3', '4'].map((id) => local(id)))
-  ctx.$nativeHttp = { get: async () => ({ results: ['1', '2', '3', '4'].map(book), total: 4 }) }
+  ctx.$absData = seriesReader(() => ({ results: ['1', '2', '3', '4'].map(book), total: 4 }))
   const result = await resolvePlaybackQueue(ctx, { libraryItemId: '3', queueSource: { sourceType: 'series', sourceId: 's', libraryId: 'l' } })
   assert.equal(result.queue.currentIndex, 2)
   assert.equal(result.queue.items[result.queue.currentIndex + 1].localLibraryItem.id, 'local_device_4')
@@ -253,7 +262,7 @@ async function container(native) {
   ctx.$diag = { debug: () => {} }
   ctx.savedQueue = null
   ctx.$localStore = { getPlaybackQueue: async () => ctx.savedQueue }
-  ctx.$store.state = { playbackQueue: null }
+  ctx.$store.state = { playbackQueue: null, activeServerConfigId: 'server' }
   ctx.$store.commit = (name, payload) => {
     if (name === 'setPlaybackQueue') ctx.$store.state.playbackQueue = payload
     if (name === 'clearPlaybackQueue') ctx.$store.state.playbackQueue = null
@@ -284,8 +293,8 @@ test('unrelated playback clears both queues before starting; failed queue fetch 
   await ctx.playLibraryItem({ libraryItemId: 'unrelated' })
   assert.deepEqual(calls, ['clear', 'play'])
   assert.equal(ctx.$store.state.playbackQueue, null)
-  ctx.$nativeHttp = {
-    get: async () => {
+  ctx.$absData = {
+    getLibraryItems: async () => {
       throw new Error('offline')
     }
   }
