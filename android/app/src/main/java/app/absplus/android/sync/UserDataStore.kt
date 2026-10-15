@@ -178,10 +178,12 @@ class UserDataStore(
    * A playback tick: the position the player reached at [lastUpdate] (the session's time). Listening reaches the
    * server through sessions, so nothing is queued and `pending` stays as it is, except after a reset that is still
    * queued: the DELETE would leave the server without this listening, so a PATCH of it is queued behind the DELETE.
-   * [mirrorToPaper]: false when the Paper copy is written by the player itself.
+   * [mirrorToPaper]: false when the Paper copy is written by the player itself. [mirrorUnlessNewer]: the copy's Paper
+   * progress keeps a later write of the player (this write may run after it).
    */
   suspend fun recordPlayback(serverConfigId: String, libraryItemId: String, episodeId: String?, currentTime: Double,
-                             duration: Double, progressValue: Double, lastUpdate: Long, mirrorToPaper: Boolean = true) {
+                             duration: Double, progressValue: Double, lastUpdate: Long, mirrorToPaper: Boolean = true,
+                             mirrorUnlessNewer: Boolean = false) {
     val row = db.withTransaction {
       val key = progressItemKey(libraryItemId, episodeId)
       val queued = outbox.byItemKey(serverConfigId, key)
@@ -204,15 +206,16 @@ class UserDataStore(
       progress.upsert(updated)
       updated
     } ?: return
-    if (mirrorToPaper) mirror.mirror(listOf(row), PLAYBACK_MIRROR_FIELDS)
+    if (mirrorToPaper) mirror.mirror(listOf(row), PLAYBACK_MIRROR_FIELDS, mirrorUnlessNewer)
     // Its own scope: the WebView re-reads just this row for a tick, not the Paper progress of every copy
     notifier.notify(SCOPE_PLAYBACK, listOf(libraryItemId))
   }
 
   /**
    * Merges the server's progress records by [mergeProgress]. A row whose item has unsent listening sessions counts as
-   * pending. [deleteMissing] (a full pull only, never a snapshot that may predate a just-sent PATCH): a row the server
-   * has no record of is deleted, with the Paper progress of its copy, unless it is pending, has unsent sessions or is
+   * pending. [deleteMissing] (a full pull only, never a snapshot that may predate a just-sent PATCH): a row whose server
+   * record is gone (deleted by another client) is deleted, with the Paper progress of its copy, unless it is pending,
+   * has unsent sessions or is
    * in [keep] (read in the deleting transaction, so a key remembered by an import that just committed is seen).
    * Anything else ([deleteMissing] false) is a snapshot, which may predate a reset that reached the server lately: its
    * records from before that reset are ignored. A taken record with the device's own values (the server's echo of
@@ -246,7 +249,8 @@ class UserDataStore(
       val kept = if (deleteMissing) keep() else emptySet()
       val deleted = if (!deleteMissing) emptyList() else progress.getAll(serverConfigId).filter { row ->
         val key = progressItemKey(row.libraryItemId, row.episodeId)
-        key !in seen && !row.pending && key !in unsent && key !in kept
+        // Only a record the server had (its id known) was deleted there; a row it never saw stays local
+        key !in seen && row.serverProgressId != null && !row.pending && key !in unsent && key !in kept
       }
       deleted.forEach { progress.delete(it.serverConfigId, it.libraryItemId, it.episodeId) }
       taken to deleted

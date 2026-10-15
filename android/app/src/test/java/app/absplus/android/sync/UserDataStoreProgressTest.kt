@@ -630,4 +630,17 @@ class UserDataStoreProgressTest {
     assertEquals(listOf("Sync"), events.map { it.name })
     assertEquals(700.0, events.single().currentTime!!.toDouble(), 0.0)
   }
+
+  @Test
+  fun aFullPullKeepsRowsTheServerNeverHadAndDeletesRecordsGoneThere() = runBlocking {
+    downloadedCopy(currentTime = 300.0)
+    db.mediaProgress().upsert(progressRow(300.0, lastUpdate = 5L, pending = false).copy(serverProgressId = null))
+    db.mediaProgress().upsert(progressRow(50.0, lastUpdate = 5L, pending = false).copy(libraryItemId = "li2"))
+
+    repeat(2) { store.applyServerProgress("srv", emptyList(), deleteMissing = true) }
+
+    assertNotNull("never seen by the server: stays", row())
+    assertEquals(300.0, paper()!!.currentTime, 0.0)
+    assertNull("its record deleted on the server: goes", db.mediaProgress().get("srv", "li2", ""))
+  }
 }

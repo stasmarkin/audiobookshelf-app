@@ -439,10 +439,11 @@ class MediaProgressSyncer(
     if (duration <= 0) return
     val progress = currentTime / duration
     val lastUpdate = System.currentTimeMillis()
-    // A downloaded copy's Paper progress is the player's own (saveLocalProgress); a late mirror could undo a newer tick
-    val mirror = !session.isLocal
+    // Into the copy's Paper progress too (the player starts from it), but never over a tick the player wrote after the
+    // seek: this write runs later, off the player's thread
     SyncEngine.launchWrite { store ->
-      store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate, mirror)
+      store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate,
+              mirrorToPaper = true, mirrorUnlessNewer = true)
     }
   }
 
