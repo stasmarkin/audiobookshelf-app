@@ -217,4 +217,31 @@ class MediaProgressSyncerWriteTest {
 
     assertEquals("the sequel's session stays for its own sync", listOf("session-sequel"), DeviceManager.dbManager.getPlaybackSessions().map { it.id })
   }
+
+  @Test
+  fun aLateSyncAnswerLeavesTheCurrentSessionsSyncClock() {
+    val opener = session(PLAYMETHOD_DIRECTPLAY, null).also { it.id = "session-opener" }
+    val sequel = session(PLAYMETHOD_DIRECTPLAY, null).also { it.id = "session-sequel" }
+    syncer.currentPlaybackSession = sequel
+    val before = syncer.lastSyncTime
+
+    syncer.serverSyncAnswered("session-opener", "Opener", 995.0, syncSuccess = true)
+    assertEquals("the sequel's listening since its last sync is still counted", before, syncer.lastSyncTime)
+
+    syncer.serverSyncAnswered("session-sequel", "Sequel", 10.0, syncSuccess = true)
+    assertTrue("its own answer moves it", syncer.lastSyncTime > before)
+  }
+
+  @Test
+  fun aFailedSyncAnswerKeepsBothSessions() {
+    val opener = session(PLAYMETHOD_DIRECTPLAY, null).also { it.id = "session-opener" }
+    val sequel = session(PLAYMETHOD_DIRECTPLAY, null).also { it.id = "session-sequel" }
+    DeviceManager.dbManager.savePlaybackSession(opener)
+    DeviceManager.dbManager.savePlaybackSession(sequel)
+    syncer.currentPlaybackSession = sequel
+
+    syncer.serverSyncAnswered("session-opener", "Opener", 995.0, syncSuccess = false)
+
+    assertEquals(setOf("session-opener", "session-sequel"), DeviceManager.dbManager.getPlaybackSessions().map { it.id }.toSet())
+  }
 }

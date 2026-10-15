@@ -40,7 +40,8 @@ class MediaProgressSyncer(
   private var listeningTimerTask: TimerTask? = null
   var listeningTimerRunning: Boolean = false
 
-  private var lastSyncTime: Long = 0
+  internal var lastSyncTime: Long = 0
+    private set
   private var failedSyncs: Int = 0
 
   var currentPlaybackSession: PlaybackSession? = null // copy of pb session currently syncing
@@ -344,19 +345,26 @@ class MediaProgressSyncer(
    * again through `local-all`.
    */
   internal fun serverSyncAnswered(sentSessionId: String, syncedTitle: String, currentTime: Double, syncSuccess: Boolean) {
+    // The sync clock and failure count belong to the session playing now: a late answer for the previous item must not
+    // reset them (its listening time would be counted short)
+    val stillCurrent = sentSessionId == currentSessionId
     if (syncSuccess) {
       noteServerSync(sentSessionId, currentTime, true)
       AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced progress (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $sentSessionId) (${DeviceManager.serverConnectionConfigName})")
 
-      failedSyncs = 0
-      playerNotificationService.alertSyncSuccess()
-      lastSyncTime = System.currentTimeMillis()
+      if (stillCurrent) {
+        failedSyncs = 0
+        playerNotificationService.alertSyncSuccess()
+        lastSyncTime = System.currentTimeMillis()
+      }
       DeviceManager.dbManager.removePlaybackSession(sentSessionId) // Remove session from db
     } else {
-      failedSyncs++
-      if (failedSyncs == 2) {
-        playerNotificationService.alertSyncFailing() // Show alert in client
-        failedSyncs = 0
+      if (stillCurrent) {
+        failedSyncs++
+        if (failedSyncs == 2) {
+          playerNotificationService.alertSyncFailing() // Show alert in client
+          failedSyncs = 0
+        }
       }
       AbsLogger.error("MediaProgressSyncer", "sync: Progress sync failed (count: $failedSyncs) (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $sentSessionId) (${DeviceManager.serverConnectionConfigName})")
     }
