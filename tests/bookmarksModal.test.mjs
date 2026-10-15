@@ -193,16 +193,22 @@ test('a downloaded copy played offline keeps its server id, so the player shows 
   const sandbox = { console }
   vm.runInNewContext(container.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component =').replace(/mixins: \[[^\]]*\],/, ''), sandbox)
   const { setServerIds } = sandbox.component.methods
-  const copySession = { libraryItemId: 'li-server', episodeId: null, localLibraryItem: { id: 'local_1', libraryItemId: 'li-server', serverConnectionConfigId: 'server-a' } }
-  const run = (ctx, args) => (setServerIds.apply(ctx, args), [ctx.serverLibraryItemId, ctx.serverEpisodeId])
+  const session = (server, episodeId = null) => ({ libraryItemId: 'li-server', episodeId, localLibraryItem: { id: 'local_1', libraryItemId: 'li-server', serverConnectionConfigId: server } })
+  const run = (currentPlaybackSession, args, previous = ['li-previous', 'ep-previous']) => {
+    const ctx = { currentPlaybackSession, $store: { state: { activeServerConfigId: 'server-a' } }, serverLibraryItemId: previous[0], serverEpisodeId: previous[1] }
+    setServerIds.apply(ctx, args)
+    return [ctx.serverLibraryItemId, ctx.serverEpisodeId]
+  }
 
-  // Offline cold start: the page could not tell the server id (no current server), the session watcher already did
-  assert.deepEqual(run({ currentPlaybackSession: copySession, serverLibraryItemId: 'li-server', serverEpisodeId: null }, ['local_1', null, null, null]), ['li-server', null])
-  // The answer came before the watcher ran: the copy's own session has it
-  assert.deepEqual(run({ currentPlaybackSession: copySession, serverLibraryItemId: null, serverEpisodeId: null }, ['local_1', null, null, null]), ['li-server', null])
-  // A session of something else still in the store is not taken
-  assert.deepEqual(run({ currentPlaybackSession: { ...copySession, localLibraryItem: { id: 'local_other' }, libraryItemId: 'li-other' }, serverLibraryItemId: null, serverEpisodeId: null }, ['local_1', null, null, null]), [null, null])
-  // Unchanged: ids the page passed, and server items
-  assert.deepEqual(run({ currentPlaybackSession: null, serverLibraryItemId: null }, ['local_1', 'local_ep', 'li-page', 'ep-page']), ['li-page', 'ep-page'])
-  assert.deepEqual(run({ currentPlaybackSession: null, serverLibraryItemId: null }, ['li-stream', 'ep-stream', null, null]), ['li-stream', 'ep-stream'])
+  // Offline cold start: the page could not tell the server ids (no current server); the copy's own session has them
+  assert.deepEqual(run(session('server-a'), ['local_1', null, null, null]), ['li-server', null])
+  assert.deepEqual(run(session('server-a', 'ep-server'), ['local_1', 'local_ep', null, null]), ['li-server', 'ep-server'], 'the pair comes from the session')
+  // A copy of another saved server: none, as before (no bookmark button, no cast to the wrong server)
+  assert.deepEqual(run(session('server-b'), ['local_1', null, null, null]), [null, null])
+  // A session of something else still in the store is not taken, and nothing is left over from before
+  assert.deepEqual(run({ ...session('server-a'), localLibraryItem: { id: 'local_other', serverConnectionConfigId: 'server-a' } }, ['local_1', null, null, null]), [null, null])
+  // Ids the page passed are used as a pair; server items as before
+  assert.deepEqual(run(session('server-a', 'ep-server'), ['local_1', 'local_ep', 'li-page', 'ep-page']), ['li-page', 'ep-page'])
+  assert.deepEqual(run(session('server-a', 'ep-server'), ['local_1', 'local_ep', 'li-page', null]), ['li-page', null], 'not mixed with the session episode')
+  assert.deepEqual(run(null, ['li-stream', 'ep-stream', null, null]), ['li-stream', 'ep-stream'])
 })

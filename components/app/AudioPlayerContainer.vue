@@ -77,14 +77,24 @@ export default {
   },
   methods: {
     /**
-     * The server ids of what started playing. A downloaded copy knows its own (the session's libraryItemId, from
-     * LocalLibraryItem.libraryItemId) even when the page could not tell them, offline or with another server active.
+     * The server ids of what started playing, both from one source. A downloaded copy of the active server knows its
+     * own (the session's ids, from LocalLibraryItem.libraryItemId) when the page could not tell them, e.g. offline on
+     * a cold start. A copy of another saved server gets none: its ids mean nothing to the active server.
      */
     setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId) {
-      const session = this.currentPlaybackSession
-      const copySession = session?.localLibraryItem?.id === libraryItemId ? session : null
-      this.serverLibraryItemId = !libraryItemId.startsWith('local') ? libraryItemId : serverLibraryItemId || copySession?.libraryItemId || this.serverLibraryItemId
-      this.serverEpisodeId = episodeId && !episodeId.startsWith('local') ? episodeId : serverEpisodeId || copySession?.episodeId || this.serverEpisodeId
+      let ids = [null, null]
+      if (!libraryItemId.startsWith('local')) {
+        ids = [libraryItemId, episodeId && !episodeId.startsWith('local') ? episodeId : serverEpisodeId]
+      } else if (serverLibraryItemId) {
+        ids = [serverLibraryItemId, serverEpisodeId]
+      } else {
+        const session = this.currentPlaybackSession
+        const copy = session?.localLibraryItem
+        const ownCopy = copy?.id === libraryItemId && !!copy.serverConnectionConfigId && copy.serverConnectionConfigId === this.$store.state.activeServerConfigId
+        if (ownCopy) ids = [session.libraryItemId || null, session.episodeId || null]
+      }
+      this.serverLibraryItemId = ids[0]
+      this.serverEpisodeId = ids[1] || null
     },
     showBookmarks() {
       this.showBookmarksModal = true
