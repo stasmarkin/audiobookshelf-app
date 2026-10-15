@@ -37,6 +37,12 @@ abstract class UserDataDatabase : RoomDatabase() {
               instance ?: open(context, FILE_NAME).also { instance = it }
             }
 
+    @Synchronized
+    internal fun resetForTest() {
+      instance?.close()
+      instance = null
+    }
+
     internal fun open(context: Context, name: String): UserDataDatabase =
             Room.databaseBuilder(context.applicationContext, UserDataDatabase::class.java, name).build()
   }

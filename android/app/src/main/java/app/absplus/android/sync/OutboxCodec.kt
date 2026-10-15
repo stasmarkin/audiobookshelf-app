@@ -28,6 +28,11 @@ fun progressItemKey(libraryItemId: String, episodeId: String?): String = "$libra
 /** Outbox key of a bookmark: `<libraryItemId>@<canonicalTime>`. */
 fun bookmarkItemKey(libraryItemId: String, time: Double): String = "$libraryItemId@${canonicalTime(time)}"
 
+/** libraryItemId and episodeId ("" for a book) of a [progressItemKey]. */
+fun progressKeyParts(itemKey: String): Pair<String, String> = itemKey.substringBeforeLast('|') to itemKey.substringAfterLast('|', "")
+
+fun bookmarkKeyLibraryItemId(itemKey: String): String = itemKey.substringBeforeLast('@')
+
 /**
  * A bookmark time as the server path and keys expect it: a whole number without ".0" (754.0 and 754 are one bookmark,
  * DELETE /bookmark/754), a fraction as is.

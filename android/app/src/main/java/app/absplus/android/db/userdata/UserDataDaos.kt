@@ -54,6 +54,10 @@ interface OutboxDao {
             AND id = (SELECT MIN(id) FROM outbox WHERE serverConfigId = :serverConfigId)""")
   suspend fun nextDue(serverConfigId: String, now: Long): OutboxEntity?
 
+  /** The oldest row of the server, due or not. */
+  @Query("SELECT * FROM outbox WHERE serverConfigId = :serverConfigId ORDER BY id LIMIT 1")
+  suspend fun head(serverConfigId: String): OutboxEntity?
+
   /** Rows of every kind about one item, oldest first. */
   @Query("SELECT * FROM outbox WHERE serverConfigId = :serverConfigId AND itemKey = :itemKey ORDER BY id")
   suspend fun byItemKey(serverConfigId: String, itemKey: String): List<OutboxEntity>

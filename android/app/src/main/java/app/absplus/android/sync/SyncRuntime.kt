@@ -2,6 +2,7 @@ package app.absplus.android.sync
 
 import android.content.Context
 import app.absplus.android.managers.DbManager
+import app.absplus.android.server.ApiHandler
 
 /**
  * Lazily starts the process-wide sync singletons. There is no Application class and the process can start without an
@@ -22,12 +23,16 @@ object SyncRuntime {
     DbManager.initialize(app)
     ActiveServer.init(app)
     ServerReachability.start(app)
+    SyncEngine.init(app) { ApiHandler(app) }
     initialized = true
   }
 
   fun setForeground(foreground: Boolean) {
     isForeground = foreground
-    if (foreground) ServerReachability.onForeground()
+    if (foreground) {
+      ServerReachability.onForeground()
+      SyncEngine.syncNow(SyncReason.FOREGROUND)
+    }
   }
 
   @Synchronized

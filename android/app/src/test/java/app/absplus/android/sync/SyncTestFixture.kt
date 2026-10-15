@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.db.userdata.UserDataDatabase
 import app.absplus.android.device.DeviceManager
 import io.paperdb.Paper
 import kotlinx.coroutines.CompletableDeferred
@@ -51,6 +52,8 @@ class SyncTestFixture {
   }
 
   private fun resetSingletons() {
+    SyncEngine.resetForTest()
+    UserDataDatabase.resetForTest()
     ServerReachability.resetForTest()
     ActiveServer.resetForTest()
     SyncRuntime.resetForTest()

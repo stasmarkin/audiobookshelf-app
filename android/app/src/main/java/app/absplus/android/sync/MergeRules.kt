@@ -44,7 +44,8 @@ data class OutboxPlan(val deleteIds: List<Long>, val insert: OutboxEntity?, val 
  */
 fun coalesce(existing: List<OutboxEntity>, incoming: OutboxEntity, inFlightId: Long?): OutboxPlan {
   val queued = existing.filter { it.matches(incoming) && it.id != inFlightId }
-  val unsentAdd = queued.lastOrNull { it.kind == OutboxKind.BOOKMARK_ADD && it.attempts == 0 }
+  val unsentAdds = queued.filter { it.kind == OutboxKind.BOOKMARK_ADD && it.attempts == 0 }
+  val unsentAdd = unsentAdds.lastOrNull()
   val updates = queued.filter { it.kind == OutboxKind.BOOKMARK_UPDATE }
 
   return when (incoming.kind) {
@@ -63,7 +64,7 @@ fun coalesce(existing: List<OutboxEntity>, incoming: OutboxEntity, inFlightId: L
       else OutboxPlan(updates.map { it.id }, incoming, null)
     OutboxKind.BOOKMARK_REMOVE ->
       when {
-        unsentAdd != null -> OutboxPlan(listOf(unsentAdd.id) + updates.map { it.id }, null, null)
+        unsentAdd != null -> OutboxPlan((unsentAdds + updates).map { it.id }, null, null)
         queued.any { it.kind == OutboxKind.BOOKMARK_REMOVE } -> OutboxPlan(updates.map { it.id }, null, null)
         else -> OutboxPlan(updates.map { it.id }, incoming, null)
       }
