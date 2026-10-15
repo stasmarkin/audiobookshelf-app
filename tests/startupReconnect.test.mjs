@@ -418,4 +418,6 @@ test('Home on a cold start with the saved server unreachable says so instead of 
   const template = page.match(/<template>([\s\S]*)<\/template>/)[1]
   assert.match(template, /v-if="!user && serverUnreachable"[\s\S]*MessageServerUnreachableShowingDevice/)
   assert.match(template, /<ui-btn v-if="!user && !serverUnreachable"[^>]*\$router\.push\('\/connect'\)/)
+  const unreachableBlock = template.match(/v-if="!user && serverUnreachable">([\s\S]*?)<div class="w-full" v-else-if/)[1]
+  assert.match(unreachableBlock, /@click="\$router\.push\('\/connect'\)">\{\{ \$strings\.ButtonSwitchServerUser \}\}/, 'a way to another server when this one is gone')
 })

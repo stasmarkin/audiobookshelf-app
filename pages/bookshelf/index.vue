@@ -25,6 +25,8 @@
             <span class="material-symbols text-warning text-lg">cloud_off</span>
             <p class="pl-2 text-warning text-sm">{{ $strings.MessageServerUnreachableShowingDevice }}</p>
           </div>
+          <!-- A way out when the saved server is gone for good -->
+          <p class="text-center text-sm text-fg-muted underline" @click="$router.push('/connect')">{{ $strings.ButtonSwitchServerUser }}</p>
         </div>
         <div class="w-full" v-else-if="!user">
           <div class="flex justify-center items-center mb-3">
