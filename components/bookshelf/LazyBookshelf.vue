@@ -223,8 +223,9 @@ export default {
           this.catalogNotLoaded = payload.replica?.reconciledAt == null && !payload.total && !payload.fromServer
           this.requiresServer = !!payload.unsupportedFilter
           this.fromServer = !!payload.fromServer
-          this.replicaIncomplete = isReplicaIncomplete(payload)
         }
+        // Any page tells the replica's state: a refresh of a scrolled list never re-reads page 0
+        if (payload) this.replicaIncomplete = isReplicaIncomplete(payload)
       } else {
         const entityPath = this.entityName
         const sfQueryString = this.currentSFQueryString ? this.currentSFQueryString + '&' : ''

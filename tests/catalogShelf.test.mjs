@@ -550,3 +550,19 @@ test('the series tab and a series page show the partial note and no count like t
     assert.deepEqual(never.emitted.filter(([name]) => name === 'bookshelf-total-entities').at(-1), ['bookshelf-total-entities', null], page)
   }
 })
+
+test('a series page whose catalog is not loaded shows its name without a count', async () => {
+  const toolbar = (await read('../components/home/BookshelfToolbar.vue')).match(/<template>([\s\S]*)<\/template>/)[1]
+  assert.match(toolbar, /\{\{ selectedSeriesName \}\}<template v-if="totalEntities !== null"> \(\{\{ \$formatNumber\(totalEntities\) \}\}\)<\/template>/)
+})
+
+test('the partial note goes away when any re-read page says the catalog is complete', async () => {
+  const shelf = await bookshelf({ answer: { results: [{ id: 'a' }], total: 500, replica: { reconciledAt: 9, complete: false } } })
+  shelf.store.state.serverState = 'offline'
+  await shelf.view.init()
+  assert.equal(shelf.view.showCatalogPartial, true)
+  // Scrolled down: the refresh after the reconcile reads page 3 only, with the same total
+  shelf.view.$absData.getLibraryItems = async () => ({ results: [{ id: 'b' }], total: 500, replica: { reconciledAt: 10, complete: true } })
+  await shelf.view.fetchEntities(3)
+  assert.equal(shelf.view.showCatalogPartial, false)
+})

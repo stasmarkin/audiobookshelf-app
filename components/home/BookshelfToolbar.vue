@@ -5,7 +5,7 @@
       <div class="flex items-center w-full text-sm">
         <!-- null: the catalog is not downloaded yet, a count would contradict the message below -->
         <template v-if="totalEntities !== null"><p v-show="!selectedSeriesName" class="toolbar-count pt-1">{{ $formatNumber(totalEntities) }} {{ entityTitle }}</p></template>
-        <p v-show="selectedSeriesName" class="ml-2 pt-1 min-w-0 break-words line-clamp-2">{{ selectedSeriesName }} ({{ $formatNumber(totalEntities) }})</p>
+        <p v-show="selectedSeriesName" class="ml-2 pt-1 min-w-0 break-words line-clamp-2">{{ selectedSeriesName }}<template v-if="totalEntities !== null"> ({{ $formatNumber(totalEntities) }})</template></p>
         <div class="flex-grow" />
         <span v-if="page == 'library' || seriesBookPage" class="material-symbols text-2xl px-2" @click="changeView">{{ !bookshelfListView ? 'view_list' : 'grid_view' }}</span>
         <template v-if="page === 'library'">
