@@ -95,6 +95,8 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 15. **Offline listening is kept:** in airplane mode, listen to a downloaded book for a few minutes, then turn airplane mode off. Its position is not moved back by an older position on the server, and the server's web client shows the phone's position after the sync.
 16. **E-book position offline:** in airplane mode, read a few pages of a downloaded e-book, then turn airplane mode off. The server's web client opens it at that page.
 17. **Revoked session:** with the app open, revoke its session on the server (change the password in the web client). The app stays on the same page with the selected library, bookmarks and progress; the indicator says "sign in again". Mark something finished: it waits. Tap the indicator: the sign-in form opens for that server with the "session expired" message; after signing in, the waiting change reaches the server.
+18. **Streamed listening while the server is down:** stream a book that is not downloaded and note the server's listening time for it. Stop the server for 2 minutes and keep listening to what the player buffered (or play a downloaded book), then start the server. After the sync, the server's listening sessions show the streamed session and a second, offline session; together they add the time actually listened within 15 seconds, and the streamed session was not overwritten by the offline one.
+19. **Downloaded book in airplane mode:** listen to a downloaded book for 10 minutes in airplane mode, then turn airplane mode off. The server's web client shows the phone's position and the listening session after the sync.
 
 ## Emulator baseline (for comparison)
 
