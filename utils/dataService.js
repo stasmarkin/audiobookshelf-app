@@ -371,12 +371,18 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     const params = { sort: 'name', desc: 0, limit, page }
     if (isWeb) {
       const data = await $axios.$get(`/api/libraries/${encodeURIComponent(libraryId)}/authors`, { params })
-      return { ...data, serverConfigId: activeServer(), replica: webReplica() }
+      return { ...authorsPage(data, limit, page), serverConfigId: activeServer(), replica: webReplica() }
     }
     const request = { libraryId, limit, page }
     const answer = await fromNative(() => plugin.getAuthors(request))
     const path = `/api/libraries/${encodeURIComponent(libraryId)}/authors?${new URLSearchParams(params).toString()}`
-    return withServerFallback(answer, path, (data) => data || {}, () => getAuthors(args))
+    return withServerFallback(answer, path, (data) => authorsPage(data, limit, page), () => getAuthors(args))
+  }
+
+  /** Servers before 2.15.0 ignore limit and page and answer every author as `authors`: cut the page from it. */
+  const authorsPage = (data, limit, page) => {
+    if (Array.isArray(data?.results) || !Array.isArray(data?.authors)) return data || {}
+    return { results: data.authors.slice(page * limit, page * limit + limit), total: data.authors.length, limit, page }
   }
 
   const getSeriesById = async ({ id }) => {

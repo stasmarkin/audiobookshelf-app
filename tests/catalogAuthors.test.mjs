@@ -171,6 +171,18 @@ test('never-reconciled authors read the server while online', async () => {
   assert.deepEqual(plain(answer.results), [{ id: 'au1', name: 'Ann' }])
   assert.equal(answer.replica.reconciledAt, null, "native's replica state is kept")
 
+  // A server before 2.15.0 ignores limit and page and answers every author as `authors`
+  const all = authorsOf('l1', 230)
+  const legacy = createDataService({ plugin: plugin(null), store: store('online'), nativeHttp: () => http({ authors: all }) })
+  const second = await legacy.getAuthors({ libraryId: 'l1', limit: 100, page: 1 })
+  assert.deepEqual(plain(second.results).map((a) => a.id), all.slice(100, 200).map((a) => a.id))
+  assert.equal(second.total, 230)
+  assert.equal(second.page, 1)
+  assert.equal(second.fromServer, true)
+  const legacyTab = authorsPage({ getAuthors: (args) => legacy.getAuthors(args) })
+  await legacyTab.view.init()
+  assert.equal(legacyTab.view.authors.length, 230, 'pages of the whole list, each author once')
+
   const reconciled = createDataService({ plugin: plugin(9), store: store('online'), nativeHttp: () => http(assert.fail) })
   assert.equal((await reconciled.getAuthors({ libraryId: 'l1', limit: 100, page: 0 })).fromServer, undefined, 'a read replica answers')
 
