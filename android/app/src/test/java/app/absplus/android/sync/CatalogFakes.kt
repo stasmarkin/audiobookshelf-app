@@ -35,6 +35,7 @@ class FakeCatalogServer {
   val authors = LinkedHashMap<String, FakeAuthor>()
   var onItemsPage: (ItemsPage) -> Unit = {}
   var onAuthorsPage: (AuthorsPage) -> Unit = {}
+  var legacyAuthors = false
   var notFound: Set<String> = emptySet()
   private val calls = HashMap<String, Int>()
   private val mapper = CatalogJson.mapper
@@ -127,6 +128,12 @@ class FakeCatalogServer {
         val page = q["page"]?.toInt() ?: 0
         val all = authors.values.filter { it.libraryId == libraryId }.sortedBy { it.addedAt }
         val call = calls.merge("$libraryId authors", 1, Int::plus)!! - 1
+        // Servers before 2.15.0 ignore limit and page and send every author without numBooks or lastFirst
+        if (legacyAuthors) {
+          val list = mapper.createArrayNode()
+          all.forEach { list.addObject().put("id", it.id).put("name", it.name).put("libraryId", libraryId).put("addedAt", it.addedAt).put("updatedAt", it.updatedAt) }
+          return 200 to mapper.writeValueAsString(mapper.createObjectNode().set<ObjectNode>("authors", list))
+        }
         val answer = AuthorsPage(libraryId, page, call, all.drop(page * limit).take(limit), all.size)
         onAuthorsPage(answer)
         val results = mapper.createArrayNode()

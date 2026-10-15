@@ -551,4 +551,53 @@ class CatalogReconcilerTest {
     assertEquals(1_000L, state("lib1")!!.authorsReconciledAt)
     assertTrue("a tab reading the server switches to the replica", topics.contains("authors:lib1"))
   }
+
+  @Test
+  fun serverWithoutAuthorPagesGivesTheWholeList() {
+    server.library("lib1")
+    repeat(150) { server.author("a$it", "Author $it") }
+    server.legacyAuthors = true
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "gone"))) }
+
+    reconcile()
+
+    assertEquals("the unpaged list is the whole list: read once", 1, authorRequests().size)
+    assertEquals((0 until 150).map { "a$it" }.toSet(), authorIds())
+    assertEquals(1_000L, state("lib1")!!.authorsReconciledAt)
+  }
+
+  @Test
+  fun authorsAnswerWithoutAListDeletesNothing() {
+    server.library("lib1")
+    server.author("a1", "Ann Lee")
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "kept"))) }
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/authors")) 200 to """{"something":"else"}""" else handler(r) }
+
+    reconcile()
+
+    assertEquals(setOf("kept"), authorIds())
+    assertNull(state("lib1")!!.authorsReconciledAt)
+    assertEquals(1_000L, state("lib1")!!.itemsReconciledAt)
+  }
+
+  @Test
+  fun unstableAuthorsWalkKeepsTheReconcileTime() {
+    server.library("lib1")
+    repeat(150) { server.author("a$it", "Author $it") }
+    server.onAuthorsPage = { if (it.page == 1) it.total = 300 + it.call }
+
+    reconcile()
+
+    assertNull("a list that kept moving is not taken for a read one", state("lib1")!!.authorsReconciledAt)
+    assertTrue("what was seen is kept", authorIds().isNotEmpty())
+
+    server.onAuthorsPage = {}
+    reconcile()
+    assertEquals(1_000L, state("lib1")!!.authorsReconciledAt)
+    now = 2_000L
+    server.onAuthorsPage = { if (it.page == 1) it.total = 300 + it.call }
+    reconcile()
+    assertEquals("the last complete read stays", 1_000L, state("lib1")!!.authorsReconciledAt)
+  }
 }

@@ -145,9 +145,10 @@ class CatalogReconciler(
     val existing = db.authors().forLibrary(sc, libraryId).associateBy { it.id }
     val firstPass = db.libraryState().get(sc, libraryId)?.authorsReconciledAt == null
     var changed = false
+    // Servers before 2.15.0 answer every author at once as `authors`
     val walk = walk(config, "authors of $libraryId", { page ->
       "/api/libraries/$libraryId/authors?limit=$AUTHORS_PAGE_SIZE&page=$page&sort=addedAt"
-    }) { results, _ ->
+    }, unpagedKey = "authors") { results, _ ->
       val rows = results.map { CatalogJson.authorEntity(sc, it) }
               .map { if (it.libraryId.isEmpty()) it.copy(libraryId = libraryId) else it }
               .filter { it.id.isNotEmpty() && it != existing[it.id] }
@@ -156,26 +157,31 @@ class CatalogReconciler(
         changed = true
       }
     }
+    // A list that kept moving is not a read one: the tab keeps reading the server until a full read
     if (walk.consistent) {
       val missing = db.authors().ids(sc, libraryId).filter { it !in walk.seen }
       if (missing.isNotEmpty()) {
         db.authors().deleteByIds(sc, missing)
         changed = true
       }
+      updateState(sc, libraryId) { it.copy(authorsReconciledAt = clock()) }
     }
-    updateState(sc, libraryId) { it.copy(authorsReconciledAt = clock()) }
     if (changed) onReplicaChanged()
     // The first pass also tells a tab that read the server meanwhile to read the replica now
-    if (changed || firstPass) notify(listOf("authors:$libraryId"))
+    if (changed || (firstPass && walk.consistent)) notify(listOf("authors:$libraryId"))
   }
 
   private class Walk(val consistent: Boolean, val seen: Set<String>)
 
-  /** Pages until the total is reached; a moving total or a repeated id restarts once. */
+  /**
+   * Pages until the total is reached; a moving total or a repeated id restarts once. [unpagedKey]: an answer without
+   * `results` must carry the whole list under this key (a server that does not page this list), else the walk fails.
+   */
   private suspend fun walk(
           config: ServerConnectionConfig,
           what: String,
           path: (page: Int) -> String,
+          unpagedKey: String? = null,
           onPage: suspend (results: JsonNode, attempt: Int) -> Unit
   ): Walk {
     var attempt = 0
@@ -187,6 +193,12 @@ class CatalogReconciler(
       while (true) {
         val answer = get(config, path(page))
         val results = answer.path("results")
+        if (unpagedKey != null && !results.isArray) {
+          val all = answer.path(unpagedKey).takeIf { it.isArray } ?: throw Skip("no $what in the answer")
+          onPage(all, attempt)
+          val ids = all.map { it.path("id").asText() }
+          return Walk(ids.toSet().size == ids.size, ids.toSet())
+        }
         val pageTotal = answer.path("total").asInt(0)
         onPage(results, attempt)
         if (total < 0) total = pageTotal else if (pageTotal != total) {
