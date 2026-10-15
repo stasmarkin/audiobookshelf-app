@@ -208,7 +208,8 @@ export default {
         return redirect(`/item/${libraryItem.libraryItemId}?${queryParams.toString()}`)
       }
     } else if (!store.state.user.serverConnectionConfig) {
-      // Not connected to server
+      // Not connected to server: a downloaded copy still opens (cold start offline, from a catalog card)
+      if (query.localLibraryItemId) return redirect(`/item/${encodeURIComponent(query.localLibraryItemId)}?noredirect=1`)
       return redirect('/?error=No server connection to get library item')
     }
 

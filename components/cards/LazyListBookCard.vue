@@ -303,9 +303,16 @@ export default {
         e.preventDefault()
         this.selectBtnClick()
       } else {
+      // Offline a book without a downloaded copy has no page to open yet: say so instead of landing on Home
+      if (this.notAvailableOffline && !this.collapsedSeries) {
+        this.$toast?.info(this.$strings.LabelNotAvailableOffline)
+        return
+      }
         var router = this.$router || this.$nuxt.$router
         if (router) {
           if (this.collapsedSeries) router.push(`/bookshelf/series/${this.collapsedSeries.id}`)
+          // The local copy lets the page fall back to it without the server
+          else if (this.localLibraryItem) router.push(`/item/${this.libraryItemId}?localLibraryItemId=${this.localLibraryItemId}`)
           else router.push(`/item/${this.libraryItemId}`)
         }
       }

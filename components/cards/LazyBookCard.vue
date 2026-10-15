@@ -504,6 +504,11 @@ export default {
         e.preventDefault()
         this.selectBtnClick()
       } else {
+        // Offline a book without a downloaded copy has no page to open yet: say so instead of landing on Home
+        if (this.notAvailableOffline && !this.collapsedSeries) {
+          this.$toast?.info(this.$strings.LabelNotAvailableOffline)
+          return
+        }
         const router = this.$router || this.$nuxt.$router
         if (router) {
           if (this.recentEpisode) router.push(`/item/${this.libraryItemId}/${this.recentEpisode.id}`)

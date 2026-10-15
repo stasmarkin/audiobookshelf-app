@@ -1,5 +1,7 @@
 <template>
   <div id="bookshelf" class="w-full max-w-full h-full">
+    <!-- Before the rows, sticky over the first one: its negative margin keeps the rows where the scroll maths expect them -->
+    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px; margin-bottom: -24px">{{ $strings.MessageCatalogPartial }}</div>
     <template v-for="shelf in totalShelves">
       <div :key="shelf" class="w-full px-2 relative" :class="showBookshelfListView || altViewEnabled ? '' : 'bookshelfRow'" :id="`shelf-${shelf - 1}`" :style="{ height: shelfHeight + 'px' }">
         <div v-if="!showBookshelfListView && !altViewEnabled" class="w-full absolute bottom-0 left-0 z-30 bookshelfDivider" style="min-height: 16px" :class="`h-${shelfDividerHeightIndex}`" />
@@ -63,6 +65,7 @@ export default {
       requiresServer: false,
       totalChanged: false,
       fromServer: false,
+      replicaIncomplete: false,
       resetGeneration: 0
     }
   },
@@ -87,6 +90,10 @@ export default {
     },
     activeServerConfigId() {
       return this.$store.state.activeServerConfigId
+    },
+    /** A library whose reconcile never finished (or was unstable) shows what it has, with a note while offline. */
+    showCatalogPartial() {
+      return this.readsCatalog && this.replicaIncomplete && this.$store.state.serverState !== 'online'
     },
     isBookEntity() {
       return this.entityName === 'books' || this.entityName === 'series-books'
@@ -216,6 +223,7 @@ export default {
           this.catalogNotLoaded = payload.replica?.reconciledAt == null && !payload.total && !payload.fromServer
           this.requiresServer = !!payload.unsupportedFilter
           this.fromServer = !!payload.fromServer
+          this.replicaIncomplete = !payload.fromServer && payload.total > 0 && (payload.replica?.reconciledAt == null || payload.replica?.complete === false)
         }
       } else {
         const entityPath = this.entityName
@@ -249,7 +257,8 @@ export default {
           this.totalEntities = payload.total
           this.totalShelves = Math.ceil(this.totalEntities / this.entitiesPerShelf)
           this.entities = new Array(this.totalEntities)
-          this.$eventBus.$emit('bookshelf-total-entities', this.totalEntities)
+          // No count over "the catalog isn't downloaded yet"
+          this.$eventBus.$emit('bookshelf-total-entities', this.catalogNotLoaded ? null : this.totalEntities)
         }
 
         for (let i = 0; i < payload.results.length; i++) {
@@ -284,7 +293,10 @@ export default {
       if (!this.currentLibraryId) {
         console.error('[LazyBookshelf] loadPage current library id not set')
         // The saved server has no library on the device yet: its catalog was never downloaded
-        if (this.readsCatalog && this.canLoad) this.catalogNotLoaded = true
+        if (this.readsCatalog && this.canLoad) {
+          this.catalogNotLoaded = true
+          this.$eventBus.$emit('bookshelf-total-entities', null)
+        }
         return
       }
       this.pagesLoaded[page] = true
@@ -377,6 +389,7 @@ export default {
       this.resetGeneration++
       this.catalogNotLoaded = false
       this.requiresServer = false
+      this.replicaIncomplete = false
 
       this.initSizeData()
       if (this.canLoad) {
