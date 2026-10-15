@@ -207,19 +207,28 @@ class LocalSessionsCleanupTest {
 
   @Test
   fun aFinishedMarkFoldedInIsSentWithoutTheSessionsPosition() = runBlocking {
-    for (finished in listOf(true, false)) {
-      api.requests.clear()
-      skippedProgressQueued(700.0)
-      SyncEngine.store!!.markFinished("srv", "li1", null, finished)
-      val marked = db.mediaProgress().get("srv", "li1", "")!!
-      serverAnswers(serverJson(900.0, lastUpdate = 300L))
-      push()
-      assertEquals("the mark decides, no check: $finished", listOf("PATCH /api/me/progress/li1"), api.paths())
-      val body = JSONObject(api.requests.single().body!!)
-      assertEquals(finished, body.getBoolean("isFinished"))
-      assertFalse(body.has("currentTime") || body.has("progress"))
-      assertEquals("the row is as the mark left it", marked.copy(pending = false), db.mediaProgress().get("srv", "li1", "")!!)
-    }
+    skippedProgressQueued(700.0)
+    SyncEngine.store!!.markFinished("srv", "li1", null, true)
+    val marked = db.mediaProgress().get("srv", "li1", "")!!
+    serverAnswers(serverJson(900.0, lastUpdate = 300L))
+    push()
+    assertEquals("the mark decides, no check", listOf("PATCH /api/me/progress/li1"), api.paths())
+    val body = JSONObject(api.requests.single().body!!)
+    assertTrue(body.getBoolean("isFinished"))
+    assertFalse(body.has("currentTime") || body.has("progress"))
+    assertEquals("the row is as the mark left it", marked.copy(pending = false), db.mediaProgress().get("srv", "li1", "")!!)
+  }
+
+  @Test
+  fun unmarkingKeepsThePositionCheckedAsUsual() = runBlocking {
+    skippedProgressQueued(700.0)
+    SyncEngine.store!!.markFinished("srv", "li1", null, false)
+    serverAnswers(serverJson(300.0, lastUpdate = 300L))
+    push()
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    val behind = JSONObject(api.requests.last().body!!)
+    assertFalse(behind.getBoolean("isFinished"))
+    assertEquals("the server is behind: the position goes too", 700.0, behind.getDouble("currentTime"), 0.0)
   }
 
   @Test
@@ -251,9 +260,13 @@ class LocalSessionsCleanupTest {
   @Test
   fun takingTheServersRecordTakesItsTime() = runBlocking {
     skippedProgressQueued(700.0, rowLastUpdate = 200L)
-    serverAnswers(serverJson(900.0, lastUpdate = 300L))
+    db.mediaProgress().upsert(db.mediaProgress().get("srv", "li1", "")!!.copy(ebookLocation = "old"))
+    serverAnswers(serverJson(900.0, lastUpdate = 300L).replace("\"startedAt\":1", "\"startedAt\":1,\"ebookLocation\":\"epubcfi(/6/8)\",\"hideFromContinueListening\":true"))
     push()
-    assertEquals(300L, db.mediaProgress().get("srv", "li1", "")!!.lastUpdate)
+    val row = db.mediaProgress().get("srv", "li1", "")!!
+    assertEquals(300L, row.lastUpdate)
+    assertEquals("the whole record, not only the position", "epubcfi(/6/8)", row.ebookLocation)
+    assertTrue(row.hideFromContinueListening)
     // A snapshot taken before that record is older than the row now
     SyncEngine.store!!.applyServerProgress("srv", listOf(serverAt(800.0, lastUpdate = 250L)))
     assertEquals(900.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)

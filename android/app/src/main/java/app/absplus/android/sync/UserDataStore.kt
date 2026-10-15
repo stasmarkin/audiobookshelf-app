@@ -388,7 +388,7 @@ class UserDataStore(
         else -> null
       }
     }
-    tookServer?.let { mirror.mirror(listOf(it), SERVER_POSITION_FIELDS) }
+    tookServer?.let { mirror.mirror(listOf(it), if (serverAhead?.sentFields.isNullOrEmpty()) null else SERVER_POSITION_FIELDS) }
     scope?.let { (name, id) -> notifier.notify(name, listOf(id)) }
   }
 
@@ -402,6 +402,11 @@ class UserDataStore(
     val local = progress.get(row.serverConfigId, libraryItemId, episodeId) ?: return null
     if (local.lastUpdate > ahead.builtFromLastUpdate) return null
     val server = ahead.server
+    if (ahead.sentFields.isEmpty()) {
+      // Nothing sent: the server's whole record, as a pull takes it, with a time no older snapshot beats
+      val taken = (mergeProgress(row.serverConfigId, null, server) as ProgressMerge.TakeServer).row
+      return taken.copy(lastUpdate = maxOf(local.lastUpdate, server.lastUpdate)).also { progress.upsert(it) }
+    }
     fun take(field: String) = field in ahead.keptFields && field !in ahead.sentFields
     val takeFinished = server.isFinished && "isFinished" !in ahead.sentFields
     val updated = local.copy(
@@ -409,9 +414,7 @@ class UserDataStore(
             progress = if (take("progress")) server.progress else local.progress,
             currentTime = if (take("currentTime")) server.currentTime else local.currentTime,
             isFinished = if (takeFinished) true else local.isFinished,
-            finishedAt = if (takeFinished) server.finishedAt else local.finishedAt,
-            // Nothing sent: the server's record keeps its own time, which an older snapshot must not beat
-            lastUpdate = if (ahead.sentFields.isEmpty()) maxOf(local.lastUpdate, server.lastUpdate) else local.lastUpdate)
+            finishedAt = if (takeFinished) server.finishedAt else local.finishedAt)
     progress.upsert(updated)
     return updated
   }

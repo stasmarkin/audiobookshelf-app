@@ -140,9 +140,10 @@ class OutboxPusher(
     var sendFields = fields
     var serverAhead: ServerAhead? = null
     val conditional = OutboxPayload.conditionalFields(row.payload).filter { it in fields }
-    // The user's own finished mark (also a reset) decides the state: the session's older position is not sent with it,
-    // and the row, which the mark set, is not compared with the server's
-    if (conditional.isNotEmpty() && "isFinished" in fields) sendFields = fields - conditional.toSet()
+    // Marking finished or resetting sets the position itself: the session's older one is not sent with it, and the row
+    // is not compared with the server's. Unmarking keeps the position, which is checked as usual
+    val positionSet = "isFinished" in fields && (progress.isFinished || OutboxPayload.finishedMark(row.payload) == false)
+    if (conditional.isNotEmpty() && positionSet) sendFields = fields - conditional.toSet()
     else if (conditional.isNotEmpty()) {
       when (val outcome = http.send(config, "GET", path)) {
         is HttpOutcome.Ok -> parseServerProgress(readTree(outcome.body))?.let { server ->
