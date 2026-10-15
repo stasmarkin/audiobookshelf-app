@@ -12,6 +12,7 @@ import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.player.ServerProgressAck
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.sync.SyncEngine
 import java.util.*
 import kotlin.concurrent.schedule
 
@@ -29,8 +30,10 @@ data class SyncResult(
 
 class MediaProgressSyncer(
         val playerNotificationService: PlayerNotificationService,
-        private val apiHandler: ApiHandler
+        apiHandler: () -> ApiHandler
 ) {
+  // Created on the first request: its secure storage is not needed to store a tick
+  private val apiHandler by lazy(apiHandler)
   private val tag = "MediaProgressSync"
   private val METERED_CONNECTION_SYNC_INTERVAL = 60000
 
@@ -281,14 +284,10 @@ class MediaProgressSyncer(
 
     val hasNetworkConnection = DeviceManager.checkConnectivity(playerNotificationService)
 
-    // Save playback session to db (server linked sessions only)
-    //   Sessions are removed once successfully synced with the server
-    currentPlaybackSession?.let { DeviceManager.dbManager.savePlaybackSession(it) }
+    currentPlaybackSession?.let { saveTick(it, currentTime) }
 
     if (currentIsLocal) {
-      // Save local progress sync
       currentPlaybackSession?.let {
-        saveLocalProgress(it)
         lastSyncTime = System.currentTimeMillis()
 
         DLog.d(
@@ -384,6 +383,32 @@ class MediaProgressSyncer(
                 "Saved Local Progress Current Time: ID ${it.id} | ${it.currentTime} | Duration ${it.duration} | Progress ${it.progressPercent}%"
         )
       }
+    }
+  }
+
+  /** Everything a tick stores on the device: the session, the downloaded copy's Paper progress and the Room row. */
+  internal fun saveTick(session: PlaybackSession, currentTime: Double) {
+    // Sessions are removed once successfully synced with the server
+    DeviceManager.dbManager.savePlaybackSession(session)
+    if (session.isLocal) saveLocalProgress(session)
+    recordTick(session, currentTime)
+  }
+
+  /**
+   * Writes the tick of a server-linked session into userdata.db, off the player's thread. A downloaded copy's Paper
+   * progress is written by [saveLocalProgress], so only a stream is mirrored to Paper (when a copy exists). A copy
+   * without a server link has no Room row.
+   */
+  internal fun recordTick(session: PlaybackSession, currentTime: Double) {
+    val serverConfigId = session.serverConnectionConfigId?.takeIf { it.isNotEmpty() } ?: return
+    val libraryItemId = session.libraryItemId?.takeIf { it.isNotEmpty() } ?: return
+    val episodeId = session.episodeId
+    val duration = session.getTotalDuration()
+    val progress = session.progress
+    val lastUpdate = session.updatedAt
+    val mirror = !session.isLocal
+    SyncEngine.launchWrite { store ->
+      store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate, mirror)
     }
   }
 

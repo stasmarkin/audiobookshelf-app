@@ -417,7 +417,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     sleepTimerManager = SleepTimerManager(this)
 
     // Initialize Media Progress Syncer
-    mediaProgressSyncer = MediaProgressSyncer(this, apiHandler)
+    mediaProgressSyncer = MediaProgressSyncer(this) { apiHandler }
 
     // Initialize shake sensor
     DLog.d(tag, "onCreate Register sensor listener ${mAccelerometer?.isWakeUpSensor}")
