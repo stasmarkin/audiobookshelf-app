@@ -1,4 +1,4 @@
-// Server reachability in the WebView: $data (utils/dataService.js) mirrors the native AbsData state into the store, and
+// Server reachability in the WebView: $absData (utils/dataService.js) mirrors the native AbsData state into the store, and
 // the two JS transports that talk to the server (plugins/nativeHttp.js, the socket in plugins/server.js) report what
 // they saw to native. Native decides whether a report is about the active server. Fakes only, synthetic servers.
 import test from 'node:test'
@@ -193,8 +193,8 @@ async function socket() {
   const store = { commit() {}, getters: { 'user/getToken': 'access-0' }, state: { libraries: {} } }
   const ctx = { app, store }
   plugin(ctx, (name, value) => (ctx[`$${name}`] = value))
-  // Nuxt injects $data after server.js runs; the socket must read it at event time
-  app.$data = { reportServerResponse: (payload) => reports.push(['response', payload]), reportSocketLost: () => reports.push(['socketLost']) }
+  // Nuxt injects $absData after server.js runs; the socket must read it at event time
+  app.$absData = { reportServerResponse: (payload) => reports.push(['response', payload]), reportSocketLost: () => reports.push(['socketLost']) }
   const s = ctx.$socket
   s.serverAddress = 'https://a.test.invalid/abs'
   s.socket = { id: 'socket-1', emit() {} }

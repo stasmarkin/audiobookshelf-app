@@ -1,5 +1,5 @@
 /**
- * $data: the WebView side of the native AbsData plugin. Mirrors the active server's reachability into the store
+ * $absData: the WebView side of the native AbsData plugin. Mirrors the active server's reachability into the store
  * (`serverState`, `activeServerConfigId`) and forwards what the WebView's own transports saw about the server.
  * Reports are fire-and-forget: a failed report must never fail the request that triggered it.
  *

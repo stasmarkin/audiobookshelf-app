@@ -6,7 +6,7 @@ class ServerSocket extends EventEmitter {
     super()
 
     this.$store = store
-    // $data is injected after this plugin is created, so it is read from app at event time
+    // $absData is injected after this plugin is created, so it is read from app at event time
     this.app = app
     this.socket = null
     this.connected = false
@@ -81,7 +81,7 @@ class ServerSocket extends EventEmitter {
     this.connected = true
     this.$store.commit('setSocketConnected', true)
     this.emit('connection-update', true)
-    this.app?.$data?.reportServerResponse({ address: this.serverAddress, status: 200 })
+    this.app?.$absData?.reportServerResponse({ address: this.serverAddress, status: 200 })
     this.sendAuthenticate()
   }
 
@@ -105,7 +105,7 @@ class ServerSocket extends EventEmitter {
     this.$store.commit('setSocketConnected', false)
     this.emit('connection-update', false)
     // A lost socket on a live network is how a server that went away is noticed without any request; not on logout
-    if (reason !== 'io client disconnect') this.app?.$data?.reportSocketLost()
+    if (reason !== 'io client disconnect') this.app?.$absData?.reportSocketLost()
   }
 
   onInit(data) {

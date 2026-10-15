@@ -6,77 +6,47 @@
 
 <script>
 import { Dialog } from '@capacitor/dialog'
+import { indicatorModel } from '@/utils/serverIndicator'
+
+const TONE_CLASS = { ok: 'text-success', warning: 'text-warning', error: 'text-error', muted: 'text-gray-200', metered: 'text-yellow-400' }
 
 export default {
-  data() {
-    return {}
-  },
   computed: {
-    user() {
-      return this.$store.state.user.user
-    },
-    socketConnected() {
-      return this.$store.state.socketConnected
-    },
-    networkConnected() {
-      return this.$store.state.networkConnected
-    },
-    networkConnectionType() {
-      return this.$store.state.networkConnectionType
-    },
-    isNetworkUnmetered() {
-      return this.$store.state.isNetworkUnmetered
-    },
-    isCellular() {
-      return this.networkConnectionType === 'cellular'
-    },
-    attemptingConnection() {
-      return this.$store.state.attemptingConnection
+    model() {
+      const state = this.$store.state
+      return indicatorModel({
+        serverState: state.serverState,
+        networkConnected: state.networkConnected,
+        hasServer: this.$store.getters['getHasActiveServer'],
+        socketConnected: state.socketConnected,
+        syncState: null,
+        attemptingConnection: state.attemptingConnection,
+        networkConnectionType: state.networkConnectionType,
+        isNetworkUnmetered: state.isNetworkUnmetered
+      })
     },
     icon() {
-      if (!this.user && !this.attemptingConnection) return null // hide when not connected to server
-
-      if (this.attemptingConnection) {
-        return 'cloud_sync'
-      } else if (!this.networkConnected) {
-        return 'wifi_off'
-      } else if (!this.socketConnected) {
-        return 'cloud_off'
-      } else if (this.isCellular) {
-        return 'signal_cellular_alt'
-      } else {
-        return 'cloud_done'
-      }
+      return this.model.icon
     },
     iconClass() {
-      if (!this.networkConnected) return 'text-error'
-      else if (!this.socketConnected) return 'text-warning'
-      else if (!this.isNetworkUnmetered) return 'text-yellow-400'
-      else if (this.isCellular) return 'text-gray-200'
-      else return 'text-success'
+      return TONE_CLASS[this.model.tone]
     }
   },
   methods: {
-    showAlertDialog() {
-      var msg = ''
-      if (this.attemptingConnection) {
-        msg = this.$strings.MessageAttemptingServerConnection
-      } else if (!this.networkConnected) {
-        msg = this.$strings.MessageNoNetworkConnection
-      } else if (!this.socketConnected) {
-        msg = this.$strings.MessageSocketNotConnected
-      } else if (this.isCellular) {
-        msg = this.isNetworkUnmetered ? this.$strings.MessageSocketConnectedOverUnmeteredCellular : this.$strings.MessageSocketConnectedOverMeteredCellular
+    async showAlertDialog() {
+      const { labelKey } = this.model
+      const title = this.$strings.HeaderConnectionStatus
+      const message = this.$strings[labelKey]
+      if (labelKey === 'LabelSignInAgain') {
+        const { value } = await Dialog.confirm({ title, message, okButtonTitle: this.$strings.ButtonConnectToServer, cancelButtonTitle: this.$strings.ButtonCancel })
+        if (value) this.$router.push('/connect')
+      } else if (labelKey === 'LabelServerUnreachable' || labelKey === 'MessageSocketNotConnected') {
+        const { value } = await Dialog.confirm({ title, message, okButtonTitle: this.$strings.ButtonRetry, cancelButtonTitle: this.$strings.ButtonCancel })
+        if (value) this.$absData.retryServer()
       } else {
-        msg = this.isNetworkUnmetered ? this.$strings.MessageSocketConnectedOverUnmeteredWifi : this.$strings.MessageSocketConnectedOverMeteredWifi
+        Dialog.alert({ title, message })
       }
-      Dialog.alert({
-        title: this.$strings.HeaderConnectionStatus,
-        message: msg
-      })
     }
-  },
-  mounted() {},
-  beforeDestroy() {}
+  }
 }
 </script>
