@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises'
 const source = await readFile(new URL('../utils/serverIndicator.js', import.meta.url), 'utf8')
 const { indicatorModel } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
 
-const live = { serverState: 'online', networkConnected: true, hasServer: true, socketConnected: true, syncState: null, attemptingConnection: false, networkConnectionType: 'wifi', isNetworkUnmetered: true }
+const live = { serverState: 'online', networkConnected: true, hasServer: true, signedIn: true, socketConnected: true, syncState: null, attemptingConnection: false, networkConnectionType: 'wifi', isNetworkUnmetered: true }
 const model = (overrides) => indicatorModel({ ...live, ...overrides })
 
 test('indicator shows offline for a dead server on live Wi-Fi', () => {
@@ -61,4 +61,11 @@ test('a live server without its socket still shows the socket warning', () => {
     const m = model({ serverState, socketConnected: false })
     assert.deepEqual([m.icon, m.tone, m.labelKey], ['cloud_off', 'warning', 'MessageSocketNotConnected'], serverState)
   }
+})
+
+test('indicator is hidden after a deliberate disconnect while the server is fine', () => {
+  assert.equal(model({ signedIn: false, socketConnected: false }).icon, null)
+  assert.equal(model({ signedIn: false, socketConnected: false, attemptingConnection: true }).icon, 'cloud_sync')
+  assert.equal(model({ signedIn: false, serverState: 'offline', socketConnected: false }).labelKey, 'LabelServerUnreachable', 'offline cold start')
+  assert.equal(model({ signedIn: false, serverState: 'unauthorized', socketConnected: false }).labelKey, 'LabelSignInAgain')
 })

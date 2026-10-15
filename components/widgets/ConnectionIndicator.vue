@@ -18,6 +18,7 @@ export default {
         serverState: state.serverState,
         networkConnected: state.networkConnected,
         hasServer: this.$store.getters['getHasActiveServer'],
+        signedIn: !!state.user.user,
         socketConnected: state.socketConnected,
         syncState: null,
         attemptingConnection: state.attemptingConnection,

@@ -2,14 +2,16 @@
  * What the app-bar connection indicator shows. `tone` maps to a text color in ConnectionIndicator.vue; `labelKey` is
  * the $strings key of the message shown on tap; `count` is reserved for pending sync work (null for now).
  *
- * @param {{ serverState: string, networkConnected: boolean, hasServer: boolean, socketConnected: boolean, syncState: object|null,
+ * @param {{ serverState: string, networkConnected: boolean, hasServer: boolean, signedIn: boolean, socketConnected: boolean, syncState: object|null,
  *   attemptingConnection: boolean, networkConnectionType: string|null, isNetworkUnmetered: boolean }} input
  * @returns {{ icon: string|null, tone: 'ok'|'warning'|'error'|'muted'|'metered', labelKey: string|null, count: number|null }}
  */
-export function indicatorModel({ serverState, networkConnected, hasServer, socketConnected, attemptingConnection, networkConnectionType, isNetworkUnmetered }) {
+export function indicatorModel({ serverState, networkConnected, hasServer, signedIn, socketConnected, attemptingConnection, networkConnectionType, isNetworkUnmetered }) {
   const show = (icon, tone, labelKey) => ({ icon, tone, labelKey, count: null })
 
   if (!hasServer && !attemptingConnection) return show(null, 'muted', null)
+  // Signed out on purpose (Disconnect) while the server is fine: nothing to report, the socket is closed on purpose
+  if (!signedIn && !attemptingConnection && serverState === 'online') return show(null, 'muted', null)
   if (!networkConnected) return show('wifi_off', 'error', 'MessageNoNetworkConnection')
   if (attemptingConnection) return show('cloud_sync', 'warning', 'MessageAttemptingServerConnection')
   if (serverState === 'unauthorized') return show('lock', 'error', 'LabelSignInAgain')
