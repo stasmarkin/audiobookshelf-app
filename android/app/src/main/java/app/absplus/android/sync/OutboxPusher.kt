@@ -143,11 +143,26 @@ class OutboxPusher(
    * server from staying on the older values.
    */
   private suspend fun followUp(row: OutboxEntity, sent: MediaProgressEntity?): OutboxEntity? {
+    if (row.kind == OutboxKind.PROGRESS_DELETE) return followUpOfReset(row)
     if (sent == null) return null
     val now = progressDao.get(sent.serverConfigId, sent.libraryItemId, sent.episodeId) ?: return null
     if (now.lastUpdate <= sent.lastUpdate) return null
     return OutboxEntity(serverConfigId = row.serverConfigId, kind = OutboxKind.PROGRESS_PATCH, itemKey = row.itemKey,
             payload = row.payload, createdAt = clock())
+  }
+
+  /**
+   * Listening after the reset that is not queued behind the DELETE yet (it started while the DELETE was on the wire)
+   * would be lost with the server record: a PATCH of it follows.
+   */
+  private suspend fun followUpOfReset(row: OutboxEntity): OutboxEntity? {
+    val resetAt = OutboxPayload.deleteLastUpdate(row.payload) ?: return null
+    val (libraryItemId, episodeId) = progressKeyParts(row.itemKey)
+    val now = progressDao.get(row.serverConfigId, libraryItemId, episodeId) ?: return null
+    if (now.lastUpdate <= resetAt) return null
+    if (outbox.byItemKey(row.serverConfigId, row.itemKey).any { it.kind == OutboxKind.PROGRESS_PATCH && it.id > row.id }) return null
+    return OutboxEntity(serverConfigId = row.serverConfigId, kind = OutboxKind.PROGRESS_PATCH, itemKey = row.itemKey,
+            payload = OutboxPayload.progressPatch(PLAYBACK_FIELDS), createdAt = clock())
   }
 
   private fun patchBody(progress: MediaProgressEntity, fields: List<String>): ObjectNode {

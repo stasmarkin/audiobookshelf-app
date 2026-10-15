@@ -23,6 +23,9 @@ val PROGRESS_PATCH_FIELDS = listOf(
         "duration", "progress", "currentTime", "isFinished", "hideFromContinueListening",
         "ebookLocation", "ebookProgress", "finishedAt", "startedAt")
 
+/** What listening changes; sent after a reset that playback followed. */
+val PLAYBACK_FIELDS = listOf("duration", "progress", "currentTime", "isFinished")
+
 /** Outbox key of a progress row: `<libraryItemId>|<episodeId>`, with "" for a book. */
 fun progressItemKey(libraryItemId: String, episodeId: String?): String = "$libraryItemId|${episodeId.orEmpty()}"
 
@@ -62,11 +65,17 @@ object OutboxPayload {
     return PROGRESS_PATCH_FIELDS.filter { it in names }
   }
 
-  fun progressDelete(serverProgressId: String): String =
-          mapper.writeValueAsString(nodes.objectNode().put("serverProgressId", serverProgressId))
+  /** [lastUpdate]: when the reset was made, so playback after it is still sent once the DELETE is answered. */
+  fun progressDelete(serverProgressId: String, lastUpdate: Long? = null): String {
+    val node = nodes.objectNode().put("serverProgressId", serverProgressId)
+    if (lastUpdate != null) node.put("lastUpdate", lastUpdate)
+    return mapper.writeValueAsString(node)
+  }
 
   fun serverProgressId(payload: String): String? =
           parse(payload)?.get("serverProgressId")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotEmpty() }
+
+  fun deleteLastUpdate(payload: String): Long? = parse(payload)?.get("lastUpdate")?.takeIf { it.isIntegralNumber }?.asLong()
 
   /** `{"time":754.0,"title":"…"}` for add and update, `{"time":754.0}` for remove. */
   fun bookmark(time: Double, title: String? = null): String {
