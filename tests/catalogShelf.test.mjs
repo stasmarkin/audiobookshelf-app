@@ -441,3 +441,22 @@ test('a series page lists its books through $absData and follows the catalog', a
   assert.deepEqual(socketResets, [], "the replica's notice refreshes it, not the socket")
 })
 
+
+test('a series page read from the server follows a removal over the socket', async () => {
+  const shelf = await bookshelf({ page: 'series-books', seriesId: 's1', answer: { results: [{ id: 'x' }, { id: 'y' }], total: 2, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+  await shelf.view.init()
+  let scheduled = 0
+  shelf.view.refreshDebouncer = { schedule: () => scheduled++, cancel() {} }
+  shelf.view.resetEntities = () => assert.fail('no reset to the top')
+  shelf.view.libraryItemRemoved({ id: 'x', libraryId: 'l1' })
+  shelf.view.libraryItemUpdated({ id: 'y', libraryId: 'l1' })
+  shelf.view.libraryItemRemoved({ id: 'z', libraryId: 'l2' })
+  assert.equal(scheduled, 2, "its loaded pages are read again; another library's book is ignored")
+
+  const series = await bookshelf({ page: 'series', answer: { results: [], total: 0, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+  await series.view.init()
+  series.view.refreshDebouncer = { schedule: () => scheduled++, cancel() {} }
+  series.view.resetEntities = () => assert.fail('no reset to the top')
+  series.view.libraryItemsAdded([{ id: 'n', libraryId: 'l1' }])
+  assert.equal(scheduled, 3)
+})

@@ -580,7 +580,7 @@ export default {
       return !this.readsCatalog || this.fromServer
     },
     /**
-     * A server-read Library list follows the socket the way a catalog notice moves it: the loaded pages are read again
+     * A server-read catalog list follows the socket the way a catalog notice moves it: the loaded pages are read again
      * (debounced), and a changed total rebuilds the list at the same scroll position.
      */
     refreshForSocket(items) {
@@ -590,51 +590,24 @@ export default {
     },
     libraryItemAdded(libraryItem) {
       if (!this.followsSocket()) return
-      if (this.entityName === 'books') return this.refreshForSocket([libraryItem])
-      console.log('libraryItem added', libraryItem)
+      if (this.readsCatalog) return this.refreshForSocket([libraryItem])
       // TODO: Check if item would be on this shelf
       this.resetEntities()
     },
     libraryItemUpdated(libraryItem) {
-      if (!this.followsSocket()) return
-      console.log('Item updated', libraryItem)
-      if (this.entityName === 'series-books') {
-        var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
-        if (indexOf >= 0) {
-          this.entities[indexOf] = libraryItem
-          if (this.entityComponentRefs[indexOf]) {
-            this.entityComponentRefs[indexOf].setEntity(libraryItem)
-
-            if (this.isBookEntity) this.entityComponentRefs[indexOf].setLocalLibraryItem(this.findLocalCopy(libraryItem))
-          }
-        }
-      }
+      if (this.followsSocket() && this.readsCatalog) this.refreshForSocket([libraryItem])
     },
     libraryItemRemoved(libraryItem) {
-      if (!this.followsSocket()) return
-      if (this.entityName === 'books') return this.refreshForSocket([libraryItem])
-      if (this.entityName === 'series-books') {
-        var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
-        if (indexOf >= 0) {
-          this.entities = this.entities.filter((ent) => ent.id !== libraryItem.id)
-          this.totalEntities = this.entities.length
-          this.$eventBus.$emit('bookshelf-total-entities', this.totalEntities)
-          this.executeRebuild()
-        }
-      }
+      if (this.followsSocket() && this.readsCatalog) this.refreshForSocket([libraryItem])
     },
     libraryItemsAdded(libraryItems) {
       if (!this.followsSocket()) return
-      if (this.entityName === 'books') return this.refreshForSocket(libraryItems || [])
-      console.log('items added', libraryItems)
+      if (this.readsCatalog) return this.refreshForSocket(libraryItems || [])
       // TODO: Check if item would be on this shelf
       this.resetEntities()
     },
     libraryItemsUpdated(libraryItems) {
-      if (!this.followsSocket()) return
-      libraryItems.forEach((ab) => {
-        this.libraryItemUpdated(ab)
-      })
+      if (this.followsSocket() && this.readsCatalog) this.refreshForSocket(libraryItems || [])
     },
     screenOrientationChange() {
       setTimeout(() => {
