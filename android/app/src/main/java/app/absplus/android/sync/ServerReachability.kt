@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
  * Android side of [ReachabilityMachine]: feeds it the default network, request results, socket and auth reports, runs
  * its probe schedule on the main looper and publishes [state]. Every machine input is handled on the main thread.
  */
-object ServerReachability {
+object ServerReachability : ReachabilitySink {
   private const val TAG = "ServerReachability"
 
   private val main = Handler(Looper.getMainLooper())
@@ -85,13 +85,13 @@ object ServerReachability {
   }
 
   /** A response from [address] (any status). Requests to other servers are ignored. */
-  fun reportResponse(address: String, code: Int) {
+  override fun reportResponse(address: String, code: Int) {
     if (!isActiveServerUrl(address)) return
     dispatch { if (code >= 500) ReachabilityInput.ServerError(code) else ReachabilityInput.RequestSucceeded }
   }
 
   /** A request to [address] failed without a response (connect error, timeout, TLS). */
-  fun reportUnreachable(address: String) {
+  override fun reportUnreachable(address: String) {
     if (!isActiveServerUrl(address)) return
     dispatch { ReachabilityInput.RequestUnreachable }
   }
