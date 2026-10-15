@@ -23,11 +23,11 @@ class ListeningLedgerTest {
     listenAndSend(15).let { ledger.ackServerSync(it); acked += it }
     assertNull(ledger.segment())
 
-    val first = ledger.failServerSync(listenAndSend(15))
+    val first = ledger.failServerSync(listenAndSend(15))!!
     assertNotEquals(serverSessionId, first.id)
     assertEquals(15L, first.timeListening)
 
-    val same = ledger.failServerSync(listenAndSend(15))
+    val same = ledger.failServerSync(listenAndSend(15))!!
     assertEquals("a further failure adds to the open segment", first.id, same.id)
     assertEquals(30L, same.timeListening)
     segments[same.id] = same.timeListening
@@ -35,7 +35,7 @@ class ListeningLedgerTest {
     listenAndSend(15).let { ledger.ackServerSync(it); acked += it }
     assertNull("an accepted /sync closes the segment", ledger.segment())
 
-    val next = ledger.failServerSync(listenAndSend(15))
+    val next = ledger.failServerSync(listenAndSend(15))!!
     assertNotEquals(first.id, next.id)
     assertNotEquals(serverSessionId, next.id)
     assertEquals(15L, next.timeListening)
@@ -60,5 +60,26 @@ class ListeningLedgerTest {
     assertNull(ledger.segment())
     // b's 10 s were already saved in the closed segment; nothing is counted twice
     assertEquals(0L, ledger.beginServerSync())
+  }
+
+  @Test
+  fun aFailureWithNothingToSaveOpensNoSegment() {
+    assertNull(ledger.failServerSync(ledger.beginServerSync()))
+    assertNull(ledger.segment())
+  }
+
+  @Test
+  fun pendingTimeIsSavedUnderTheIdOfTheSegmentItBecomes() {
+    val inFlight = listenAndSend(10)
+    ledger.addListened(20) // not attempted yet (metered)
+    val pending = ledger.pendingSegment()!!
+    assertEquals("unsent and in flight", 30L, pending.timeListening)
+
+    val segment = ledger.failServerSync(inFlight)!!
+    assertEquals(pending.id, segment.id)
+    assertEquals("only the failed time is in the segment", 10L, segment.timeListening)
+    assertEquals("the segment and what is still unsent", 30L, ledger.pendingSegment()!!.timeListening)
+    ledger.ackServerSync(ledger.beginServerSync())
+    assertNull("all settled", ledger.pendingSegment())
   }
 }

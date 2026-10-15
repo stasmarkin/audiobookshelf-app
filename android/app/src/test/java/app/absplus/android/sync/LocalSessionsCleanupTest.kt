@@ -70,6 +70,8 @@ class LocalSessionsCleanupTest {
     val done = CompletableDeferred<Unit>()
     LocalSessionsCleanup.settle(sent, requestOk, results) { done.complete(Unit) }
     withTimeout(5_000) { done.await() }
+    // The cleanup runs in the write queue, after what is queued before it
+    SyncEngine.write { }
   }
 
   @Test
@@ -77,6 +79,8 @@ class LocalSessionsCleanupTest {
     val results = listOf(ok("a"), failed("b", "Media item not found"), failed("c", "boom"), ok("x"))
     assertEquals(setOf("a", "b"), LocalSessionsCleanup.idsToRemove(listOf("a", "b", "c", "d"), results))
     assertEquals(setOf("e"), LocalSessionsCleanup.idsToRemove(listOf("e"), listOf(failed("e", "Library not found"))))
+    assertEquals("the server's two errors only, as they are", setOf("f"), LocalSessionsCleanup.idsToRemove(listOf("f", "g", "h"),
+            listOf(failed("f", " media item NOT found "), failed("g", "Episode file not found on disk"), failed("h", "not found"))))
 
     val sent = saved(session("a"), session("b"), session("c"), session("d"))
     settle(sent, true, results)
@@ -98,6 +102,28 @@ class LocalSessionsCleanupTest {
     settle(sent, true, listOf(ok("a")))
     assertEquals(setOf("a"), paperIds())
     assertEquals(115L, DeviceManager.dbManager.getPlaybackSession("a")!!.updatedAt)
+  }
+
+  @Test
+  fun sessionGivenMoreTimeDuringRequestIsKept() {
+    val sent = saved(session("a", updatedAt = 100L).also { it.timeListening = 15L })
+    // A late failed /sync added its time to the offline session and kept its newer position
+    DeviceManager.dbManager.savePlaybackSession(session("a", updatedAt = 100L).also { it.timeListening = 30L })
+    settle(sent, true, listOf(ok("a")))
+    assertEquals(30L, DeviceManager.dbManager.getPlaybackSession("a")!!.timeListening)
+  }
+
+  @Test
+  fun theCallIsAnsweredEvenWhenTheWriteQueueNeverRunsTheCleanup() = runBlocking {
+    val release = CompletableDeferred<Unit>()
+    SyncEngine.launchWrite { release.await() } // a sync stopped or stuck before the cleanup's turn
+    val done = CompletableDeferred<Unit>()
+    LocalSessionsCleanup.settle(saved(session("a")), true, listOf(ok("a"))) { done.complete(Unit) }
+    try {
+      withTimeout(2_000) { done.await() }
+    } finally {
+      release.complete(Unit)
+    }
   }
 
   @Test

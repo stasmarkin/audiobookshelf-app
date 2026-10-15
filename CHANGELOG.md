@@ -51,13 +51,16 @@ Merged into `plus`, not yet in a published release.
 - **Rollback:** rolling back to the previous version is safe: the downloaded-book progress it reads is kept up to date
   alongside, and it sends unsent "finished" and resets itself.
 - **Listening sessions offline:** listening to a streamed book while the server cannot be reached is no longer lost or
-  counted twice. The time the server did not get is saved as a listening session of its own and sent when the server
-  is back, next to the streamed session, which it no longer overwrites; no listening time is sent twice.
+  inflated. The time the server did not get is saved as a listening session of its own, also when the app is closed
+  before it could send it, and sent when the server is back, next to the streamed session, which it no longer
+  overwrites. Rarely, when the server applied an update but its answer was lost, that time can also count in the
+  offline session.
   The server's answer is now read per session: the ones it took leave the phone, the ones it rejects because their
   book or library no longer exists are dropped (with a Diagnostics log entry), and any other is sent again next time.
   When the server takes a session but keeps its own newer position, the phone's position is sent to it as a progress
   change, so the offline position stays protected until the server has it. Rolling back to the previous version is
-  safe: the saved sessions are ordinary listening sessions it sends itself.
+  safe: the saved sessions are ordinary listening sessions it sends itself; only the last minute or so of streamed
+  time not settled at that moment is not sent by it (it is sent after updating again).
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 

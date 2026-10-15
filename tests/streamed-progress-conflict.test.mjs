@@ -230,7 +230,7 @@ test('deviceFocused passes and keeps the handled record, also across a recreated
 
 test('Native wiring: the syncer records sent and acknowledged server syncs; the session start is seeded; the state reports it', async () => {
   const syncer = await read('../android/app/src/main/java/app/absplus/android/media/MediaProgressSyncer.kt')
-  assert.match(syncer, /val sessionId = session\.id\n[\s\S]*?noteServerSync\(sessionId, currentTime, false\)\n\s+send\(sessionId, MediaProgressSyncData\(sent, session\.duration, currentTime\)\) \{ syncSuccess, errorMsg ->\n\s+if \(syncSuccess\) \{\n\s+ledger\.ackServerSync\(sent\)\n\s+noteServerSync\(sessionId, currentTime, true\)/)
+  assert.match(syncer, /val sessionId = session\.id\n[\s\S]*?noteServerSync\(sessionId, currentTime, false\)\n\s+send\(sessionId, MediaProgressSyncData\(sent, session\.duration, currentTime\)\) \{ syncSuccess, errorMsg ->\n\s+if \(syncSuccess\) \{\n\s+synchronized\(ledger\) \{\n\s+ledger\.ackServerSync\(sent\)\n\s+saveUnsettled\(session, ledger\)\n\s+\}\n\s+noteServerSync\(sessionId, currentTime, true\)/)
   assert.match(syncer, /if \(playbackSession\.isLocal \|\| serverProgressAck\?\.sessionId == playbackSession\.id\) return\n\s+serverProgressAck = ServerProgressAck\.sessionStart\(playbackSession\.id, playbackSession\.currentTime\)/)
   const service = await read('../android/app/src/main/java/app/absplus/android/player/PlayerNotificationService.kt')
   assert.ok(service.indexOf('mediaProgressSyncer.noteServerSessionStart(playbackSession)') < service.indexOf('Prepare Player Session is finished, so restart it'), 'seeded before the finished-item reset')

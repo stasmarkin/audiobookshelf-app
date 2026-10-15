@@ -201,10 +201,17 @@ class MediaProgressSyncerWriteTest {
 
   /** One stream tick as `sync` runs it, on a snapshot of the session. */
   private fun streamTick(session: PlaybackSession, ledger: ListeningLedger, time: Double, hasNetwork: Boolean,
+                         shouldSyncServer: Boolean = true,
                          send: (String, MediaProgressSyncData, (Boolean, String?) -> Unit) -> Unit = noRequest) {
     tick(session, time)
-    syncer.syncStream(session.clone(), ledger, 15, hasNetwork, shouldSyncServer = true, send = send) {}
+    syncer.syncStream(session.clone(), ledger, 15, hasNetwork, shouldSyncServer, send = send) {}
   }
+
+  private fun restartProcess() {
+    syncer = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get()) { throw AssertionError() }
+  }
+
+  private fun unsettledKeys() = DeviceManager.dbManager.unsettledListeningKeys()
 
   private fun paperSessions() = DeviceManager.dbManager.getPlaybackSessions()
 
@@ -221,7 +228,7 @@ class MediaProgressSyncerWriteTest {
     assertEquals(100.0, saved.currentTime, 0.0)
 
     // The process ends before the network is back: a new syncer finds only the segment
-    syncer = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get()) { throw AssertionError() }
+    restartProcess()
     assertEquals(listOf(segment.id), paperSessions().map { it.id })
   }
 
@@ -280,8 +287,71 @@ class MediaProgressSyncerWriteTest {
     assertEquals("li1", segment.libraryItemId)
     assertEquals(15L, segment.timeListening)
     assertEquals(PLAYMETHOD_DIRECTPLAY, segment.playMethod)
-    assertEquals("no new Paper books", booksBefore + "playbackSession", paperBooks() + "playbackSession")
+    assertTrue("no other new Paper books", (paperBooks() - booksBefore).all { it == "playbackSession" || it == "listeningLedger" })
     assertEquals("no new preferences", prefsBefore, sharedPrefs())
+  }
+
+  @Test
+  fun aProcessEndingInTheMeteredWindowOrWithARequestInFlightKeepsItsTime() {
+    val ledger = ListeningLedger()
+    val session = stream()
+    streamTick(session, ledger, 100.0, hasNetwork = true) { _, _, done -> done(false, null) }
+    streamTick(session, ledger, 115.0, hasNetwork = true, shouldSyncServer = false) // metered: not sent yet
+    streamTick(session, ledger, 130.0, hasNetwork = true) { _, _, _ -> } // no answer before the process ends
+    assertEquals("only the failed time is sent so far", 15L, paperSessions().single().timeListening)
+
+    restartProcess()
+    val recovered = paperSessions().single()
+    assertEquals("one offline session holds all of it", ledger.segment()!!.id, recovered.id)
+    assertEquals(45L, recovered.timeListening)
+    assertEquals(130.0, recovered.currentTime, 0.0)
+    assertTrue(unsettledKeys().isEmpty())
+  }
+
+  @Test
+  fun timeNotSentYetGoesToTheSegmentWhenTheSessionEnds() {
+    var now = 1_000_000L
+    val streamed = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get(),
+            apiHandler = { throw AssertionError() }, clock = { now }, hasNetwork = { true }, playerTime = { 100.0 }, sendProgressSync = noRequest)
+    streamed.start(stream("srv-1"))
+    now += 15_000
+    streamed.sync(false, 100.0) {} // metered: kept for the next attempt
+    streamed.start(stream("srv-2")) // the queue moved on
+    now += 15_000
+    streamed.sync(false, 200.0) {}
+    streamed.stop(false) {} // e.g. a playback error: nothing is sent
+    val sessions = paperSessions()
+    assertEquals(listOf("li1", "li1"), sessions.map { it.libraryItemId })
+    assertEquals(listOf(15L, 15L), sessions.map { it.timeListening })
+    assertTrue(sessions.none { it.id.startsWith("srv-") })
+    assertTrue(unsettledKeys().isEmpty())
+  }
+
+  @Test
+  fun anAnswerToAnEarlierPauseOrStopDoesNotResetWhatStartedSince() {
+    var now = 1_000_000L
+    val answers = mutableListOf<(Boolean, String?) -> Unit>()
+    val streamed = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get(),
+            apiHandler = { throw AssertionError() }, clock = { now }, hasNetwork = { true }, playerTime = { 100.0 }, sendProgressSync = { _, _, done -> answers.add(done) })
+    try {
+      streamed.start(stream("srv-1"))
+      now += 15_000
+      streamed.pause {}
+      streamed.start(stream("srv-1")) // play again before the pause's /sync answered
+      answers[0](true, null)
+      now += 15_000
+      streamed.sync(true, 115.0) {}
+      assertEquals("ticks still reach the server", 2, answers.size)
+      answers[1](true, null)
+
+      now += 15_000
+      streamed.stop {}
+      streamed.start(stream("srv-2")) // the queue moved on before the stop's /sync answered
+      answers[2](true, null)
+      assertEquals("srv-2", streamed.currentSessionId)
+    } finally {
+      streamed.stop(false) {}
+    }
   }
 
   private fun paperBooks() = java.io.File(Paper.book("playbackSession").path).parentFile!!.list()!!.toSet()

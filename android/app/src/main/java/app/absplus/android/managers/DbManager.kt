@@ -396,13 +396,26 @@ class DbManager {
   }
   fun getPlaybackSession(playbackSessionId: String): PlaybackSession? =
           Paper.book("playbackSession").read<PlaybackSession>(playbackSessionId)
-  /** Removes the session only if it is still the one sent at [sentUpdatedAt]: a later tick is sent next time. */
-  fun removePlaybackSessionIfUnchanged(playbackSessionId: String, sentUpdatedAt: Long): Boolean = synchronized(playbackSessionLock) {
-    val saved = getPlaybackSession(playbackSessionId) ?: return false
-    if (saved.updatedAt != sentUpdatedAt) return false
-    Paper.book("playbackSession").delete(playbackSessionId)
+  /** Removes the session only if it is still the one that was sent: a later tick or more time is sent next time. */
+  fun removePlaybackSessionIfUnchanged(sent: PlaybackSession): Boolean = synchronized(playbackSessionLock) {
+    val saved = getPlaybackSession(sent.id) ?: return false
+    if (saved.updatedAt != sent.updatedAt || saved.timeListening != sent.timeListening) return false
+    Paper.book("playbackSession").delete(sent.id)
     true
   }
+
+  /**
+   * A stream's listening not settled with the server yet, as the offline session it would become; kept apart from
+   * `playbackSession`, which is sent (also by older versions) while that time may still reach the server by `/sync`.
+   */
+  fun saveUnsettledListening(key: String, session: PlaybackSession) {
+    Paper.book("listeningLedger").write(key, session)
+  }
+  fun getUnsettledListening(key: String): PlaybackSession? = Paper.book("listeningLedger").read<PlaybackSession>(key)
+  fun removeUnsettledListening(key: String) {
+    Paper.book("listeningLedger").delete(key)
+  }
+  fun unsettledListeningKeys(): List<String> = Paper.book("listeningLedger").allKeys
   fun removePlaybackSession(playbackSessionId: String) {
     Paper.book("playbackSession").delete(playbackSessionId)
   }
