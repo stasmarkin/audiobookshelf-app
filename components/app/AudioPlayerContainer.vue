@@ -39,6 +39,7 @@ export default {
       onSleepTimerEndedListener: null,
       onSleepTimerSetListener: null,
       onMediaPlayerChangedListener: null,
+      onAwaitingServerListener: null,
       sleepInterval: null,
       currentEndOfChapterTime: 0,
       serverLibraryItemId: null,
@@ -521,6 +522,10 @@ export default {
       console.log('Got local media progress update', localMediaProgress.progress, JSON.stringify(localMediaProgress))
       this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
     },
+    // Native paused a stream whose server went away and resumes it itself: a label, not an error, and the player stays
+    onAwaitingServer(data) {
+      this.$store.commit('setPlayerAwaitingServer', !!data?.awaiting)
+    },
     onMediaPlayerChanged(data) {
       this.$store.commit('setMediaPlayer', data.value)
     },
@@ -698,6 +703,7 @@ export default {
     this.onSleepTimerEndedListener = await AbsAudioPlayer.addListener('onSleepTimerEnded', this.onSleepTimerEnded)
     this.onSleepTimerSetListener = await AbsAudioPlayer.addListener('onSleepTimerSet', this.onSleepTimerSet)
     this.onMediaPlayerChangedListener = await AbsAudioPlayer.addListener('onMediaPlayerChanged', this.onMediaPlayerChanged)
+    this.onAwaitingServerListener = await AbsAudioPlayer.addListener('onAwaitingServer', this.onAwaitingServer)
 
     this.playbackSpeed = this.$store.getters['user/getUserSetting']('playbackRate')
     console.log(`[AudioPlayerContainer] Init Playback Speed: ${this.playbackSpeed}`)
@@ -720,6 +726,7 @@ export default {
     this.onSleepTimerEndedListener?.remove()
     this.onSleepTimerSetListener?.remove()
     this.onMediaPlayerChangedListener?.remove()
+    this.onAwaitingServerListener?.remove()
 
     this.$eventBus.$off('abs-ui-ready', this.onReady)
     this.$eventBus.$off('play-item', this.playLibraryItem)

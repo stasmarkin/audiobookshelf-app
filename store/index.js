@@ -8,6 +8,7 @@ export const state = () => ({
   playerIsPlaying: false,
   playerIsFullscreen: false,
   playerIsStartingPlayback: false, // When pressing play before native play response
+  playerAwaitingServer: false, // the stream lost its server and native waits for it (paused, player open)
   playerStartingPlaybackMediaId: null,
   playbackQueue: null, // { sourceType: String, sourceId: String, items: Array, currentIndex: Number }
   playbackQueueGeneration: 0, // bumped by every set/clear, so an older async native queue answer can't replace a newer one
@@ -154,6 +155,8 @@ export const mutations = {
     state.lastItemScrollData = data
   },
   setPlaybackSession(state, playbackSession) {
+    // Native reports the wait per session: a new session or a close ends it
+    if (!playbackSession || playbackSession.id !== state.currentPlaybackSession?.id) state.playerAwaitingServer = false
     state.currentPlaybackSession = playbackSession
 
     state.isCasting = playbackSession?.mediaPlayer === 'cast-player'
@@ -166,6 +169,9 @@ export const mutations = {
   },
   setAttemptingConnection(state, val) {
     state.attemptingConnection = val
+  },
+  setPlayerAwaitingServer(state, val) {
+    state.playerAwaitingServer = !!val
   },
   setPlayerPlaying(state, val) {
     state.playerIsPlaying = val

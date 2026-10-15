@@ -60,7 +60,7 @@
       <div ref="titlewrapper" class="overflow-hidden relative">
         <p class="title-text whitespace-nowrap"></p>
       </div>
-      <p class="author-text text-fg text-opacity-75 truncate">{{ authorName }}</p>
+      <p class="author-text text-fg text-opacity-75 truncate">{{ authorLine }}</p>
     </div>
 
     <div id="playerContent" class="playerContainer w-full z-20 absolute bottom-0 left-0 right-0 p-2 pointer-events-auto transition-all" :style="{ backgroundColor: showFullscreen ? '' : coverChrome.backdrop }" @click="clickContainer">
@@ -363,7 +363,14 @@ export default {
       return { classes, vars, plates }
     },
     showLoadingState() {
-      return this.isLoading || this.isCheckingServerProgress
+      // While waiting for the server nothing loads, and Play must stay reachable (it retries the server)
+      return !this.awaitingServer && (this.isLoading || this.isCheckingServerProgress)
+    },
+    awaitingServer() {
+      return this.$store.state.playerAwaitingServer
+    },
+    authorLine() {
+      return this.awaitingServer ? this.$strings.LabelWaitingForServer : this.authorName
     },
     showCastBtn() {
       return this.$store.state.isCastAvailable
@@ -1044,6 +1051,7 @@ export default {
         await this.$nextTick()
         this.onMetadata({ duration: Number(state.duration) || 0, currentTime: Number(state.currentTime) || 0, playerState: 'READY' })
         this.onPlayingUpdate({ value: !!state.isPlaying })
+        this.$store.commit('setPlayerAwaitingServer', !!state.awaitingServer)
         if (state.mediaPlayer) this.$store.commit('setMediaPlayer', state.mediaPlayer)
         this.$eventBus.$emit('native-playback-reattached', state)
       } catch (error) {
