@@ -76,7 +76,7 @@
           </div>
           <!-- Bookmark key: shown for every server book, online or not (the list is the cached user data; a write that
                cannot reach the server reports its own error), so it never drops out of the utility row -->
-          <span v-if="!isPodcast && serverLibraryItemId" class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="{ fill: bookmarks.length }" @click="$emit('showBookmarks')">bookmark</span>
+          <span v-if="!isPodcast && (serverLibraryItemId || bookmarkable)" class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="{ fill: bookmarks.length }" @click="$emit('showBookmarks')">bookmark</span>
           <!-- hidden for podcasts but still using this as a placeholder -->
           <span v-else class="material-symbols text-3xl text-white text-opacity-0">bookmark</span>
 
@@ -168,7 +168,9 @@ export default {
     },
     sleepTimerRunning: Boolean,
     sleepTimeRemaining: Number,
-    serverLibraryItemId: String
+    serverLibraryItemId: String,
+    // Bookmarks are available although the server ids are not (a downloaded copy of another saved server)
+    bookmarkable: Boolean
   },
   mixins: [jumpLabelMixin],
   data() {

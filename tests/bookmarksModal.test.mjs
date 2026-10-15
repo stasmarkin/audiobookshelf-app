@@ -220,6 +220,7 @@ test('a session arriving for a copy of another server sets no server ids', async
   const watcher = sandbox.component.watch.currentPlaybackSession
   const arrive = (currentPlaybackSession) => {
     const ctx = { currentPlaybackSession, $store: { state: { activeServerConfigId: 'server-a' } }, onPlaybackEnded() {}, serverLibraryItemId: 'li-previous', serverEpisodeId: 'ep-previous' }
+    ctx.setSessionServerIds = sandbox.component.methods.setSessionServerIds.bind(ctx)
     ;(watcher.handler || watcher).call(ctx)
     return [ctx.serverLibraryItemId, ctx.serverEpisodeId]
   }
@@ -230,4 +231,48 @@ test('a session arriving for a copy of another server sets no server ids', async
   assert.deepEqual(arrive(copy('server-a')), ['li-server', 'ep-server'])
   assert.deepEqual(arrive({ libraryItemId: 'li-stream', episodeId: null }), ['li-stream', null], 'a stream as before')
   assert.deepEqual(arrive(null), [null, null])
+})
+
+const plain = (value) => JSON.parse(JSON.stringify(value)) // values made inside the vm sandbox
+
+test('a downloaded copy of another server keeps its bookmark button and its own server bookmarks', async () => {
+  const container = (await readFile(new URL('../components/app/AudioPlayerContainer.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const sandbox = { console }
+  vm.runInNewContext(container.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component =').replace(/mixins: \[[^\]]*\],/, ''), sandbox)
+  const { computed, methods, watch } = sandbox.component
+  const fromStore = [{ libraryItemId: 'li-server', time: 1, title: 'Of the active server' }]
+  const context = (server, active = 'server-a') => {
+    const ctx = {
+      currentPlaybackSession: { libraryItemId: 'li-server', episodeId: null, localLibraryItem: { id: 'local_1', libraryItemId: 'li-server', serverConnectionConfigId: server } },
+      $store: { state: { activeServerConfigId: active }, getters: { 'user/getUserBookmarksForItem': (id) => fromStore.filter((b) => b.libraryItemId === id) } },
+      serverLibraryItemId: null,
+      serverEpisodeId: null,
+      onPlaybackEnded() {}
+    }
+    for (const name of ['bookmarkLibraryItemId', 'bookmarkServerConfigId', 'bookmarks']) Object.defineProperty(ctx, name, { get: computed[name].bind(ctx) })
+    ctx.setSessionServerIds = methods.setSessionServerIds.bind(ctx)
+    ctx.setSessionServerIds()
+    return ctx
+  }
+
+  const foreign = context('server-b')
+  assert.equal(foreign.serverLibraryItemId, null, 'no cast or item page on the active server')
+  assert.equal(foreign.bookmarkLibraryItemId, 'li-server', 'but its bookmarks, kept for its own server')
+  assert.equal(foreign.bookmarkServerConfigId, 'server-b')
+  assert.deepEqual(plain(foreign.bookmarks), [], 'not the active server list: the modal reads server B')
+  assert.match(container, /<modals-bookmarks-modal [^>]*:library-item-id="bookmarkLibraryItemId" :server-config-id="bookmarkServerConfigId"/)
+  assert.match(container, /:bookmarkable="!!bookmarkLibraryItemId"/)
+  const player = (await readFile(new URL('../components/app/AudioPlayer.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  assert.match(player, /v-if="!isPodcast && \(serverLibraryItemId \|\| bookmarkable\)" class="player-key utility-key bookmark-key/)
+
+  const own = context('server-a')
+  assert.equal(own.serverLibraryItemId, 'li-server')
+  assert.deepEqual(plain(own.bookmarks), fromStore)
+
+  // The active server is known only later (cold start): the copy playing turns out to be its own
+  const late = context('server-a', null)
+  assert.equal(late.serverLibraryItemId, null)
+  late.$store.state.activeServerConfigId = 'server-a'
+  watch['$store.state.activeServerConfigId'].call(late)
+  assert.equal(late.serverLibraryItemId, 'li-server')
 })
