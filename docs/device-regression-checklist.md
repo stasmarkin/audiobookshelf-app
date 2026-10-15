@@ -83,6 +83,13 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 3. **Server back:** start the server again and touch nothing. Within one retry step (5, 10, 30, 60 seconds, then every 5 minutes; Retry in the indicator dialog or returning to the app checks at once) the indicator shows online again, Home and the other tabs load, and the Diagnostics log shows the local listening sessions syncing.
 4. **Cold start with the server stopped:** force-stop the app, stop the server, start the app. The indicator shows "server unreachable" (not "no network") and no sign-in screen opens. Start the server: the app signs in by itself and the library loads.
 5. **Airplane mode on a cold start:** the indicator shows "no network" (Wi-Fi with a slash), and the indicator raises no toasts. Turning airplane mode off with the server running brings the indicator back to online.
+6. **Bookmarks in airplane mode:** while playing, turn airplane mode on. Create, rename and delete bookmarks: no toast appears, the list updates at once, and the indicator says how many changes wait to be sent.
+7. **Bookmarks on a cold start without a network:** force-stop the app with airplane mode on and start it again. The bookmarks of the playing book are in the list.
+8. **Offline bookmarks reach the server:** turn airplane mode off. The indicator shows syncing, then online; the bookmarks made offline are in the server's web client and on a second device, and the deleted ones are gone there.
+9. **Bookmark deleted elsewhere:** delete a bookmark in the server's web client, then tap the indicator and Sync now. The bookmark disappears from the phone.
+10. **Update from the previous version, online:** after installing over the previous version, all bookmarks from the server are in the list.
+11. **No full sync on a short trip to the background:** play, switch to another app for a minute and come back. The Diagnostics log has no new `SyncEngine` `Reconcile` entry for this return.
+12. **Sync after a long server outage in the background:** put the app in the background, stop the server for 20 minutes, start it, then open the app. The Diagnostics log shows exactly one new `SyncEngine` `Reconcile` entry.
 
 ## Emulator baseline (for comparison)
 

@@ -26,6 +26,13 @@ Merged into `plus`, not yet in a published release.
   foreground), and when the server answers again the app signs in, reloads the library and syncs listening sessions
   by itself, without a restart. A server that refuses the sign-in shows "sign in again". Downloads still follow the
   network as before.
+- **Bookmarks work offline:** creating, renaming and deleting a bookmark no longer fails without the server. The
+  change is saved on the device at once, the connection indicator shows how many changes wait to be sent, and they
+  reach the server, in order, as soon as it is reachable (tap the indicator and Sync now to send them at once).
+  Bookmarks are also shown after a cold start without a network, and bookmarks deleted on another device disappear
+  on the next sync. A bookmark made on a downloaded copy of another saved server is sent to that server when it is
+  the active one again. Rolling back to the previous version keeps unsent offline bookmarks on the device; they are
+  not shown or sent by that version and go out after updating again.
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 
