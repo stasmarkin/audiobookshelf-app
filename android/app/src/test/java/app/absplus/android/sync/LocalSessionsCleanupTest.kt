@@ -282,6 +282,19 @@ class LocalSessionsCleanupTest {
   }
 
   @Test
+  fun aRowTakingTheServersPositionKnowsItsRecord() = runBlocking {
+    for (ebook in listOf(false, true)) {
+      db.outbox().head("srv")?.let { error("outbox not empty") }
+      db.mediaProgress().upsert(progressRow(700.0, lastUpdate = 200L, pending = false).copy(serverProgressId = null))
+      settle(saved(session("a")), true, listOf(ok("a", progressSynced = false)))
+      if (ebook) SyncEngine.store!!.updateEbookProgress("srv", "li1", "epubcfi(/6/4)", 0.3) // partly sent
+      serverAnswers(serverJson(900.0, lastUpdate = 300L))
+      push()
+      assertEquals("partly sent: $ebook", "mp1", db.mediaProgress().get("srv", "li1", "")!!.serverProgressId)
+    }
+  }
+
+  @Test
   fun takingTheServersRecordTakesItsTime() = runBlocking {
     skippedProgressQueued(700.0, rowLastUpdate = 200L)
     db.mediaProgress().upsert(db.mediaProgress().get("srv", "li1", "")!!.copy(ebookLocation = "old"))

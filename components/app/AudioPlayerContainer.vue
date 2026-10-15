@@ -1,10 +1,10 @@
 <template>
   <div>
-    <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" @showQueue="showQueueModal = true" />
+    <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" :bookmarkable="!!bookmarkLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" @showQueue="showQueueModal = true" />
 
     <modals-playback-speed-modal v-model="showPlaybackSpeedModal" :playback-rate.sync="playbackSpeed" @update:playbackRate="updatePlaybackSpeed" @change="changePlaybackSpeed" />
     <modals-sleep-timer-modal v-model="showSleepTimerModal" :current-time="sleepTimeRemaining" :sleep-timer-running="isSleepTimerRunning" :current-end-of-chapter-time="currentEndOfChapterTime" :is-auto="isAutoSleepTimer" @change="selectSleepTimeout" @cancel="cancelSleepTimer" @increase="increaseSleepTimer" @decrease="decreaseSleepTimer" />
-    <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="serverLibraryItemId" :server-config-id="bookmarkServerConfigId" :playback-rate="playbackSpeed" @select="selectBookmark" />
+    <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="bookmarkLibraryItemId" :server-config-id="bookmarkServerConfigId" :playback-rate="playbackSpeed" @select="selectBookmark" />
     <modals-queue-modal v-model="showQueueModal" :queue="playbackQueue" @reorder="reorderQueue" @remove="removeFromQueue" />
   </div>
 </template>
@@ -49,9 +49,22 @@ export default {
   },
   mixins: [CellularPermissionHelpers],
   computed: {
+    /**
+     * The server item the bookmarks belong to. Unlike serverLibraryItemId (cast, opening the item: the active server
+     * only), a downloaded copy of another saved server has its bookmarks too, kept for that server.
+     */
+    bookmarkLibraryItemId() {
+      if (this.serverLibraryItemId) return this.serverLibraryItemId
+      const session = this.currentPlaybackSession
+      if (!session?.localLibraryItem?.serverConnectionConfigId) return null
+      return session.libraryItemId || session.localLibraryItem.libraryItemId || null
+    },
     bookmarks() {
-      if (!this.serverLibraryItemId) return []
-      return this.$store.getters['user/getUserBookmarksForItem'](this.serverLibraryItemId)
+      if (!this.bookmarkLibraryItemId) return []
+      // The store holds the active server's bookmarks; the modal reads another server's copy bookmarks itself
+      const server = this.bookmarkServerConfigId
+      if (server && server !== this.$store.state.activeServerConfigId) return []
+      return this.$store.getters['user/getUserBookmarksForItem'](this.bookmarkLibraryItemId)
     },
     bookmarkServerConfigId() {
       // A downloaded copy keeps its own server: its bookmarks are queued for that server, not the active one
@@ -71,14 +84,23 @@ export default {
     currentPlaybackSession() {
       // Sessions arrive on native advancement, including after background playback.
       this.onPlaybackEnded()
-      // A copy of another saved server: its ids mean nothing to the active server (see setServerIds)
-      const copyServer = this.currentPlaybackSession?.localLibraryItem?.serverConnectionConfigId
-      const foreignCopy = !!this.currentPlaybackSession?.localLibraryItem && copyServer !== this.$store.state.activeServerConfigId
-      this.serverLibraryItemId = foreignCopy ? null : this.currentPlaybackSession?.libraryItemId || null
-      this.serverEpisodeId = foreignCopy ? null : this.currentPlaybackSession?.episodeId || null
+      this.setSessionServerIds()
+    },
+    '$store.state.activeServerConfigId'() {
+      // Known late on a cold start (or switched): a downloaded copy playing may now be, or no longer be, the active
+      // server's. A stream keeps the ids it started with
+      if (this.currentPlaybackSession?.localLibraryItem) this.setSessionServerIds()
     }
   },
   methods: {
+    /** The playing session's server ids; none for a copy of another saved server, which mean nothing to the active one. */
+    setSessionServerIds() {
+      const session = this.currentPlaybackSession
+      const copyServer = session?.localLibraryItem?.serverConnectionConfigId
+      const foreignCopy = !!session?.localLibraryItem && copyServer !== this.$store.state.activeServerConfigId
+      this.serverLibraryItemId = foreignCopy ? null : session?.libraryItemId || null
+      this.serverEpisodeId = foreignCopy ? null : session?.episodeId || null
+    },
     /**
      * The server ids of what started playing, both from one source. A downloaded copy of the active server knows its
      * own (the session's ids, from LocalLibraryItem.libraryItemId) when the page could not tell them, e.g. offline on

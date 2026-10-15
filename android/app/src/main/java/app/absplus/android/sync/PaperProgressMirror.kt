@@ -14,9 +14,10 @@ import app.absplus.android.media.MediaEventManager
 interface ProgressMirror {
   /**
    * Copies each row into the progress of the downloaded copy of its item on its server, if there is one. An existing
-   * copy progress takes only [fields] (and `lastUpdate`); null copies every field.
+   * copy progress takes only [fields] (and `lastUpdate`); null copies every field. [unlessNewer]: an existing copy
+   * progress written later than the row (by the player itself) is left as it is.
    */
-  fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>? = null)
+  fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>? = null, unlessNewer: Boolean = false)
 
   /** Removes the progress of the downloaded copy of each row's item, if there is one. */
   fun remove(rows: Collection<MediaProgressEntity>)
@@ -25,7 +26,7 @@ interface ProgressMirror {
   fun noteServerValues(rows: Collection<MediaProgressEntity>) {}
 
   object None : ProgressMirror {
-    override fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>?) {}
+    override fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>?, unlessNewer: Boolean) {}
     override fun remove(rows: Collection<MediaProgressEntity>) {}
   }
 }
@@ -47,12 +48,12 @@ object PaperProgressMirror : ProgressMirror {
     return DeviceManager.dbManager.getLocalLibraryItems().also { cachedCopies = version to it }
   }
 
-  override fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>?) {
+  override fun mirror(rows: Collection<MediaProgressEntity>, fields: Collection<String>?, unlessNewer: Boolean) {
     if (rows.isEmpty()) return
     val copies = copies()
     for (row in rows) {
       val (item, localEpisodeId) = copyOf(copies, row) ?: continue
-      mirror(row, item, localEpisodeId, fields)
+      mirror(row, item, localEpisodeId, fields, unlessNewer)
     }
   }
 
@@ -61,7 +62,7 @@ object PaperProgressMirror : ProgressMirror {
     val copies = copies()
     for (row in rows) {
       if (copyOf(copies, row) == null) continue
-      val progress = MediaProgress(row.serverProgressId.orEmpty(), row.libraryItemId, row.episodeId.ifEmpty { null },
+      val progress = MediaProgress(UserDataStore.realServerProgressId(row.serverProgressId).orEmpty(), row.libraryItemId, row.episodeId.ifEmpty { null },
               row.duration, row.progress, row.currentTime, row.isFinished, row.ebookLocation, row.ebookProgress,
               row.lastUpdate, row.startedAt, row.finishedAt)
       // A no-op for an item never played here: the history exists only after playback
@@ -78,10 +79,12 @@ object PaperProgressMirror : ProgressMirror {
     }
   }
 
-  private fun mirror(row: MediaProgressEntity, item: LocalLibraryItem, localEpisodeId: String?, fields: Collection<String>?) {
+  private fun mirror(row: MediaProgressEntity, item: LocalLibraryItem, localEpisodeId: String?, fields: Collection<String>?,
+                     unlessNewer: Boolean): Unit = synchronized(DbManager.localMediaProgressLock) {
     val db = DeviceManager.dbManager
     val id = localProgressId(item, localEpisodeId)
     val existing = db.getLocalMediaProgress(id)
+    if (unlessNewer && existing != null && existing.lastUpdate > row.lastUpdate) return
     val progress = if (existing == null) newProgress(id, item, localEpisodeId, row) else existing.also { lmp ->
       fun has(field: String) = fields == null || field in fields
       // A row created by an action alone has no duration yet; the copy knows it

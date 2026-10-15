@@ -354,7 +354,8 @@ class UserDataStoreProgressTest {
     assertEquals(60.0, patch.getDouble("currentTime"), 0.0)
     assertEquals(setOf("duration", "progress", "currentTime", "isFinished", "lastUpdate"), keys(api.requests[1].body))
     assertFalse(row()!!.pending)
-    assertNull("the deleted record's id is forgotten", row()!!.serverProgressId)
+    assertEquals("the deleted record's id is forgotten; the PATCH made a new record, id still unknown",
+            UserDataStore.SERVER_RECORD_SEEN, row()!!.serverProgressId)
   }
 
   @Test
@@ -629,5 +630,44 @@ class UserDataStoreProgressTest {
     val events = DeviceManager.dbManager.getMediaItemHistory("li1")!!.events
     assertEquals(listOf("Sync"), events.map { it.name })
     assertEquals(700.0, events.single().currentTime!!.toDouble(), 0.0)
+  }
+
+  @Test
+  fun aFullPullKeepsRowsTheServerNeverHadAndDeletesRecordsGoneThere() = runBlocking {
+    downloadedCopy(currentTime = 300.0)
+    db.mediaProgress().upsert(progressRow(300.0, lastUpdate = 5L, pending = false).copy(serverProgressId = null))
+    db.mediaProgress().upsert(progressRow(50.0, lastUpdate = 5L, pending = false).copy(libraryItemId = "li2"))
+
+    repeat(2) { store.applyServerProgress("srv", emptyList(), deleteMissing = true) }
+
+    assertNotNull("never seen by the server: stays", row())
+    assertEquals(300.0, paper()!!.currentTime, 0.0)
+    assertNull("its record deleted on the server: goes", db.mediaProgress().get("srv", "li2", ""))
+  }
+
+  @Test
+  fun aRowTheServerTookByPatchIsDeletedOnceAnotherClientDeletesIt() = runBlocking {
+    // Finished offline; the PATCH created the server record, whose id the device never learned
+    store.markFinished("srv", "li1", null, true)
+    pusher.pushAll(config)
+    assertEquals(UserDataStore.SERVER_RECORD_SEEN, row()!!.serverProgressId)
+    assertTrue("never handed out as an id", UserDataJson.progress(row()!!).isNull("id"))
+
+    // Another client deleted it: the next full pull follows
+    store.applyServerProgress("srv", emptyList(), deleteMissing = true)
+    assertNull(row())
+  }
+
+  @Test
+  fun aResetOfARowSeenWithoutItsIdZeroesItByPatch() = runBlocking {
+    db.mediaProgress().upsert(progressRow(400.0, lastUpdate = 5L, pending = false).copy(serverProgressId = UserDataStore.SERVER_RECORD_SEEN))
+
+    store.resetProgress("srv", "li1", null)
+
+    assertEquals(listOf(OutboxKind.PROGRESS_PATCH), outbox().map { it.kind })
+    // A pull brings the real id
+    db.outbox().byItemKey("srv", progressItemKey("li1", null)).forEach { store.onOutboxSent(it) }
+    store.applyServerProgressCandidate("srv", server(0.0, lastUpdate = 1L, id = "mp7"))
+    assertEquals("mp7", row()!!.serverProgressId)
   }
 }

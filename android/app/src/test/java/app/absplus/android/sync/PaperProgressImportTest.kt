@@ -184,7 +184,9 @@ class PaperProgressImportTest {
 
   @Test
   fun progressResetInTheWebClientDoesNotComeBackFromAnOldPaperCopy() = runBlocking {
-    // Reset in the web client: the server has no record; the downloaded copy still has its old Paper progress
+    // Synced before (the row knows its server record), then reset in the web client: the server has no record, and
+    // the downloaded copy still has its old Paper progress, written later by the old version
+    db.mediaProgress().upsert(progressRow(600.0, lastUpdate = 100L, pending = false))
     import.import(listOf(lmp(lastUpdate = 200L, currentTime = 700.0)))
     serverHas()
 
@@ -194,6 +196,19 @@ class PaperProgressImportTest {
     OutboxPusher(db, syncHttp(api), store, { 2L }, {}).pushAll(fakeServer())
     assertTrue("no PATCH brings it back", api.paths().none { it.startsWith("PATCH") })
     assertNull("the next reconcile follows the server", row())
+  }
+
+  @Test
+  fun progressTheServerNeverSawStaysOnTheDevice() = runBlocking {
+    // "Finished" offline on the old version, for a book the server has no progress of
+    import.import(listOf(lmp(lastUpdate = 200L, isFinished = true)))
+    serverHas()
+
+    assertTrue(reconcile().isSuccess)
+    assertTrue(reconcile().isSuccess)
+
+    assertTrue("kept after both reconciles", row()!!.isFinished)
+    assertTrue("and not sent", outbox().isEmpty())
   }
 
   @Test

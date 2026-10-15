@@ -436,16 +436,24 @@ class MediaProgressSyncerWriteTest {
   private fun sharedPrefs() = java.io.File(context.applicationInfo.dataDir, "shared_prefs").list()?.toSet().orEmpty()
 
   @Test
-  fun aSeekOfADownloadedCopyLeavesItsPaperProgressToThePlayer() = runBlocking {
+  fun aSeekOfADownloadedCopyMovesItsPaperProgressUnlessThePlayerWroteLater() = runBlocking {
     DeviceManager.dbManager.saveLocalLibraryItem(copy)
     val session = session(PLAYMETHOD_LOCAL, copy)
     tick(session, 100.0)
     eventually("the tick") { row()?.currentTime == 100.0 }
 
     syncer.recordSeek(session, 300.0, session.id)
-    eventually("the seek in Room") { row()?.currentTime == 300.0 }
-    SyncEngine.write { } // the write, with any mirror of it, is over
-    assertEquals("the player writes the copy's progress itself", 100.0, DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!.currentTime, 0.0)
+    SyncEngine.write { } // the write, with its mirror, is over
+    assertEquals("the copy starts from the seek next time", 300.0, DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!.currentTime, 0.0)
+
+    // The player's own tick lands in Paper before a slower mirror of an earlier seek
+    val paper = DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!
+    paper.currentTime = 450.0
+    paper.lastUpdate = System.currentTimeMillis() + 60_000
+    DeviceManager.dbManager.saveLocalMediaProgress(paper)
+    syncer.recordSeek(session, 320.0, session.id)
+    SyncEngine.write { }
+    assertEquals("the newer tick stays", 450.0, DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!.currentTime, 0.0)
   }
 
   /** The opener's /sync is answered after the queue moved on to the sequel. */

@@ -48,8 +48,10 @@ Merged into `plus`, not yet in a published release.
   change), the app stays where it was with the selected library, progress and bookmarks; downloaded books keep
   playing, changes keep waiting, and the indicator asks to sign in again (it opens the sign-in form for that server).
   Until you sign in, the library tabs stay empty as they do offline. An explicit sign-out is unchanged.
-- **Rollback:** rolling back to the previous version is safe: the downloaded-book progress it reads is kept up to date
-  alongside, and it sends unsent "finished" and resets itself.
+- **Rollback and a known limit:** rolling back to the previous version is safe: the downloaded-book progress it reads
+  is kept up to date alongside, and it sends unsent "finished" and resets itself. Progress of a downloaded book reset
+  in the web client before updating to this version, while the device never learned the server's record, stays on the
+  device as its local position and is not sent to the server (as in the previous version).
 - **Listening sessions offline:** listening to a streamed book while the server cannot be reached is no longer lost or
   inflated. The time the server did not get is saved as a listening session of its own, also when the app is closed
   before it could send it, and sent when the server is back, next to the streamed session, which it no longer

@@ -566,7 +566,8 @@ test('Full-player bookmark key: shown for every server book whether or not the s
   const src = await read('../components/app/AudioPlayer.vue')
   const key = src.match(/<span v-if="([^"]*)" class="player-key utility-key bookmark-key[^"]*"[^>]*>bookmark<\/span>/)
   assert.ok(key, 'the bookmark key exists in the utility row')
-  assert.equal(key[1], '!isPodcast && serverLibraryItemId')
+  // A downloaded copy of another saved server has bookmarks without the active server's ids (bookmarkable)
+  assert.equal(key[1], '!isPodcast && (serverLibraryItemId || bookmarkable)')
   assert.match(key[0], /@click="\$emit\('showBookmarks'\)"/)
   // Order in the row: queue, bookmark, speed, sleep, chapters
   const row = src.slice(src.indexOf('class="utility-row'), src.indexOf('chapters-key'))

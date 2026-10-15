@@ -18,6 +18,12 @@ class DbManager {
     @Volatile var localLibraryItemsVersion = 0L
       private set
 
+    /**
+     * Held around a read-compare-write of a downloaded copy's progress (the Paper mirror of userdata.db) and the
+     * player's own write of it, so a check "not newer than mine" cannot be overtaken between the read and the write.
+     */
+    val localMediaProgressLock = Any()
+
     fun localLibraryItemsChanged() {
       localLibraryItemsVersion++
     }
