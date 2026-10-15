@@ -302,6 +302,8 @@ class AbsAudioPlayer : Plugin() {
     val ino = call.getString("ino")?.takeIf { it.isNotEmpty() }
     if (libraryItemId.isEmpty()) return call.resolve(JSObject().put("source", "broken"))
     Handler(Looper.getMainLooper()).post {
+      // Not bound yet: the UI falls back to deciding by the id
+      if (!::playerNotificationService.isInitialized) return@post call.reject("Player service not ready")
       val source = playerNotificationService.planFor(StartRequest(libraryItemId, episodeId, ino, playWhenReady = false))
       val name = when (source) {
         is PlaybackSource.Local -> "local"
