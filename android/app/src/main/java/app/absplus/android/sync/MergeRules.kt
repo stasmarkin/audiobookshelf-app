@@ -1,6 +1,7 @@
 package app.absplus.android.sync
 
 import app.absplus.android.db.userdata.BookmarkEntity
+import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.db.userdata.OutboxEntity
 
 data class ServerBookmark(val libraryItemId: String, val time: Double, val title: String, val createdAt: Long)
@@ -30,6 +31,48 @@ fun mergeBookmarks(serverConfigId: String, local: List<BookmarkEntity>, server: 
   val deletes = localByKey.filter { (key, row) -> !row.pending && key !in serverByKey }.values.toList()
   return BookmarkMergePlan(upserts, deletes)
 }
+
+/** A media progress record as the server sends it; [episodeId] is null for a book. */
+data class ServerProgress(
+        val id: String,
+        val libraryItemId: String,
+        val episodeId: String?,
+        val duration: Double,
+        val progress: Double,
+        val currentTime: Double,
+        val isFinished: Boolean,
+        val hideFromContinueListening: Boolean,
+        val ebookLocation: String?,
+        val ebookProgress: Double?,
+        val lastUpdate: Long,
+        val startedAt: Long,
+        val finishedAt: Long?
+)
+
+sealed interface ProgressMerge {
+  data object KeepLocal : ProgressMerge
+  data class TakeServer(val row: MediaProgressEntity) : ProgressMerge
+}
+
+/**
+ * The one merge rule of progress: the larger `lastUpdate` wins, a tie keeps the local row, and a local row with
+ * something unsent is never overwritten. [hasUnsentSessions]: the item has listening sessions waiting for `local-all`,
+ * which count as unsent, so offline listening to a downloaded book is not rolled back by the server.
+ */
+fun mergeProgress(serverConfigId: String, local: MediaProgressEntity?, server: ServerProgress,
+                  hasUnsentSessions: Boolean = false): ProgressMerge {
+  if (local != null && (local.pending || hasUnsentSessions || local.lastUpdate >= server.lastUpdate)) return ProgressMerge.KeepLocal
+  return ProgressMerge.TakeServer(MediaProgressEntity(
+          serverConfigId = serverConfigId, libraryItemId = server.libraryItemId, episodeId = server.episodeId.orEmpty(),
+          serverProgressId = server.id, duration = server.duration, progress = server.progress,
+          currentTime = server.currentTime, isFinished = server.isFinished,
+          hideFromContinueListening = server.hideFromContinueListening, ebookLocation = server.ebookLocation,
+          ebookProgress = server.ebookProgress, lastUpdate = server.lastUpdate, startedAt = server.startedAt,
+          finishedAt = server.finishedAt, source = PROGRESS_SOURCE_SERVER, pending = false))
+}
+
+const val PROGRESS_SOURCE_SERVER = "server"
+const val PROGRESS_SOURCE_DEVICE = "device"
 
 /** What to do with the outbox of one item when a new action [OutboxPlan] is about it. */
 data class OutboxPlan(val deleteIds: List<Long>, val insert: OutboxEntity?, val update: OutboxEntity?)
