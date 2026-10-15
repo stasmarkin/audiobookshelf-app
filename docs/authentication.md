@@ -41,6 +41,8 @@ How the app signs in to an Audiobookshelf server and renews an expired access to
 | `transient` | offline, timeout, 5xx, malformed answer | Nothing changes; the waiting requests fail with an ordinary error and the user stays signed in. Offline playback never renews. |
 | `stale` (JS) | logout or server switch while waiting | Waiting requests fail at once; the late result is ignored |
 
+**Server reachability.** A `rejected` result also marks the server `unauthorized` in native `sync/ServerReachability.kt` (shown by the app-bar indicator as "sign in again"). This includes a server answering 401 when the connection has no refresh token (an old, pre-JWT token): `TokenRefresher` reports that as `rejected` too, so the server becomes `unauthorized` at once. `ApiHandler.handleRefreshRejected` reports it before checking whether the connection is the signed-in one, because offline on a cold start there is no signed-in connection while `sync/ActiveServer.kt` still remembers the server; a rejection for any other saved connection (a queued download's server, for example) does not change the state. `unauthorized` stays until the user signs in to that server again (or removes it). What happens to the session is unchanged: it signs out and `/connect?error=refreshTokenFailed` opens, as in the table above.
+
 **Stale results can't overwrite newer credentials.**
 - A refresh writes its rotated token only while the refresh token it sent is still the stored one (compare-and-set in `SecureStorage`, under one process-wide lock).
 - So a refresh that finishes after a new login, after a logout from the server (token cleared) or after the connection was removed is discarded. A rejection that arrives after a new login doesn't clear the new token.

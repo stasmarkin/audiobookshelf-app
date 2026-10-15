@@ -74,6 +74,15 @@ Items marked **emulator-covered** already pass on an AOSP API 35 emulator (see t
    - **Starter and custom presets:** a starter and a custom preset color the widget (Android 12+), the status/navigation bar areas and the app.
    - **Back to built-ins:** choosing a built-in or turning RICE off restores the exact built-in look everywhere.
 
+## 9. Offline and server reachability
+
+Needs a test server on the LAN that you can stop and start (for example its container), and a Wi-Fi connection that stays up.
+
+1. **Server stopped, Wi-Fi alive:** open Home and leave it. Stop the server. Within 15 seconds, without a restart or a tap, the app-bar indicator changes to "server unreachable" (cloud with a slash, warning color). Tapping it shows the message with Retry and Cancel.
+2. **Server back:** start the server again and touch nothing. Within one retry step (5, 10, 30, 60 seconds, then every 5 minutes; Retry in the indicator dialog or returning to the app checks at once) the indicator shows online again, Home and the other tabs load, and the Diagnostics log shows the local listening sessions syncing.
+3. **Cold start with the server stopped:** force-stop the app, stop the server, start the app. The indicator shows "server unreachable" (not "no network") and no sign-in screen opens. Start the server: the app signs in by itself and the library loads.
+4. **Airplane mode on a cold start:** the indicator shows "no network" (Wi-Fi with a slash), and the indicator raises no toasts. Turning airplane mode off with the server running brings the indicator back to online.
+
 ## Emulator baseline (for comparison)
 
 The upstream v0.14.2-beta synchronization ran sections 2, 3.1–3.5 (widget key code), 3.7, 3.8, 4.1 (dispatch only), 5.1 (process kill), 7 (privacy counts) and 8.1 on an AOSP `sdk_gphone64_x86_64` emulator (API 35) against a local Audiobookshelf 2.36.1 server. Samsung-specific behavior, Bluetooth, real headsets, SAF folders, long runs and battery restrictions were not covered.
