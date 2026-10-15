@@ -23,6 +23,7 @@ export default {
     return {
       inittingLibraries: false,
       hasMounted: false,
+      initialSessionsSynced: false,
       disconnectTime: 0,
       socketDisconnectedTime: 0,
       timeLostFocus: 0,
@@ -36,7 +37,10 @@ export default {
         if (!newVal) {
           console.log(`[default] lost network connection`)
           this.disconnectTime = Date.now()
+          return
         }
+        // Native can report the server online before Android reports the network, and attemptConnection needs both
+        if (this.hasMounted && this.serverState === 'online' && !this.user) this.connectWhenReachable()
       }
     },
     serverState: {
@@ -212,14 +216,27 @@ export default {
     },
     serverCameOnline() {
       if (!this.user) {
-        if (!this.attemptingConnection) this.attemptConnection()
+        this.connectWhenReachable()
         return
       }
-      // Re-read the library so the shelves (library-changed) show what changed while the server was away
-      this.initLibraries()
+      if (!this.currentLibraryId) {
+        this.initLibraries()
+      } else {
+        // Not library-changed: that sends item, collection and playlist pages back to lists and resets filters
+        this.$eventBus.$emit('server-reachable')
+      }
       setTimeout(() => {
         this.syncLocalSessions(false)
       }, 4000)
+    },
+    async connectWhenReachable() {
+      if (this.attemptingConnection) return
+      await this.attemptConnection()
+      if (!this.user) return
+      // An offline cold start skipped the startup sync (no user then), so this one is the first
+      const isFirstSync = !this.initialSessionsSynced
+      this.initialSessionsSynced = true
+      await this.syncLocalSessions(isFirstSync)
     },
     itemRemoved(libraryItem) {
       if (this.$route.name.startsWith('item')) {
@@ -390,12 +407,13 @@ export default {
       }
 
       await this.syncLocalSessions(true)
-
-      this.hasMounted = true
+      this.initialSessionsSynced = !!this.user
 
       AbsLogger.info({ tag: 'default', message: 'mounted: fully initialized' })
       this.$eventBus.$emit('abs-ui-ready')
     }
+    // Also on a remount (back from /connect), or the watchers above never react again
+    this.hasMounted = true
   },
   beforeDestroy() {
     this.$eventBus.$off('change-lang', this.changeLanguage)

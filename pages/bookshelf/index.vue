@@ -328,9 +328,11 @@ export default {
     },
     initListeners() {
       this.$eventBus.$on('library-changed', this.libraryChanged)
+      this.$eventBus.$on('server-reachable', this.libraryChanged)
     },
     removeListeners() {
       this.$eventBus.$off('library-changed', this.libraryChanged)
+      this.$eventBus.$off('server-reachable', this.libraryChanged)
     }
   },
   async mounted() {

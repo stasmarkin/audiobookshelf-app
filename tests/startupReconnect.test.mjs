@@ -16,7 +16,7 @@ const flush = async (n = 20) => {
   for (let i = 0; i < n; i++) await Promise.resolve()
 }
 
-function layout({ serverState = 'offline', networkConnected = true, user = null, currentLibraryId = 'lib-1', getServerState } = {}) {
+function layout({ serverState = 'offline', networkConnected = true, user = null, currentLibraryId = 'lib-1', getServerState, isFirstLoad = true, signsIn = false } = {}) {
   const timers = []
   const sandbox = {
     AbsLogger: { info: async () => {}, error: async () => {} },
@@ -31,7 +31,7 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
   const calls = []
   const emitted = []
   const store = {
-    state: { serverState, networkConnected, socketConnected: false, attemptingConnection: false, isFirstLoad: true, user: { user, serverConnectionConfig: null }, libraries: { currentLibraryId } },
+    state: { serverState, networkConnected, socketConnected: false, attemptingConnection: false, isFirstLoad, user: { user, serverConnectionConfig: null }, libraries: { currentLibraryId } },
     getters: { getIsPlayerOpen: false, 'libraries/getCurrentLibraryName': 'Library', getOrientationLockSetting: null },
     commit(type, payload) {
       if (type === 'setAttemptingConnection') store.state.attemptingConnection = payload
@@ -65,7 +65,10 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
   }
   for (const [name, fn] of Object.entries(component.methods)) view[name] = fn.bind(view)
   // Spies for the heavy work; initLibraries stays real so the shelves' refresh event is observable
-  view.attemptConnection = async () => calls.push('attemptConnection')
+  view.attemptConnection = async () => {
+    calls.push('attemptConnection')
+    if (signsIn) store.state.user.user = { id: 'user-1' }
+  }
   view.syncLocalSessions = async (isFirstSync) => calls.push(['syncLocalSessions', isFirstSync])
   view.loadSavedSettings = async () => {}
 
@@ -103,8 +106,14 @@ test('server coming online retries authorization when there is no user and syncs
     signedIn.calls.filter((c) => c[0] === 'syncLocalSessions'),
     [['syncLocalSessions', false]]
   )
-  assert.ok(signedIn.calls.some((c) => c[0] === 'dispatch' && c[1] === 'libraries/fetch'), 'the library is re-read')
-  assert.deepEqual(signedIn.emitted, ['library-changed'], 'shelves refetch on library-changed')
+  assert.deepEqual(signedIn.emitted, ['server-reachable'], 'Home re-reads its shelves')
+  assert.ok(!signedIn.calls.some((c) => c[0] === 'dispatch'), 'no library reload: open pages and filters stay where they are')
+
+  const noLibrary = layout({ user: { id: 'user-1' }, currentLibraryId: null })
+  noLibrary.view.hasMounted = true
+  noLibrary.watch('serverState', 'online', 'offline')
+  await flush()
+  assert.deepEqual(noLibrary.emitted, ['library-changed'], 'without a library yet, libraries are loaded as before')
 
   const steady = layout({ user: { id: 'user-1' } })
   steady.view.hasMounted = true
@@ -159,4 +168,74 @@ test('startup reads the server state first and waits for the server when native 
   })
   await failing.mounted()
   assert.ok(failing.calls.includes('attemptConnection'), 'a failed state read does not block the connection')
+})
+
+test('Home re-reads its shelves when the server is reachable again, without leaving the page', async () => {
+  const page = (await readFile(new URL('../pages/bookshelf/index.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const sandbox = { console: { ...console, log: () => {} } }
+  vm.runInNewContext(page.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
+  const handlers = {}
+  const fetched = []
+  const view = { $eventBus: { $on: (name, fn) => (handlers[name] = fn), $off() {} }, currentLibraryId: 'lib-1', fetchCategories: () => fetched.push(true) }
+  for (const [name, fn] of Object.entries(sandbox.component.methods)) if (!(name in view)) view[name] = fn.bind(view)
+  view.initListeners()
+  handlers['server-reachable']()
+  assert.equal(fetched.length, 1)
+})
+
+test('after an offline cold start, the automatic sign-in also syncs local sessions', async () => {
+  const l = layout({ serverState: 'offline', signsIn: true })
+  await l.mounted()
+  assert.ok(!l.calls.includes('attemptConnection'))
+  l.store.state.serverState = 'online'
+  l.watch('serverState', 'online', 'offline')
+  await flush()
+  assert.deepEqual(
+    l.calls.filter((c) => typeof c === 'string' || c[0] === 'syncLocalSessions'),
+    ['getServerState', ['syncLocalSessions', true], 'attemptConnection', ['syncLocalSessions', true]],
+    'the startup sync was skipped without a user, so this one is the first'
+  )
+
+  const online = layout({ serverState: 'unknown', signsIn: true })
+  await online.mounted()
+  online.store.state.user.user = null // signed out later
+  online.watch('serverState', 'online', 'offline')
+  await flush()
+  assert.deepEqual(online.calls.filter((c) => c[0] === 'syncLocalSessions').at(-1), ['syncLocalSessions', false])
+})
+
+test('a remounted layout (back from /connect) still reconnects', async () => {
+  const l = layout({ isFirstLoad: false, user: null })
+  await l.mounted()
+  assert.equal(l.view.hasMounted, true)
+  l.watch('serverState', 'online', 'offline')
+  await flush()
+  assert.deepEqual(l.calls, ['attemptConnection'])
+})
+
+test('the server answering before Android reports the network still connects, in either order', async () => {
+  const serverFirst = layout({ user: null, networkConnected: false })
+  serverFirst.view.hasMounted = true
+  serverFirst.store.state.serverState = 'online'
+  serverFirst.watch('serverState', 'online', 'offline') // attemptConnection bails out: no network yet (real code)
+  serverFirst.calls.length = 0
+  serverFirst.store.state.networkConnected = true
+  serverFirst.watch('networkConnected', true, false)
+  await flush()
+  assert.deepEqual(serverFirst.calls, ['attemptConnection'])
+
+  const networkFirst = layout({ user: null, networkConnected: false, serverState: 'offline' })
+  networkFirst.view.hasMounted = true
+  networkFirst.store.state.networkConnected = true
+  networkFirst.watch('networkConnected', true, false)
+  networkFirst.store.state.serverState = 'online'
+  networkFirst.watch('serverState', 'online', 'offline')
+  await flush()
+  assert.deepEqual(networkFirst.calls, ['attemptConnection'])
+
+  const signedIn = layout({ user: { id: 'user-1' }, serverState: 'online' })
+  signedIn.view.hasMounted = true
+  signedIn.watch('networkConnected', true, false)
+  await flush()
+  assert.deepEqual(signedIn.calls, [], 'a signed-in user waits for the server, not the network')
 })
