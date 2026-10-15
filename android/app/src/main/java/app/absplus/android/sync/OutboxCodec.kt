@@ -54,20 +54,25 @@ object OutboxPayload {
   /**
    * `{"fields":[…]}`: unknown names are left out, the rest are kept in [PROGRESS_PATCH_FIELDS] order. [finishedMark]:
    * true for the user's explicit "finished"/"not finished" (playback keeps it until sent), false for a change that
-   * overrides one (a reset), null for neither. [ifAhead]: sent only if the device's position is ahead of the server's
-   * (versions that do not know the flag send it anyway).
+   * overrides one (a reset), null for neither. [conditionalFields]: those of [fields] sent only if the device's
+   * position is ahead of the server's (versions that do not know them send them anyway).
    */
-  fun progressPatch(fields: Collection<String>, finishedMark: Boolean? = null, ifAhead: Boolean = false): String {
+  fun progressPatch(fields: Collection<String>, finishedMark: Boolean? = null, conditionalFields: Collection<String> = emptyList()): String {
     val array = nodes.arrayNode()
     PROGRESS_PATCH_FIELDS.filter { it in fields }.forEach { array.add(it) }
     val node = nodes.objectNode().set<ObjectNode>("fields", array)
     if (finishedMark != null) node.put("finishedMark", finishedMark)
-    if (ifAhead) node.put("ifAhead", true)
+    val conditional = PROGRESS_PATCH_FIELDS.filter { it in fields && it in conditionalFields }
+    if (conditional.isNotEmpty()) node.set<ObjectNode>("conditionalFields", nodes.arrayNode().also { a -> conditional.forEach { a.add(it) } })
     return mapper.writeValueAsString(node)
   }
 
-  /** Whether a `progress_patch` is sent only if the device's position is ahead of the server's. */
-  fun ifAhead(payload: String): Boolean = parse(payload)?.get("ifAhead")?.asBoolean() == true
+  /** The fields of a `progress_patch` sent only if the device's position is ahead of the server's. */
+  fun conditionalFields(payload: String): List<String> {
+    val array = parse(payload)?.get("conditionalFields")?.takeIf { it.isArray } ?: return emptyList()
+    val names = array.mapNotNull { node -> node.takeIf { it.isTextual }?.asText() }.toSet()
+    return PROGRESS_PATCH_FIELDS.filter { it in names }
+  }
 
   /** The `finishedMark` of a `progress_patch` payload; null when it has none. */
   fun finishedMark(payload: String): Boolean? = parse(payload)?.get("finishedMark")?.takeIf { it.isBoolean }?.asBoolean()

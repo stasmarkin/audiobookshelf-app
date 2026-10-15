@@ -206,13 +206,71 @@ class LocalSessionsCleanupTest {
   }
 
   @Test
-  fun aUsersOwnChangeFoldedInIsSentUnconditionally() = runBlocking {
+  fun aFinishedMarkFoldedInIsSentAndThePositionStaysConditional() = runBlocking {
     skippedProgressQueued(700.0)
     SyncEngine.store!!.markFinished("srv", "li1", null, true)
     serverAnswers(serverJson(900.0, lastUpdate = 300L))
     push()
-    assertEquals(listOf("PATCH /api/me/progress/li1"), api.paths())
-    assertTrue(JSONObject(api.requests.single().body!!).getBoolean("isFinished"))
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    val ahead = JSONObject(api.requests.last().body!!)
+    assertTrue(ahead.getBoolean("isFinished"))
+    assertFalse("the server's further position stays", ahead.has("currentTime") || ahead.has("progress"))
+  }
+
+  @Test
+  fun aFinishedMarkAndThePositionAreSentWhenTheServerIsBehind() = runBlocking {
+    skippedProgressQueued(700.0)
+    // "Not finished" keeps the position (marking finished moves it to the start, which no server is behind)
+    SyncEngine.store!!.markFinished("srv", "li1", null, false)
+    serverAnswers(serverJson(300.0, lastUpdate = 300L))
+    push()
+    val behind = JSONObject(api.requests.last().body!!)
+    assertFalse(behind.getBoolean("isFinished"))
+    assertEquals(700.0, behind.getDouble("currentTime"), 0.0)
+  }
+
+  @Test
+  fun anEbookChangeFoldedInIsSentWithoutTheOlderAudioPosition() = runBlocking {
+    skippedProgressQueued(700.0)
+    SyncEngine.store!!.updateEbookProgress("srv", "li1", "epubcfi(/6/4)", 0.3)
+    serverAnswers(serverJson(900.0, lastUpdate = 300L))
+    push()
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    val body = JSONObject(api.requests.last().body!!)
+    assertEquals("epubcfi(/6/4)", body.getString("ebookLocation"))
+    assertFalse(body.has("currentTime") || body.has("progress") || body.has("duration"))
+    assertNull(db.outbox().head("srv"))
+  }
+
+  @Test
+  fun anExplicitChangeOfAConditionalFieldMakesItUnconditional() {
+    fun patch(id: Long, payload: String) = app.absplus.android.db.userdata.OutboxEntity(id = id, serverConfigId = "srv",
+            kind = OutboxKind.PROGRESS_PATCH, itemKey = progressItemKey("li1", null), payload = payload, createdAt = 1L)
+    val skipped = patch(1, OutboxPayload.progressPatch(listOf("duration", "progress", "currentTime"),
+            conditionalFields = listOf("duration", "progress", "currentTime")))
+    val folded = coalesce(listOf(skipped), patch(0, OutboxPayload.progressPatch(listOf("currentTime"))), null).insert!!
+    assertEquals(listOf("duration", "progress"), OutboxPayload.conditionalFields(folded.payload))
+  }
+
+  @Test
+  fun aCheckTheServerCannotAnswerFallsBackToThePatch() = runBlocking {
+    for ((code, text) in listOf(403 to "Forbidden", 200 to "not json")) {
+      api.requests.clear()
+      skippedProgressQueued(700.0)
+      api.handler = { request -> if (request.method == "GET") code to text else 200 to "{}" }
+      push()
+      assertEquals("GET $code", listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+      assertNull(db.outbox().head("srv"))
+    }
+  }
+
+  @Test
+  fun aServerErrorOnTheCheckIsRetried() = runBlocking {
+    skippedProgressQueued(700.0)
+    api.handler = { request -> if (request.method == "GET") 503 to "busy" else 200 to "{}" }
+    assertEquals(StopReason.BACKOFF, push().stoppedBy)
+    assertEquals(listOf("GET /api/me/progress/li1"), api.paths())
+    assertTrue(db.mediaProgress().get("srv", "li1", "")!!.pending)
   }
 
   @Test

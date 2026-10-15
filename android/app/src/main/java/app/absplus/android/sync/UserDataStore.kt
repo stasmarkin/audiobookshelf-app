@@ -329,11 +329,15 @@ class UserDataStore(
   /** [row] will never reach the server (rejected or unreadable); a bookmark with nothing else to send is dropped too. */
   suspend fun onOutboxDropped(row: OutboxEntity) = settle(row, dropped = true, followUp = null)
 
-  /** Queues a `progress_patch` of [fields] for the item, folded into a queued one. [ifAhead]: see [OutboxPayload.progressPatch]. */
+  /**
+   * Queues a `progress_patch` of [fields] for the item, folded into a queued one. [conditionalFields]: see
+   * [OutboxPayload.progressPatch].
+   */
   suspend fun queueProgressPatch(serverConfigId: String, libraryItemId: String, episodeId: String?, fields: Collection<String>,
-                                 ifAhead: Boolean = false) {
+                                 conditionalFields: Collection<String> = emptyList()) {
     db.withTransaction {
-      enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, progressItemKey(libraryItemId, episodeId), OutboxPayload.progressPatch(fields, ifAhead = ifAhead))
+      enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, progressItemKey(libraryItemId, episodeId),
+              OutboxPayload.progressPatch(fields, conditionalFields = conditionalFields))
       setProgressPending(serverConfigId, progressItemKey(libraryItemId, episodeId))
     }
   }

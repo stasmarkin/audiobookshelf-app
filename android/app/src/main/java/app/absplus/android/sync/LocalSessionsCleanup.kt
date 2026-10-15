@@ -47,7 +47,8 @@ object LocalSessionsCleanup {
         for (item in skipped) {
           val hasRow = store.progressRowsFor(item.serverConfigId, listOf(item.libraryItemId)).any { it.episodeId == item.episodeId.orEmpty() }
           if (!hasRow) continue
-          store.queueProgressPatch(item.serverConfigId, item.libraryItemId, item.episodeId, SKIPPED_PROGRESS_FIELDS, ifAhead = true)
+          store.queueProgressPatch(item.serverConfigId, item.libraryItemId, item.episodeId, SKIPPED_PROGRESS_FIELDS,
+                  conditionalFields = SKIPPED_PROGRESS_FIELDS)
           patched = true
         }
         removeSettled()

@@ -138,19 +138,27 @@ class OutboxPusher(
             ?: return Step.Drop("no progress row")
     if (!progress.pending) return Step.Drop("progress row is not pending")
     val path = "/api/me/progress/${segment(libraryItemId)}" + if (episodeId.isEmpty()) "" else "/${segment(episodeId)}"
-    if (OutboxPayload.ifAhead(row.payload)) {
+    var sendFields = fields
+    var serverAhead: ServerProgress? = null
+    val conditional = OutboxPayload.conditionalFields(row.payload).filter { it in fields }
+    if (conditional.isNotEmpty()) {
       when (val outcome = http.send(config, "GET", path)) {
-        is HttpOutcome.Ok -> {
-          val server = parseServerProgress(readTree(outcome.body)) ?: return Step.Retry("unreadable server progress")
-          if (server.isFinished || server.currentTime >= progress.currentTime) return Step.Sent(serverValue = server)
+        is HttpOutcome.Ok -> parseServerProgress(readTree(outcome.body))?.let { server ->
+          if (server.isFinished || server.currentTime >= progress.currentTime) {
+            serverAhead = server
+            sendFields = fields - conditional.toSet()
+          }
+        } // An unreadable record is no reason to hold the queue: sent as before the check
+        is HttpOutcome.HttpError -> when (outcome.code) {
+          408, 429, in 500..599 -> return Step.Retry("HTTP ${outcome.code}")
+          else -> Unit // No record (404) or a check the server refuses: sent as before the check
         }
-        // No record on the server: nothing to overwrite
-        is HttpOutcome.HttpError -> if (outcome.code != 404) return Step.Retry("HTTP ${outcome.code}")
         else -> return classify(outcome)
       }
     }
-    val step = classify(http.send(config, "PATCH", path, mapper.writeValueAsString(patchBody(progress, fields))))
-    return if (step is Step.Sent) Step.Sent(progress) else step
+    if (sendFields.isEmpty()) return Step.Sent(serverValue = serverAhead)
+    val step = classify(http.send(config, "PATCH", path, mapper.writeValueAsString(patchBody(progress, sendFields))))
+    return if (step is Step.Sent) Step.Sent(progress, serverAhead) else step
   }
 
   /**
