@@ -3,7 +3,9 @@ package app.absplus.android.managers
 import app.absplus.android.diagnostics.DLog
 import android.content.Context
 import android.util.Log
+import app.absplus.android.data.PlaybackSession
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
+import app.absplus.android.player.matches
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -32,17 +34,23 @@ object PlaybackRestoreStore {
 
   fun saveQueue(ctx: Context, items: List<PlaylistQueueItem>, index: Int) {
     val arr = JSONArray()
-    items.forEach { arr.put(JSONObject().put("libraryItemId", it.libraryItemId).put("episodeId", it.episodeId ?: JSONObject.NULL)) }
+    items.forEach {
+      arr.put(JSONObject()
+              .put("libraryItemId", it.libraryItemId)
+              .put("episodeId", it.episodeId ?: JSONObject.NULL)
+              .put("ino", it.ino ?: JSONObject.NULL)
+              .put("serverConnectionConfigId", it.serverConnectionConfigId ?: JSONObject.NULL))
+    }
     prefs(ctx).edit().putString(KEY_QUEUE, arr.toString()).putInt(KEY_QUEUE_INDEX, index).apply()
   }
 
   /**
-   * The saved queue, only if its current entry is exactly the item being restored (same item and
-   * episode identity); otherwise the queue is stale and must not be reattached to this session.
+   * The saved queue, only if its current entry is the item being restored (see [matches]); otherwise the queue is
+   * stale and must not be reattached to this session.
    */
-  fun queueForRestoredItem(saved: SavedQueue, itemId: String?, episodeId: String?): SavedQueue? {
+  fun queueForRestoredItem(saved: SavedQueue, session: PlaybackSession): SavedQueue? {
     val queuedItem = saved.items.getOrNull(saved.index) ?: return null
-    return if (queuedItem.libraryItemId == itemId && queuedItem.episodeId == episodeId) saved else null
+    return if (queuedItem.matches(session)) saved else null
   }
 
   fun loadQueue(ctx: Context): SavedQueue {
@@ -50,7 +58,9 @@ object PlaybackRestoreStore {
       val arr = JSONArray(prefs(ctx).getString(KEY_QUEUE, null) ?: "[]")
       val items = (0 until arr.length()).map {
         val o = arr.getJSONObject(it)
-        PlaylistQueueItem(o.getString("libraryItemId"), if (o.isNull("episodeId")) null else o.getString("episodeId"))
+        // ino and serverConnectionConfigId are absent in queues saved by older versions
+        PlaylistQueueItem(o.getString("libraryItemId"), o.optStringOrNull("episodeId"), o.optStringOrNull("ino"),
+                o.optStringOrNull("serverConnectionConfigId"))
       }
       SavedQueue(items, prefs(ctx).getInt(KEY_QUEUE_INDEX, -1))
     } catch (e: Exception) {
@@ -58,4 +68,6 @@ object PlaybackRestoreStore {
       SavedQueue(emptyList(), -1)
     }
   }
+
+  private fun JSONObject.optStringOrNull(key: String): String? = if (isNull(key)) null else getString(key)
 }

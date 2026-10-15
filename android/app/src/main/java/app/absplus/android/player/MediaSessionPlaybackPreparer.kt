@@ -30,16 +30,7 @@ class MediaSessionPlaybackPreparer(var playerNotificationService:PlayerNotificat
   override fun onPrepare(playWhenReady: Boolean) {
     Log.d(tag, "ON PREPARE $playWhenReady")
     playerNotificationService.mediaManager.getFirstItem()?.let { li ->
-      playerNotificationService.mediaManager.play(li, null, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-          Log.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-          }
-        }
-      }
+      playerNotificationService.startWrapper(li, null, playWhenReady, playerNotificationService.mediaManager.getSavedPlaybackRate())
     }
   }
 
@@ -58,32 +49,14 @@ class MediaSessionPlaybackPreparer(var playerNotificationService:PlayerNotificat
     }
 
     libraryItemWrapper?.let { li ->
-      playerNotificationService.mediaManager.play(li, podcastEpisode, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-         Log.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-          }
-        }
-      }
+      playerNotificationService.startWrapper(li, podcastEpisode, playWhenReady, playerNotificationService.mediaManager.getSavedPlaybackRate())
     }
   }
 
   override fun onPrepareFromSearch(query: String, playWhenReady: Boolean, extras: Bundle?) {
     Log.d(tag, "ON PREPARE FROM SEARCH $query")
     playerNotificationService.mediaManager.getFromSearch(query)?.let { li ->
-      playerNotificationService.mediaManager.play(li, null, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-         Log.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-          }
-        }
-      }
+      playerNotificationService.startWrapper(li, null, playWhenReady, playerNotificationService.mediaManager.getSavedPlaybackRate())
     }
   }
 

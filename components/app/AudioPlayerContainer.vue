@@ -13,7 +13,7 @@
 import { AbsAudioPlayer, AbsLogger } from '@/plugins/capacitor'
 import { Dialog } from '@capacitor/dialog'
 import CellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
-import { nativeQueueItems, queueDisplayFromNative, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } from '@/utils/playbackQueue'
+import { nativeQueueItems, nativeQueueMatches, queueDisplayFromNative, queueItemKeyOf, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } from '@/utils/playbackQueue'
 import { refocusDisplayTime, refocusServerAction, readRefocusHandled, writeRefocusHandled } from '@/utils/livePosition'
 
 export default {
@@ -246,7 +246,8 @@ export default {
       if (this.$refs.audioPlayer) {
         playbackRate = this.$refs.audioPlayer.currentPlaybackRate || 1
       }
-      AbsAudioPlayer.prepareLibraryItem({ libraryItemId, episodeId, playWhenReady: false, playbackRate })
+      // A cast device cannot play a file on the phone: stream even when the book is downloaded
+      AbsAudioPlayer.prepareLibraryItem({ libraryItemId, episodeId, playWhenReady: false, playbackRate, forceStream: true })
         .then((data) => {
           if (data.error) {
             const errorMsg = data.error || 'Failed to play'
@@ -308,7 +309,7 @@ export default {
         // A newer play request must not be overwritten by an old bridge response.
         if (this.$store.state.playbackQueue !== queue) return
         if (!native.items.length) this.$store.commit('clearPlaybackQueue')
-        else if (native.items.length === queue.items.length && nativeQueueItems(queue.items).every((item, index) => item.libraryItemId === native.items[index].libraryItemId && item.episodeId === (native.items[index].episodeId || null))) {
+        else if (nativeQueueMatches(native.items, queue.items)) {
           this.$store.commit('setPlaybackQueue', { ...queue, currentIndex: native.currentIndex })
         }
       } catch (error) {
@@ -327,7 +328,7 @@ export default {
           this.$toast.error('Queue changed, try again')
           return
         }
-        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newItems), currentIndex: queue.currentIndex })
+        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newItems, this.nativeQueueServerConfigId()), currentIndex: queue.currentIndex })
         this.$store.commit('setPlaybackQueue', { ...queue, items: newItems })
       } catch (error) {
         console.error('[AudioPlayerContainer] Failed to mutate playback queue', error)
@@ -342,20 +343,13 @@ export default {
     removeFromQueue(item) {
       const queue = this.$store.state.playbackQueue
       if (!queue) return
-      const key = nativeQueueItems([item])[0]
-      const newItems = queue.items.filter((queueItem, index) => {
-        if (index <= queue.currentIndex) return true
-        const queueItemKey = nativeQueueItems([queueItem])[0]
-        return queueItemKey.libraryItemId !== key.libraryItemId || queueItemKey.episodeId !== key.episodeId
-      })
+      const key = queueItemKeyOf(item)
+      const newItems = queue.items.filter((queueItem, index) => index <= queue.currentIndex || queueItemKeyOf(queueItem) !== key)
       this.mutateQueue(newItems)
     },
     isAlreadyQueued(items, item) {
-      const key = nativeQueueItems([item])[0]
-      return items.some((queueItem) => {
-        const queueItemKey = nativeQueueItems([queueItem])[0]
-        return queueItemKey.libraryItemId === key.libraryItemId && queueItemKey.episodeId === key.episodeId
-      })
+      const key = queueItemKeyOf(item)
+      return items.some((queueItem) => queueItemKeyOf(queueItem) === key)
     },
     async addSingleItemToQueue(item) {
       if (!this.currentPlaybackSession) {
@@ -366,7 +360,7 @@ export default {
       const queue = this.$store.state.playbackQueue
       if (!queue) {
         const newQueue = { sourceType: 'adhoc', sourceId: null, items: [sessionToQueueItem(this.currentPlaybackSession), item], currentIndex: 0 }
-        if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items), currentIndex: 0 })
+        if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items, this.nativeQueueServerConfigId()), currentIndex: 0 })
         this.$store.commit('setPlaybackQueue', newQueue)
         return
       }
@@ -391,7 +385,7 @@ export default {
         }
         if (!queue) {
           const newQueue = { sourceType: 'adhoc', sourceId: null, items: [...existingItems, ...appendItems], currentIndex: 0 }
-          if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items), currentIndex: 0 })
+          if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items, this.nativeQueueServerConfigId()), currentIndex: 0 })
           this.$store.commit('setPlaybackQueue', newQueue)
           return
         }
@@ -426,8 +420,9 @@ export default {
       const startTime = payload.startTime
       const startWhenReady = !payload.paused
 
-      const isLocal = libraryItemId.startsWith('local')
-      if (!isLocal) {
+      // Native plays a downloaded copy of a server id too; only a stream needs the cellular permission
+      const source = await this.resolvePlaybackSource(libraryItemId, episodeId, payload.ino)
+      if (source === 'stream') {
         const hasPermission = await this.checkCellularPermission('streaming')
         if (!hasPermission) {
           this.$store.commit('setPlayerDoneStartingPlayback')
@@ -440,7 +435,7 @@ export default {
       const serverLibraryItemId = payload.serverLibraryItemId || null
       const serverEpisodeId = payload.serverEpisodeId || null
 
-      if (isLocal && this.$store.state.isCasting) {
+      if (source === 'local' && this.$store.state.isCasting) {
         const { value } = await Dialog.confirm({
           title: 'Warning',
           message: `Cannot cast downloaded media items. Confirm to close cast and play on your device.`
@@ -452,7 +447,7 @@ export default {
       }
 
       if (queue) {
-        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(queue.items), currentIndex: queue.currentIndex })
+        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(queue.items, this.nativeQueueServerConfigId()), currentIndex: queue.currentIndex })
         this.$store.commit('setPlaybackQueue', queue)
       }
 
@@ -479,6 +474,7 @@ export default {
 
       console.log('Called playLibraryItem', libraryItemId)
       const preparePayload = { libraryItemId, episodeId, playWhenReady: startWhenReady, playbackRate }
+      if (payload.ino) preparePayload.ino = payload.ino
       if (startTime !== undefined && startTime !== null) preparePayload.startTime = startTime
       return AbsAudioPlayer.prepareLibraryItem(preparePayload)
         .then((data) => {
@@ -501,6 +497,20 @@ export default {
         .finally(() => {
           this.$store.commit('setPlayerDoneStartingPlayback')
         })
+    },
+    // The server a queue item streams from when it names none (no downloaded copy)
+    nativeQueueServerConfigId() {
+      return this.$store.state.activeServerConfigId || this.$store.getters['user/getServerConnectionConfigId'] || null
+    },
+    /** 'local', 'stream' or 'broken' as native would play it; without an answer the id decides, as before. */
+    async resolvePlaybackSource(libraryItemId, episodeId, ino) {
+      try {
+        const { source } = await AbsAudioPlayer.resolvePlaybackSource({ libraryItemId, episodeId: episodeId || null, ino: ino || null })
+        if (source) return source
+      } catch (error) {
+        console.error('[AudioPlayerContainer] Failed to resolve the playback source', error)
+      }
+      return libraryItemId.startsWith('local') ? 'local' : 'stream'
     },
     pauseItem() {
       if (this.$refs.audioPlayer && this.$refs.audioPlayer.isPlaying) {

@@ -1,6 +1,9 @@
 package app.absplus.android.player
 
+import app.absplus.android.data.LibraryItem
+import app.absplus.android.data.LibraryItemWrapper
 import app.absplus.android.data.LocalLibraryItem
+import app.absplus.android.data.PlaybackSession
 import app.absplus.android.data.Podcast
 import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.db.userdata.MediaProgressEntity
@@ -38,6 +41,13 @@ class PlaybackSourceResolver(
     return localOrBroken(withEpisode)
   }
 
+  /** What a saved session plays from after a restart: a stream downloaded since plays the copy. */
+  fun restoreSource(session: PlaybackSession): PlaybackSource {
+    if (session.isLocal) return resolveLocalId(session.localLibraryItemId, session.localEpisodeId)
+    val libraryItemId = session.libraryItemId ?: return PlaybackSource.NotFound("Streamed session has no item")
+    return resolve(session.serverConnectionConfigId, libraryItemId, session.episodeId, session.libraryItem?.ino)
+  }
+
   private fun resolveLocalId(localId: String, episodeId: String?): PlaybackSource {
     val item = localItems().find { it.id == localId } ?: return PlaybackSource.NotFound("Local library item not found")
     if (episodeId.isNullOrEmpty()) return localOrBroken(listOf(item to null))
@@ -53,6 +63,46 @@ class PlaybackSourceResolver(
 
   private fun episodeOf(item: LocalLibraryItem, match: (PodcastEpisode) -> Boolean): PodcastEpisode? =
           (item.media as? Podcast)?.episodes?.find(match)
+}
+
+/**
+ * A request to start an item, from any start point: the app's Play, the queue, Android Auto, a resume after the server
+ * came back, a switch to a finished download. [serverConfigId] null means the active server.
+ */
+data class StartRequest(
+        val libraryItemId: String,
+        val episodeId: String?,
+        val ino: String? = null,
+        val serverConfigId: String? = null,
+        /** Explicit position; null takes the newer of `media_progress` and the source's own (see [chooseStartTime]). */
+        val startTime: Double? = null,
+        val playWhenReady: Boolean,
+        val playbackRate: Float? = null,
+        /** Stream even when downloaded: a cast device cannot play a file on the phone. */
+        val forceStream: Boolean = false
+) {
+  companion object {
+    fun forQueueItem(item: PlayerNotificationService.PlaylistQueueItem, playWhenReady: Boolean, playbackRate: Float? = null) =
+            StartRequest(item.libraryItemId, item.episodeId, item.ino, item.serverConnectionConfigId,
+                    playWhenReady = playWhenReady, playbackRate = playbackRate)
+
+    /** An Android Auto browse-tree item: a server item (with its server episode) or a device copy. */
+    fun forWrapper(wrapper: LibraryItemWrapper, episode: PodcastEpisode?, playWhenReady: Boolean, playbackRate: Float?) =
+            StartRequest(wrapper.id, episode?.id, (wrapper as? LibraryItem)?.ino, playWhenReady = playWhenReady,
+                    playbackRate = playbackRate)
+  }
+}
+
+/** What [request] plays from. A forced stream of a `local_*` id streams the copy's server item when it has one. */
+fun planStart(request: StartRequest, activeServerConfigId: String?, resolver: PlaybackSourceResolver): PlaybackSource {
+  val isLocalId = request.libraryItemId.startsWith("local")
+  if (request.forceStream && !isLocalId) return PlaybackSource.Stream(request.libraryItemId, request.episodeId)
+  val source = resolver.resolve(request.serverConfigId ?: activeServerConfigId, request.libraryItemId, request.episodeId, request.ino)
+  if (!request.forceStream) return source
+  return when (source) {
+    is PlaybackSource.Local -> source.item.libraryItemId?.let { PlaybackSource.Stream(it, source.episode?.serverEpisodeId) } ?: source
+    else -> source
+  }
 }
 
 /** A position with the time it was written, from the Paper copy or the server. */

@@ -1,6 +1,7 @@
 package app.absplus.android.player
 
 import app.absplus.android.data.DeviceInfo
+import app.absplus.android.data.LibraryItem
 import app.absplus.android.data.LocalLibraryItem
 import app.absplus.android.data.MediaType
 import app.absplus.android.data.MediaTypeMetadata
@@ -85,6 +86,40 @@ class PlaybackSourceResolverTest {
     assertEquals(PlaybackSource.Stream("li1", null), resolver(copy).resolve(null, "li1", null))
   }
 
+  @Test fun restoreOfStreamedSessionUsesNewLocalCopy() {
+    val copy = book("local_1", "li1")
+    val streamed = session("li1", null, playMethod = PLAYMETHOD_DIRECTPLAY, config = "a")
+    assertSame(copy, (resolver(copy).restoreSource(streamed) as PlaybackSource.Local).item)
+    assertEquals(PlaybackSource.Stream("li1", null), resolver().restoreSource(streamed))
+    // A downloaded session whose copy is gone does not fall back to streaming
+    val local = session("li1", copy, playMethod = PLAYMETHOD_LOCAL, config = "a")
+    assertTrue(resolver().restoreSource(local) is PlaybackSource.NotFound)
+    assertSame(copy, (resolver(copy).restoreSource(local) as PlaybackSource.Local).item)
+  }
+
+  // Every start point (card, item page, queue, Android Auto, widget restore) builds a StartRequest and runs planStart
+  @Test fun everyStartRequestOfADownloadedBookPlansTheCopy() {
+    val copy = book("local_1", "li1", ino = "42")
+    val r = resolver(copy)
+    assertSame(copy, (planStart(StartRequest("li1", null, playWhenReady = true), "a", r) as PlaybackSource.Local).item)
+    assertSame(copy, (planStart(StartRequest.forQueueItem(PlayerNotificationService.PlaylistQueueItem("liX", null, "42", "a"), true), "a", r) as PlaybackSource.Local).item)
+    assertSame(copy, (planStart(StartRequest("local_1", null, playWhenReady = true), "a", r) as PlaybackSource.Local).item)
+    // Casting cannot play a file: a server id streams, as for playServerLibraryItemAndCast
+    assertEquals(PlaybackSource.Stream("li1", null), planStart(StartRequest("li1", null, playWhenReady = true, forceStream = true), "a", r))
+    assertEquals(PlaybackSource.Stream("li1", null), planStart(StartRequest("local_1", null, playWhenReady = true, forceStream = true), "a", r))
+  }
+
+  // Android Auto hands over a browse-tree item: a server item with a copy plays the copy
+  @Test fun androidAutoServerItemPlansTheCopy() {
+    val copy = book("local_1", "li1")
+    val server = LibraryItem("li1", "42", "lib", "f", "", "", 0L, 0L, 0L, 0L, 0L, null, null, false, false, "book",
+      MediaType(MediaTypeMetadata("Book", false), null), null, null, null, null, null)
+    val request = StartRequest.forWrapper(server, null, playWhenReady = true, playbackRate = 1f)
+    assertEquals("42", request.ino)
+    assertSame(copy, (planStart(request, "a", resolver(copy)) as PlaybackSource.Local).item)
+    assertEquals("local_1", StartRequest.forWrapper(copy, null, playWhenReady = true, playbackRate = 1f).libraryItemId)
+  }
+
   private fun row(currentTime: Double, lastUpdate: Long, isFinished: Boolean = false) = MediaProgressEntity(
     "a", "li1", "", null, 1000.0, currentTime / 1000.0, currentTime, isFinished, false, null, null, lastUpdate, 0L, null, "device", false)
 
@@ -110,4 +145,9 @@ class PlaybackSourceResolverTest {
     assertEquals(12.0, chooseStartTime(row(12.0, 1L), null))
     assertNull(chooseStartTime(null, null))
   }
+
+  private fun session(serverId: String, copy: LocalLibraryItem?, playMethod: Int, config: String?) = PlaybackSession(
+    "s", null, serverId, null, "book", MediaTypeMetadata("Book", false), DeviceInfo("d", "m", "x", 35, "0"),
+    emptyList(), "Book", "Author", null, 360.0, playMethod, 0L, 0L, 0L, mutableListOf(), 12.5, null, copy, null, config, null, null
+  )
 }

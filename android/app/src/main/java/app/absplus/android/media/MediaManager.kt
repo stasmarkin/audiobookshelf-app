@@ -985,21 +985,6 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
     }
   }
 
-  fun play(libraryItemWrapper:LibraryItemWrapper, episode:PodcastEpisode?, playItemRequestPayload:PlayItemRequestPayload, cb: (PlaybackSession?) -> Unit) {
-    if (libraryItemWrapper is LocalLibraryItem) {
-      cb(libraryItemWrapper.getPlaybackSession(episode, playItemRequestPayload.deviceInfo))
-    } else {
-      val libraryItem = libraryItemWrapper as LibraryItem
-      apiHandler.playLibraryItem(libraryItem.id,episode?.id ?: "", playItemRequestPayload) {
-        if (it == null) {
-          cb(null)
-        } else {
-          cb(it)
-        }
-      }
-    }
-  }
-
   private fun levenshtein(lhs : CharSequence, rhs : CharSequence) : Int {
     val lhsLength = lhs.length + 1
     val rhsLength = rhs.length + 1

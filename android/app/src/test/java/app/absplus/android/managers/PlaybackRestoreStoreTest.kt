@@ -2,6 +2,13 @@ package app.absplus.android.managers
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import app.absplus.android.data.DeviceInfo
+import app.absplus.android.data.LocalLibraryItem
+import app.absplus.android.data.MediaType
+import app.absplus.android.data.MediaTypeMetadata
+import app.absplus.android.data.PlaybackSession
+import app.absplus.android.player.PLAYMETHOD_DIRECTPLAY
+import app.absplus.android.player.PLAYMETHOD_LOCAL
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,6 +31,18 @@ import org.robolectric.annotation.Config
 class PlaybackRestoreStoreTest {
   private lateinit var ctx: Context
   private val twelve = (0 until 12).map { PlaylistQueueItem("local_device_b$it", null) }
+
+  private fun copy(id: String, serverId: String? = null, config: String? = null, ino: String? = null) = LocalLibraryItem(
+    id, "internal-book", "", "", "", false, "book", MediaType(MediaTypeMetadata("Book", false), null),
+    mutableListOf(), null, null, true, config, null, null, serverId, ino
+  )
+
+  /** The session restoreLastPlaybackSession rebuilds: a downloaded copy, or a stream when [copy] is null. */
+  private fun session(serverId: String?, episodeId: String? = null, copy: LocalLibraryItem? = null, localEpisodeId: String? = null) = PlaybackSession(
+    "s", null, serverId ?: copy?.libraryItemId, episodeId, "book", MediaTypeMetadata("Book", false), DeviceInfo("d", "m", "x", 35, "0"),
+    emptyList(), "Book", "Author", null, 360.0, if (copy != null) PLAYMETHOD_LOCAL else PLAYMETHOD_DIRECTPLAY, 0L, 0L, 0L,
+    mutableListOf(), 0.0, null, copy, localEpisodeId, copy?.serverConnectionConfigId, null, null
+  )
 
   private fun rawPrefs() = ctx.getSharedPreferences("absplus_playback_restore", Context.MODE_PRIVATE)
 
@@ -82,14 +101,39 @@ class PlaybackRestoreStoreTest {
   @Test
   fun queueIsReattachedOnlyWhenItsCurrentEntryIsTheRestoredItem() {
     val saved = PlaybackRestoreStore.SavedQueue(twelve, 7)
-    assertSame(saved, PlaybackRestoreStore.queueForRestoredItem(saved, "local_device_b7", null))
-    assertNull(PlaybackRestoreStore.queueForRestoredItem(saved, "local_device_b6", null))
-    assertNull(PlaybackRestoreStore.queueForRestoredItem(saved, "local_device_b7", "episode"))
-    assertNull(PlaybackRestoreStore.queueForRestoredItem(PlaybackRestoreStore.SavedQueue(twelve, -1), "local_device_b0", null))
-    assertNull(PlaybackRestoreStore.queueForRestoredItem(PlaybackRestoreStore.SavedQueue(twelve, 12), "local_device_b11", null))
-    assertNull(PlaybackRestoreStore.queueForRestoredItem(PlaybackRestoreStore.SavedQueue(emptyList(), -1), "local_device_b0", null))
+    assertSame(saved, PlaybackRestoreStore.queueForRestoredItem(saved, session(null, copy = copy("local_device_b7"))))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(saved, session(null, copy = copy("local_device_b6"))))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(saved, session(null, copy = copy("local_device_b7"), localEpisodeId = "episode")))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(PlaybackRestoreStore.SavedQueue(twelve, -1), session(null, copy = copy("local_device_b0"))))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(PlaybackRestoreStore.SavedQueue(twelve, 12), session(null, copy = copy("local_device_b11"))))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(PlaybackRestoreStore.SavedQueue(emptyList(), -1), session(null, copy = copy("local_device_b0"))))
     val episodes = PlaybackRestoreStore.SavedQueue(listOf(PlaylistQueueItem("local_p", "local_e1")), 0)
-    assertSame(episodes, PlaybackRestoreStore.queueForRestoredItem(episodes, "local_p", "local_e1"))
+    assertSame(episodes, PlaybackRestoreStore.queueForRestoredItem(episodes, session(null, copy = copy("local_p"), localEpisodeId = "local_e1")))
+  }
+
+  @Test
+  fun serverIdQueueIsReattachedToTheRestoredCopyOrStream() {
+    val serverIds = PlaybackRestoreStore.SavedQueue(listOf(PlaylistQueueItem("li0", null), PlaylistQueueItem("li1", null)), 1)
+    assertSame(serverIds, PlaybackRestoreStore.queueForRestoredItem(serverIds, session(null, copy = copy("local_1", "li1", "a"))))
+    assertSame(serverIds, PlaybackRestoreStore.queueForRestoredItem(serverIds, session("li1")))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(serverIds, session("li0")))
+  }
+
+  @Test
+  fun queueWithInoMatchesRestoredLocalCopy() {
+    val queue = listOf(PlaylistQueueItem("li0", null), PlaylistQueueItem("liA", null, "42", "a"))
+    PlaybackRestoreStore.saveQueue(ctx, queue, 1)
+    val loaded = PlaybackRestoreStore.loadQueue(ctx)
+    assertEquals(queue, loaded.items)
+    // The book was downloaded through another library: the copy has another server id, the same ino
+    assertSame(loaded, PlaybackRestoreStore.queueForRestoredItem(loaded, session(null, copy = copy("local_b", "liB", "a", ino = "42"))))
+    assertNull(PlaybackRestoreStore.queueForRestoredItem(loaded, session(null, copy = copy("local_b", "liB", "other", ino = "42"))))
+  }
+
+  @Test
+  fun queueSavedByAnOlderVersionStillLoads() {
+    rawPrefs().edit().putString("queue", """[{"libraryItemId":"local_x","episodeId":null},{"libraryItemId":"p","episodeId":"e2"}]""").putInt("queueIndex", 0).commit()
+    assertEquals(PlaybackRestoreStore.SavedQueue(listOf(PlaylistQueueItem("local_x", null), PlaylistQueueItem("p", "e2")), 0), PlaybackRestoreStore.loadQueue(ctx))
   }
 
   @Test
@@ -100,6 +144,6 @@ class PlaybackRestoreStoreTest {
     val recreated = ApplicationProvider.getApplicationContext<Context>()
     assertTrue(PlaybackRestoreStore.isResumable(recreated))
     val saved = PlaybackRestoreStore.loadQueue(recreated)
-    assertEquals(12, PlaybackRestoreStore.queueForRestoredItem(saved, "local_device_b4", null)?.items?.size)
+    assertEquals(12, PlaybackRestoreStore.queueForRestoredItem(saved, session(null, copy = copy("local_device_b4")))?.items?.size)
   }
 }

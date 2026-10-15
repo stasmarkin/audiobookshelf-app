@@ -112,6 +112,9 @@ class UserDataStore(
 
   suspend fun progressRows(serverConfigId: String): List<MediaProgressEntity> = progress.getAll(serverConfigId)
 
+  suspend fun progressRow(serverConfigId: String, libraryItemId: String, episodeId: String?): MediaProgressEntity? =
+          progress.get(serverConfigId, libraryItemId, episodeId ?: "")
+
   /** Rows of just these items; ids beyond SQLite's parameter limit are read in chunks. */
   suspend fun progressRowsFor(serverConfigId: String, libraryItemIds: Collection<String>): List<MediaProgressEntity> =
           libraryItemIds.distinct().chunked(500).flatMap { progress.getForItems(serverConfigId, it) }
