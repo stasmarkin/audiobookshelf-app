@@ -254,6 +254,17 @@ class UserDataStore(
     }
   }
 
+  /**
+   * A downloaded copy of the item just got its Paper progress from [snapshot], the server's progress when the download
+   * was requested. The snapshot merges like any server value; when userdata.db keeps its own newer row, the copy gets
+   * that instead.
+   */
+  suspend fun onCopyDownloaded(serverConfigId: String, libraryItemId: String, episodeId: String?, snapshot: ServerProgress?) {
+    if (serverConfigId.isEmpty() || libraryItemId.isEmpty()) return
+    if (snapshot != null && applyServerProgressCandidate(serverConfigId, snapshot)) return
+    progress.get(serverConfigId, libraryItemId, episodeId.orEmpty())?.let { mirror.mirror(listOf(it)) }
+  }
+
   /** One server record (socket event, the server value on refocus); whether it was taken. */
   suspend fun applyServerProgressCandidate(serverConfigId: String, server: ServerProgress): Boolean =
           applyServerProgress(serverConfigId, listOf(server)).isNotEmpty()

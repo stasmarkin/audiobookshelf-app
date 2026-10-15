@@ -8,6 +8,8 @@ import com.anggrayudi.storage.file.*
 import app.absplus.android.data.*
 import app.absplus.android.models.DownloadItem
 import app.absplus.android.models.DownloadItemPart
+import app.absplus.android.sync.SyncEngine
+import app.absplus.android.sync.serverProgressOf
 import java.io.File
 
 /** Creates local-library records from a completed download manifest. */
@@ -212,6 +214,8 @@ class FolderScanner(private val ctx: Context) {
       result.localMediaProgress =
               repointLocalProgress(savedProgress, item.libraryItemId, item.serverConnectionConfigId, item.serverAddress, item.serverUserId)
       DeviceManager.dbManager.saveLocalMediaProgress(savedProgress)
+      // Sent on the next reconcile with the corrected server item if newer than its progress there
+      SyncEngine.importPaperProgress(listOf(savedProgress))
     } else item.userMediaProgress?.let { progress ->
       val progressId =
               if (item.episodeId.isNullOrEmpty()) localItem.id
@@ -239,6 +243,12 @@ class FolderScanner(private val ctx: Context) {
       DeviceManager.dbManager.saveLocalMediaProgress(result.localMediaProgress!!)
     }
     DeviceManager.dbManager.saveLocalLibraryItem(localItem)
+    if (savedProgress == null) {
+      // The snapshot above is from when the download was requested; userdata.db may know newer progress. After the
+      // copy is saved: the write finds the copy to mirror into.
+      val snapshot = item.userMediaProgress?.let(::serverProgressOf)
+      SyncEngine.launchWrite { it.onCopyDownloaded(item.serverConnectionConfigId, item.libraryItemId, item.episodeId, snapshot) }
+    }
     callback(result)
   }
 

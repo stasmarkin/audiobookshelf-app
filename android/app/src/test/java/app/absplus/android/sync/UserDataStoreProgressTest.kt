@@ -425,4 +425,38 @@ class UserDataStoreProgressTest {
     assertNull(row())
     assertTrue(outbox().isEmpty())
   }
+
+  @Test
+  fun downloadedCopyGetsTheNewerRoomProgress() = runBlocking {
+    // The snapshot taken when the download was requested is older than what the device recorded since
+    downloadedCopy(currentTime = 100.0)
+    db.mediaProgress().upsert(progressRow(650.0, lastUpdate = 500L, pending = false))
+
+    store.onCopyDownloaded("srv", "li1", null, server(100.0, lastUpdate = 5L))
+
+    assertEquals(650.0, paper()!!.currentTime, 0.0)
+    assertEquals(500L, paper()!!.lastUpdate)
+    assertEquals("the row is not rolled back", 650.0, row()!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun newerDownloadSnapshotMergesIntoRoom() = runBlocking {
+    downloadedCopy(currentTime = 800.0)
+    db.mediaProgress().upsert(progressRow(100.0, lastUpdate = 5L, pending = false))
+
+    store.onCopyDownloaded("srv", "li1", null, server(800.0, lastUpdate = 900L))
+
+    assertEquals(800.0, row()!!.currentTime, 0.0)
+    assertEquals(800.0, paper()!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun downloadWithoutSnapshotOrRowLeavesThePaperCopy() = runBlocking {
+    downloadedCopy(currentTime = 40.0)
+
+    store.onCopyDownloaded("srv", "li1", null, null)
+
+    assertNull(row())
+    assertEquals(40.0, paper()!!.currentTime, 0.0)
+  }
 }

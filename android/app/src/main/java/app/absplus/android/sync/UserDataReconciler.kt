@@ -1,6 +1,7 @@
 package app.absplus.android.sync
 
 import androidx.room.withTransaction
+import app.absplus.android.data.MediaProgress
 import app.absplus.android.data.ServerConnectionConfig
 import app.absplus.android.db.userdata.ServerSyncStateEntity
 import app.absplus.android.db.userdata.UserDataDatabase
@@ -170,6 +171,14 @@ fun parseServerProgress(node: JsonNode?): ServerProgress? {
           ebookLocation = text("ebookLocation"), ebookProgress = number("ebookProgress"), lastUpdate = lastUpdate,
           startedAt = long("startedAt") ?: 0L, finishedAt = long("finishedAt"))
 }
+
+/** A server `MediaProgress` already parsed into the Paper model, such as a download's snapshot. */
+fun serverProgressOf(progress: MediaProgress) = ServerProgress(
+        id = progress.id, libraryItemId = progress.libraryItemId, episodeId = progress.episodeId?.takeIf { it.isNotEmpty() },
+        duration = progress.duration, progress = progress.progress, currentTime = progress.currentTime,
+        isFinished = progress.isFinished, hideFromContinueListening = false, ebookLocation = progress.ebookLocation,
+        ebookProgress = progress.ebookProgress, lastUpdate = progress.lastUpdate, startedAt = progress.startedAt,
+        finishedAt = progress.finishedAt)
 
 /** Whether a server [version] such as "2.36.0" (or "v2.36.1-beta") is at least [min]; an unknown version is not. */
 fun versionAtLeast(version: String?, min: String): Boolean {
