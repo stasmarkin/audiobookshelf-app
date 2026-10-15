@@ -19,7 +19,8 @@ Merged into `plus`, not yet in a published release.
 - **Download reliability:** fixed a crash when the download list subscribed while downloads were starting or finishing,
   and made Retry and new download requests safe while other downloads change the queue.
 - **Server unreachable is no longer "connected":** when the server goes down while Wi-Fi stays up, the app notices
-  within seconds (the live connection drops, the app checks the server's `/ping`) and the indicator in the app bar
+  within seconds (the live connection drops, the app checks the server's `/ping`; up to about a minute when the whole
+  server machine is switched off and the connection just goes silent) and the indicator in the app bar
   shows "server unreachable" instead of a connected cloud; tapping it offers Retry. While it is down the app keeps
   checking (5 s, 10 s, 30 s, 1 min, then every 5 min, and at once when the network changes or the app returns to the
   foreground), and when the server answers again the app signs in, reloads the library and syncs listening sessions
