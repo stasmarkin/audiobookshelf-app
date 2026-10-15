@@ -45,12 +45,13 @@ class MediaProgressSyncer(
   var listeningTimerRunning: Boolean = false
 
   // The last tick: each tick counts the listening since it
-  private var lastSyncTime: Long = 0
+  internal var lastSyncTime: Long = 0
+    private set
   // When the stream last tried /sync: on a metered connection it tries once a minute
   private var lastServerSyncAttempt: Long = 0
   @Volatile private var failedSyncs: Int = 0
   // The current session's streamed time not taken by /sync yet; a new session starts a new one
-  private var ledger = ListeningLedger()
+  @Volatile private var ledger = ListeningLedger()
   // Changes with every start: an answer to an earlier stop or pause must not reset what started since
   private var generation = 0L
 
@@ -395,6 +396,8 @@ class MediaProgressSyncer(
     lastServerSyncAttempt = clock()
     noteServerSync(sessionId, currentTime, false)
     send(sessionId, MediaProgressSyncData(sent, session.duration, currentTime)) { syncSuccess, errorMsg ->
+      // The failure count and its alerts belong to the session playing now, not to a late answer for the previous one
+      val stillCurrent = ledger === this.ledger
       if (syncSuccess) {
         synchronized(ledger) {
           ledger.ackServerSync(sent)
@@ -402,16 +405,20 @@ class MediaProgressSyncer(
         }
         noteServerSync(sessionId, currentTime, true)
         AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced progress (title: \"$title\") (currentTime: $currentTime) (session id: $sessionId)")
-        failedSyncs = 0
-        playerNotificationService.alertSyncSuccess()
+        if (stillCurrent) {
+          failedSyncs = 0
+          playerNotificationService.alertSyncSuccess()
+        }
         // A session an earlier version saved under the server's id
         DeviceManager.dbManager.removePlaybackSession(sessionId)
       } else {
         settleFailed(session, ledger, sent)
-        failedSyncs++
-        if (failedSyncs == 2) {
-          playerNotificationService.alertSyncFailing() // Show alert in client
-          failedSyncs = 0
+        if (stillCurrent) {
+          failedSyncs++
+          if (failedSyncs == 2) {
+            playerNotificationService.alertSyncFailing() // Show alert in client
+            failedSyncs = 0
+          }
         }
         AbsLogger.error("MediaProgressSyncer", "sync: Progress sync failed, progress kept in an offline session (count: $failedSyncs) (title: \"$title\") (currentTime: $currentTime) (session id: $sessionId)")
       }

@@ -402,4 +402,37 @@ class MediaProgressSyncerWriteTest {
     SyncEngine.write { } // the write, with any mirror of it, is over
     assertEquals("the player writes the copy's progress itself", 100.0, DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!.currentTime, 0.0)
   }
+
+  /** The opener's /sync is answered after the queue moved on to the sequel. */
+  private fun answerAfterTheQueueMovedOn(success: Boolean) {
+    val opener = stream("session-opener")
+    val sequel = stream("session-sequel")
+    // Saved under their server ids by an earlier version
+    DeviceManager.dbManager.savePlaybackSession(opener.clone())
+    DeviceManager.dbManager.savePlaybackSession(sequel.clone())
+    var answer: ((Boolean, String?) -> Unit)? = null
+    syncer.syncStream(opener.clone(), ListeningLedger(), 15, hasNetwork = true, shouldSyncServer = true, send = { _, _, done -> answer = done }) {}
+    syncer.currentPlaybackSession = sequel
+    answer!!(success, null)
+  }
+
+  @Test
+  fun aSyncAnswerRemovesTheSessionThatWasSent() {
+    answerAfterTheQueueMovedOn(success = true)
+    assertEquals("the sequel's session stays for its own sync", listOf("session-sequel"), paperSessions().map { it.id })
+  }
+
+  @Test
+  fun aLateSyncAnswerLeavesTheCurrentSessionsSyncClock() {
+    val before = syncer.lastSyncTime
+    answerAfterTheQueueMovedOn(success = true)
+    // Each tick moves the clock by what it counted; no answer moves it
+    assertEquals(before, syncer.lastSyncTime)
+  }
+
+  @Test
+  fun aFailedSyncAnswerKeepsBothSessions() {
+    answerAfterTheQueueMovedOn(success = false)
+    assertTrue(paperSessions().map { it.id }.containsAll(listOf("session-opener", "session-sequel")))
+  }
 }
