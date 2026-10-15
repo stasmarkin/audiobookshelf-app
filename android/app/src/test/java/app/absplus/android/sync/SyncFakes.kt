@@ -7,6 +7,7 @@ import app.absplus.android.data.ServerConnectionConfig
 import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.db.userdata.UserDataDatabase
 import app.absplus.android.server.RefreshResult
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
@@ -17,7 +18,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import java.io.IOException
-import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A request the fake server received. */
@@ -30,7 +31,8 @@ data class FakeRequest(val method: String, val path: String, val body: String?) 
  * [IOException] for a server that does not answer. Synthetic addresses only.
  */
 class FakeApi(var handler: (FakeRequest) -> Pair<Int, String> = { 200 to "{}" }) {
-  val requests: MutableList<FakeRequest> = Collections.synchronizedList(mutableListOf())
+  // Read by the test thread (paths(), count, any) while OkHttp threads add to it: iteration must not throw
+  val requests: MutableList<FakeRequest> = CopyOnWriteArrayList()
   private val active = AtomicInteger()
   /** The most requests the server ever handled at the same time. */
   val maxConcurrent = AtomicInteger()
@@ -78,11 +80,14 @@ fun progressRow(currentTime: Double, lastUpdate: Long, pending: Boolean = true, 
         ebookLocation = null, ebookProgress = null, lastUpdate = lastUpdate, startedAt = 1L, finishedAt = null,
         source = "device", pending = pending)
 
-/** Polls [condition] for up to 5 s of real time: Room and OkHttp run on their own threads. */
+/**
+ * Polls [condition] for up to 5 s of real time: Room and OkHttp run on their own threads. Only running out of time is
+ * a timeout; an exception from the condition itself fails with that exception.
+ */
 suspend fun eventually(message: String = "condition", condition: suspend () -> Boolean) {
   try {
     withTimeout(5_000) { while (!condition()) delay(10) }
-  } catch (e: Exception) {
+  } catch (e: TimeoutCancellationException) {
     throw AssertionError("Timed out waiting for $message", e)
   }
 }
