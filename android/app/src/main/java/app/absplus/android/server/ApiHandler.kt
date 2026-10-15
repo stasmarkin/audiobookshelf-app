@@ -166,6 +166,7 @@ class ApiHandler(var ctx:Context) {
           if (!it.isSuccessful) {
             val jsobj = JSObject()
             jsobj.put("error", "Unexpected code $response")
+            jsobj.put("statusCode", it.code)
             cb(jsobj)
             return
           }
@@ -327,6 +328,7 @@ class ApiHandler(var ctx:Context) {
               AbsLogger.error(tag, "retryOriginalRequest: Retry request failed with status ${it.code} for server ${DeviceManager.serverConnectionConfigString}")
               val errorObj = JSObject()
               errorObj.put("error", "Retry request failed with status ${it.code}")
+              errorObj.put("statusCode", it.code)
               callback(errorObj)
               return
             }
@@ -641,18 +643,23 @@ class ApiHandler(var ctx:Context) {
   }
 
   fun playLibraryItem(libraryItemId:String, episodeId:String?, playItemRequestPayload:PlayItemRequestPayload, cb: (PlaybackSession?) -> Unit) {
+    playLibraryItemWithStatus(libraryItemId, episodeId, playItemRequestPayload) { session, _ -> cb(session) }
+  }
+
+  /** [playLibraryItem] that also tells the HTTP status of a refused request (null when there was no response). */
+  fun playLibraryItemWithStatus(libraryItemId:String, episodeId:String?, playItemRequestPayload:PlayItemRequestPayload, cb: (PlaybackSession?, Int?) -> Unit) {
     val payload = JSObject(jacksonMapper.writeValueAsString(playItemRequestPayload))
 
     val endpoint = if (episodeId.isNullOrEmpty()) "/api/items/$libraryItemId/play" else "/api/items/$libraryItemId/play/$episodeId"
     postRequest(endpoint, payload, null) {
       if (it.has("error")) {
         Log.e(tag, it.getString("error") ?: "Play Library Item Failed")
-        cb(null)
+        cb(null, if (it.has("statusCode")) it.getInteger("statusCode") else null)
       } else {
         it.put("serverConnectionConfigId", DeviceManager.serverConnectionConfig?.id)
         it.put("serverAddress", DeviceManager.serverAddress)
         val playbackSession = jacksonMapper.readValue<PlaybackSession>(it.toString())
-        cb(playbackSession)
+        cb(playbackSession, null)
       }
     }
   }

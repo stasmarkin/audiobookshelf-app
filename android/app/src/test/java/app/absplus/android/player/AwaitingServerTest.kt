@@ -208,6 +208,10 @@ class AwaitingServerTest {
     val always = AwaitingServer()
     always.onQueueBlocked(PlaylistQueueItem("li2", null), "a")
     assertEquals(true, (always.onServerState(ServerState.ONLINE, "a", metered(StreamingUsingCellularSetting.ALWAYS)) as ResumeStream).playWhenReady)
+    // The user's own Play is the confirmation Ask wants
+    val user = AwaitingServer()
+    user.onStreamLost("li1", null, 50.0, false, "a")
+    assertEquals(true, (user.onUserPlay(ServerState.ONLINE, "a", metered(StreamingUsingCellularSetting.ASK)) as ResumeStream).playWhenReady)
   }
 
   @Test fun longWaitResumesPaused() {
@@ -239,5 +243,44 @@ class AwaitingServerTest {
     val blocked = AwaitingServer()
     blocked.onQueueBlocked(PlaylistQueueItem("li2", null), "a")
     assertFalse(blocked.isStreamLost)
+  }
+
+  @Test fun serverGoneStatusOnResumeWaitsAgain() {
+    val waiting = AwaitingServer()
+    waiting.onStreamLost("li1", null, 50.0, true, "a")
+    repeat(2) {
+      val resume = waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream
+      // A proxy answers 502 for the play request: the server is still away
+      assertNull(waiting.onResumeFailed(resume, ServerState.ONLINE, httpStatus = 502))
+      assertTrue(waiting.isAwaiting)
+    }
+    val third = waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream
+    assertEquals(AwaitingAction.GiveUp, waiting.onResumeFailed(third, ServerState.ONLINE, httpStatus = 530))
+    for (status in listOf(404, 500, 501, null)) {
+      val refused = AwaitingServer()
+      refused.onStreamLost("li1", null, 50.0, true, "a")
+      assertEquals("$status", AwaitingAction.GiveUp, refused.onResumeFailed(refused.onServerState(ServerState.ONLINE, "a") as ResumeStream, ServerState.ONLINE, status))
+    }
+  }
+
+  @Test fun resumeKeepsTheServersTrackCount() {
+    val waiting = AwaitingServer()
+    waiting.onStreamLost("li1", null, 50.0, true, "a", expectedTracks = 3)
+    val resume = waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream
+    assertEquals(3, resume.expectedTracks)
+    waiting.onResumeFailed(resume, ServerState.OFFLINE)
+    assertEquals(3, (waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream).expectedTracks)
+  }
+
+  @Test fun pauseDuringAFailedResumeWaitsPaused() {
+    val gate = StartGate()
+    val waiting = AwaitingServer()
+    waiting.onStreamLost("li1", null, 50.0, true, "a")
+    val resume = waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream
+    val ticket = gate.begin(resume.playWhenReady)
+    gate.pause()
+    // The service restores the wait with the intent the gate holds now
+    waiting.onResumeFailed(resume.copy(playWhenReady = gate.admit(ticket)!!), ServerState.OFFLINE)
+    assertEquals(false, (waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream).playWhenReady)
   }
 }

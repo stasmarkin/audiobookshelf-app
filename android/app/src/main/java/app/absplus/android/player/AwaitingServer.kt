@@ -19,6 +19,9 @@ fun isServerLoss(errorCode: Int, httpStatus: Int?): Boolean = when (errorCode) {
   else -> false
 }
 
+/** An HTTP status that means the server (behind a proxy) is down rather than refusing this request. */
+fun isServerGoneStatus(httpStatus: Int?): Boolean = httpStatus in SERVER_GONE_STATUSES
+
 /** The HTTP status of a source error, when the server answered one. */
 fun httpStatusOf(error: PlaybackException): Int? {
   val source = (error as? ExoPlaybackException)?.takeIf { it.type == ExoPlaybackException.TYPE_SOURCE }?.sourceException ?: error.cause
@@ -35,7 +38,9 @@ sealed interface AwaitingAction {
           val position: Double?,
           val playWhenReady: Boolean,
           val serverConfigId: String,
-          val queueItem: PlaylistQueueItem? = null
+          val queueItem: PlaylistQueueItem? = null,
+          /** The server's track count the stream started with, so a partial download does not replace it. */
+          val expectedTracks: Int? = null
   ) : AwaitingAction
 
   /** The item finished downloading: play the copy from [position] (null: where media_progress has it). */
@@ -85,7 +90,8 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
           val episodeId: String?,
           val position: Double,
           override val playWhenReady: Boolean,
-          override val serverConfigId: String
+          override val serverConfigId: String,
+          val expectedTracks: Int? = null
   ) : Wait
 
   private data class Blocked(val item: PlaylistQueueItem, override val serverConfigId: String, override val playWhenReady: Boolean) : Wait
@@ -109,23 +115,25 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
   val blockedItem: PlaylistQueueItem? get() = (wait as? Blocked)?.item
 
   /** Waits for the stream's server; GiveUp when this is the third resume in a row that failed. */
-  fun onStreamLost(libraryItemId: String, episodeId: String?, position: Double, wasPlaying: Boolean, serverConfigId: String): AwaitingAction? =
-          startWait(Lost(libraryItemId, episodeId, position, wasPlaying, serverConfigId))
+  fun onStreamLost(libraryItemId: String, episodeId: String?, position: Double, wasPlaying: Boolean, serverConfigId: String,
+                   expectedTracks: Int? = null): AwaitingAction? =
+          startWait(Lost(libraryItemId, episodeId, position, wasPlaying, serverConfigId, expectedTracks))
 
   fun onQueueBlocked(item: PlaylistQueueItem, serverConfigId: String, playWhenReady: Boolean = true): AwaitingAction? =
           startWait(Blocked(item, serverConfigId, playWhenReady))
 
   /**
-   * The play request of [resume] failed. The server answers but refuses: give up at once. It is away again: wait as
-   * before (a failed resume; the third in a row gives up).
+   * The play request of [resume] failed. The server answers but refuses: give up at once. It is away again, or a proxy
+   * answered for it ([isServerGoneStatus]): wait as before (a failed resume; the third in a row gives up).
+   * [resume]'s playWhenReady is the intent now (a Pause during the request).
    */
-  fun onResumeFailed(resume: AwaitingAction.ResumeStream, state: ServerState): AwaitingAction? {
-    if (state == ServerState.ONLINE) {
+  fun onResumeFailed(resume: AwaitingAction.ResumeStream, state: ServerState, httpStatus: Int? = null): AwaitingAction? {
+    if (state == ServerState.ONLINE && !isServerGoneStatus(httpStatus)) {
       cancel(CancelReason.CLOSED)
       return AwaitingAction.GiveUp
     }
     val again = resume.queueItem?.let { Blocked(it, resume.serverConfigId, resume.playWhenReady) }
-            ?: Lost(resume.libraryItemId, resume.episodeId, resume.position ?: 0.0, resume.playWhenReady, resume.serverConfigId)
+            ?: Lost(resume.libraryItemId, resume.episodeId, resume.position ?: 0.0, resume.playWhenReady, resume.serverConfigId, resume.expectedTracks)
     return startWait(again)
   }
 
@@ -166,15 +174,16 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
     if (state != ServerState.ONLINE || activeServerConfigId != w.serverConfigId) return null
     // Never streams on cellular against the setting, as a restore does not: waits for an unmetered network
     if (permission.metered && permission.cellular == StreamingUsingCellularSetting.NEVER) return null
-    // Asking is the app's dialog, and a long wait may have outlived the listener: continue, but paused
-    val confirmed = !(permission.metered && permission.cellular == StreamingUsingCellularSetting.ASK)
+    // Asking is the app's dialog (the user's own Play confirms), and a long wait may have outlived the listener:
+    // continue, but paused
+    val confirmed = byUser || !(permission.metered && permission.cellular == StreamingUsingCellularSetting.ASK)
     val fresh = byUser || clock() - waitingSince <= STALE_WAIT_MS
     val playWhenReady = w.playWhenReady && confirmed && fresh
     wait = null
     resumeInFlight = true
     return when (w) {
-      is Lost -> AwaitingAction.ResumeStream(w.libraryItemId, w.episodeId, w.position, playWhenReady, w.serverConfigId)
-      is Blocked -> AwaitingAction.ResumeStream(w.item.libraryItemId, w.item.episodeId, null, playWhenReady, w.serverConfigId, w.item)
+      is Lost -> AwaitingAction.ResumeStream(w.libraryItemId, w.episodeId, w.position, playWhenReady, w.serverConfigId, expectedTracks = w.expectedTracks)
+      is Blocked -> AwaitingAction.ResumeStream(w.item.libraryItemId, w.item.episodeId, null, playWhenReady, w.serverConfigId, w.item, w.item.expectedTracks)
     }
   }
 

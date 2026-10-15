@@ -288,6 +288,8 @@ class AbsAudioPlayer : Plugin() {
             DLog.e(tag, "prepareLibraryItem: ${result.message} ($libraryItemId)")
             call.resolve(JSObject().put("error", result.message))
           }
+          // The call must resolve; another start took over and reports itself
+          PlayerNotificationService.StartResult.Replaced -> call.resolve(JSObject())
           is PlayerNotificationService.StartResult.Started ->
             if (result.session.isLocal) call.resolve(JSObject()) else call.resolve(JSObject(jacksonMapper.writeValueAsString(result.session)))
         }
