@@ -27,10 +27,13 @@ class UserDataStoreTest {
   private val db = inMemoryUserData()
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   private var inFlight: Long? = null
+  private var now = 1_000L
+  private var owner: String? = null
   private val store = store()
 
   private fun store(outbox: OutboxDao = db.outbox()) =
-          UserDataStore(db, DataChangeNotifier(10, scope) { _, _ -> }, clock = { 1_000L }, inFlightId = { inFlight }, outbox = outbox)
+          UserDataStore(db, DataChangeNotifier(10, scope) { _, _ -> }, clock = { now }, inFlightId = { inFlight },
+                  ownerOf = { owner }, outbox = outbox)
 
   @After
   fun tearDown() {
@@ -48,6 +51,7 @@ class UserDataStoreTest {
     assertEquals(BookmarkEntity("srv", "li1", 754.0, "Mark", 1_000L, null, pending = true), row())
     assertEquals(listOf(OutboxKind.BOOKMARK_ADD), kinds())
     assertEquals(OutboxPayload.bookmark(754.0, "Mark"), queue().single().payload)
+    assertNull("no owner known, none written", OutboxPayload.userId(queue().single().payload))
 
     val broken = object : OutboxDao by db.outbox() {
       override suspend fun insert(entity: OutboxEntity): Long = throw IllegalStateException("disk full")
@@ -186,5 +190,85 @@ class UserDataStoreTest {
     store.onOutboxSent(db.outbox().byItemKey("srv", progressItemKey("li1", null)).single())
 
     assertFalse(db.mediaProgress().get("srv", "li1", "")!!.pending)
+  }
+
+  @Test
+  fun blankTitleIsRejectedBeforeAnyWrite() = runBlocking {
+    for (title in listOf("", "   ")) {
+      try {
+        store.addBookmark("srv", "li1", 754.0, title)
+        fail("title '$title' must be rejected")
+      } catch (e: IllegalArgumentException) {
+        // expected: the server would answer 400 and the bookmark would be dropped
+      }
+    }
+    db.bookmarks().upsert(BookmarkEntity("srv", "li1", 754.0, "Synced", 1L, null, pending = false))
+    try {
+      store.renameBookmark("srv", "li1", 754.0, " ")
+      fail("blank rename must be rejected")
+    } catch (e: IllegalArgumentException) {
+      // expected
+    }
+    assertEquals("Synced", row()!!.title)
+    assertEquals(0, db.outbox().count("srv"))
+  }
+
+  @Test
+  fun outboxRowsCarryTheirOwner() = runBlocking {
+    owner = "user-alice"
+    store.addBookmark("srv", "li1", 754.0, "Mark")
+    store.renameBookmark("srv", "li1", 754.0, "Renamed")
+    val folded = queue().single()
+    assertEquals(OutboxKind.BOOKMARK_ADD, folded.kind)
+    assertEquals("Renamed", OutboxPayload.bookmarkTitle(folded.payload))
+    assertEquals("the folded add keeps its owner", "user-alice", OutboxPayload.userId(folded.payload))
+
+    db.mediaProgress().upsert(progressRow(10.0, lastUpdate = 1L))
+    store.queueProgressPatch("srv", "li1", null, listOf("currentTime"))
+    store.queueProgressPatch("srv", "li1", null, listOf("isFinished"))
+    val patch = db.outbox().byItemKey("srv", progressItemKey("li1", null)).single()
+    assertEquals(listOf("currentTime", "isFinished"), OutboxPayload.progressPatchFields(patch.payload))
+    assertEquals("user-alice", OutboxPayload.userId(patch.payload))
+  }
+
+  private val serverCopy = listOf(ServerBookmark("li1", 754.0, "Mark", 5L))
+
+  @Test
+  fun staleUserObjectAfterPushDoesNotDeleteTheSentBookmark() = runBlocking {
+    store.addBookmark("srv", "li1", 754.0, "Mark")
+    store.onOutboxSent(queue().single())
+
+    // An authorize answer requested before the POST arrives after it settled: it does not have the bookmark yet
+    store.applyServerBookmarks("srv", emptyList(), fromSnapshot = true)
+    assertEquals(listOf(754.0), db.bookmarks().getVisible("srv").map { it.time })
+
+    now += UserDataStore.RECENTLY_SETTLED_MS
+    store.applyServerBookmarks("srv", emptyList(), fromSnapshot = true)
+    assertTrue("after the window the server list applies again", db.bookmarks().getVisible("srv").isEmpty())
+  }
+
+  @Test
+  fun staleSnapshotDoesNotResurrectARemovedBookmark() = runBlocking {
+    db.bookmarks().upsert(BookmarkEntity("srv", "li1", 754.0, "Mark", 5L, null, pending = false))
+    store.removeBookmark("srv", "li1", 754.0)
+    store.onOutboxSent(queue().single())
+    assertNull(row())
+
+    store.applyServerBookmarks("srv", serverCopy, fromSnapshot = true)
+    assertNull("a snapshot from before the DELETE does not bring it back", row())
+
+    store.applyServerBookmarks("srv", serverCopy)
+    assertEquals("a fresh pull is the server's current state", 754.0, row()!!.time, 0.0)
+  }
+
+  @Test
+  fun recentKeysProtectOnlyTheirOwnBookmarks() = runBlocking {
+    store.addBookmark("srv", "li1", 754.0, "Mark")
+    store.onOutboxSent(queue().single())
+    db.bookmarks().upsert(BookmarkEntity("srv", "li2", 1.0, "Old", 1L, null, pending = false))
+
+    store.applyServerBookmarks("srv", listOf(ServerBookmark("li3", 2.0, "New", 1L)), fromSnapshot = true)
+
+    assertEquals(listOf("li1" to 754.0, "li3" to 2.0), db.bookmarks().getVisible("srv").map { it.libraryItemId to it.time })
   }
 }

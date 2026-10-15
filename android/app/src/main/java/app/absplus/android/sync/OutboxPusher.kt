@@ -92,7 +92,14 @@ class OutboxPusher(
     return PushResult(sent, dropped, outbox.count(config.id), stoppedBy)
   }
 
-  private suspend fun send(config: ServerConnectionConfig, row: OutboxEntity): Step = when (row.kind) {
+  private suspend fun send(config: ServerConnectionConfig, row: OutboxEntity): Step {
+    // A saved server can be signed in again as another user under the same id; their token must not send this row
+    val owner = OutboxPayload.userId(row.payload)
+    if (owner != null && owner != config.userId) return Step.Drop("queued for another user of this server")
+    return sendAs(config, row)
+  }
+
+  private suspend fun sendAs(config: ServerConnectionConfig, row: OutboxEntity): Step = when (row.kind) {
     OutboxKind.PROGRESS_PATCH -> sendProgressPatch(config, row)
     OutboxKind.PROGRESS_DELETE -> {
       val id = OutboxPayload.serverProgressId(row.payload)

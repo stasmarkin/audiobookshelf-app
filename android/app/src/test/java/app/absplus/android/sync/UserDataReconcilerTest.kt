@@ -93,4 +93,14 @@ class UserDataReconcilerTest {
     assertFalse(versionAtLeast(null, "2.36.0"))
     assertFalse(versionAtLeast("", "2.36.0"))
   }
+
+  @Test
+  fun missingSplitEndpointFallsBackToApiMe() = runBlocking {
+    api.handler = { request -> if (request.path == "/api/me/bookmarks") 404 to "Not Found" else 200 to """{"bookmarks":$twoBookmarks}""" }
+
+    assertTrue(reconciler.reconcileBookmarks(fakeServer(version = "2.36.0")).isSuccess)
+
+    assertEquals(listOf("GET /api/me/bookmarks", "GET /api/me"), api.paths())
+    assertEquals(2, visible().size)
+  }
 }

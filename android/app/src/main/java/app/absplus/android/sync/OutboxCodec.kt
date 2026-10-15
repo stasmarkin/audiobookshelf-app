@@ -2,6 +2,7 @@ package app.absplus.android.sync
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
 /** Kinds of outbox rows. Stored as text: a version that does not know a kind drops the row with a log entry. */
@@ -78,6 +79,15 @@ object OutboxPayload {
           parse(payload)?.get("time")?.takeIf { it.isNumber }?.asDouble()?.takeIf { it.isFinite() }
 
   fun bookmarkTitle(payload: String): String? = parse(payload)?.get("title")?.takeIf { it.isTextual }?.asText()
+
+  /** [payload] with the id of the user the row belongs to; an unreadable payload is returned unchanged. */
+  fun withUserId(payload: String, userId: String): String {
+    val node = parse(payload) as? ObjectNode ?: return payload
+    return mapper.writeValueAsString(node.put("userId", userId))
+  }
+
+  /** The owner written by [withUserId]; null for rows queued before owners were recorded. */
+  fun userId(payload: String): String? = parse(payload)?.get("userId")?.takeIf { it.isTextual }?.asText()
 
   private fun parse(payload: String): JsonNode? =
           try {

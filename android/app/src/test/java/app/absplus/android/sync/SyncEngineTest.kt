@@ -36,25 +36,35 @@ class SyncEngineTest {
   @Volatile private var foreground = false
   @Volatile private var now = 100_000_000L
   private var refresh: RefreshResult = RefreshResult.Transient
+  @Volatile private var failNextRun = false
+  private val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
   private val store get() = SyncEngine.store!!
 
   private val serverBookmarks = """{"bookmarks":[{"libraryItemId":"li7","time":1,"title":"A","createdAt":1},
     {"libraryItemId":"li8","time":2,"title":"B","createdAt":1}]}"""
 
   /** Starts the engine and lets its APP_START run finish, so later state changes are separate requests. */
-  private suspend fun start() {
+  private suspend fun start(unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS) {
     api.handler = { request -> if (request.method == "GET") 200 to serverBookmarks else 200 to "{}" }
     SyncEngine.initForTest(SyncDeps(
             db = db,
             http = SyncHttp(api.client, { _, onResult -> onResult(refresh) }, { "token" }, NoopSink()),
-            activeServer = { active },
+            activeServer = {
+              if (failNextRun) {
+                failNextRun = false
+                throw IllegalStateException("database is full")
+              }
+              active
+            },
             serverState = state,
             serverId = serverId,
             isForeground = { foreground || SyncRuntime.isForeground },
             clock = { now },
             scope = scope,
             log = {},
-            notifyWindowMs = 10))
+            notifyWindowMs = 10,
+            logError = { errors.add(it) },
+            unreachableRetryMs = unreachableRetryMs))
     settle()
   }
 
@@ -318,5 +328,65 @@ class SyncEngineTest {
     assertTrue(db.bookmarks().getAll("srv").isEmpty())
     assertEquals(true, SyncEngine.applyEvent("user_updated", user, "srv"))
     assertEquals(listOf(3.0), db.bookmarks().getVisible("srv").map { it.time })
+  }
+
+  @Test
+  fun staleUserObjectAfterPushKeepsTheSentBookmark() = runBlocking {
+    start()
+    store.addBookmark("srv", "li1", 754.0, "Offline")
+    state.value = ServerState.ONLINE
+    eventually("the push") { db.outbox().count("srv") == 0 }
+
+    // The authorize answer was requested before the POST and arrives after it
+    assertEquals(true, SyncEngine.applyEvent("user_updated", """{"bookmarks":[]}""", "srv"))
+
+    assertEquals(listOf(754.0), db.bookmarks().getVisible("srv").map { it.time })
+  }
+
+  @Test
+  fun failingRunNeitherCrashesNorStopsSyncing() = runBlocking {
+    start()
+    store.addBookmark("srv", "li1", 754.0, "Mark")
+    failNextRun = true
+    state.value = ServerState.ONLINE
+    eventually("the failure is reported") { SyncEngine.syncState.value.lastError == "database is full" }
+    assertTrue(errors.any { it.contains("database is full") })
+    assertEquals(1, db.outbox().count("srv"))
+
+    SyncEngine.syncNow(SyncReason.MANUAL)
+
+    eventually("the next run works") { db.outbox().count("srv") == 0 }
+  }
+
+  @Test
+  fun unreachableWhileOnlineRetriesByItself() = runBlocking {
+    start(unreachableRetryMs = listOf(100L))
+    store.addBookmark("srv", "li1", 754.0, "Mark")
+    // A 401 whose refresh fails transiently: no answer to use, while reachability still says online
+    api.handler = { 401 to "Unauthorized" }
+    state.value = ServerState.ONLINE
+    eventually("the push stops") { SyncEngine.syncState.value.lastError == "unreachable" }
+    api.handler = { 200 to "{}" }
+
+    eventually("sent without another trigger") { db.outbox().count("srv") == 0 }
+  }
+
+  @Test
+  fun failedReconcileDoesNotCoverTheNextTrigger() = runBlocking {
+    foreground = true
+    start()
+    api.handler = { request -> if (request.method == "GET") 500 to "" else 200 to "{}" }
+    state.value = ServerState.ONLINE
+    eventually("the failed reconcile") { gets() == 1 && SyncEngine.syncState.value.lastError != null }
+    settle()
+    api.handler = { request -> if (request.method == "GET") 200 to serverBookmarks else 200 to "{}" }
+
+    // The server blinked: it comes back within RECONCILE_MIN_INTERVAL_MS of the failed attempt
+    state.value = ServerState.OFFLINE
+    settle()
+    state.value = ServerState.ONLINE
+
+    eventually("the next automatic trigger reconciles") { gets() == 2 }
+    eventually("and its bookmarks arrive") { db.bookmarks().getVisible("srv").size == 2 }
   }
 }

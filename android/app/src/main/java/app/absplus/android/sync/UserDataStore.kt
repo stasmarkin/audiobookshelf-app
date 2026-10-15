@@ -16,16 +16,21 @@ class UserDataStore(
         private val clock: () -> Long,
         /** The outbox row [OutboxPusher] has on the wire; [coalesce] leaves it alone. */
         private val inFlightId: () -> Long?,
+        /** The user a saved server is signed in as; written into each outbox row so it is never sent as someone else. */
+        private val ownerOf: (serverConfigId: String) -> String? = { null },
         private val outbox: OutboxDao = db.outbox()
 ) {
   private val bookmarks = db.bookmarks()
   private val progress = db.mediaProgress()
+  /** Bookmark keys whose outbox rows were settled lately, with the time; see [applyServerBookmarks]. */
+  private val recentlySettled = HashMap<String, Long>()
 
   suspend fun visibleBookmarks(serverConfigId: String): List<BookmarkEntity> = bookmarks.getVisible(serverConfigId)
 
   /** Adds a bookmark; one that is already visible at [time] is renamed instead (the server treats it the same way). */
   suspend fun addBookmark(serverConfigId: String, libraryItemId: String, time: Double, title: String) {
     requireValidTime(time)
+    requireValidTitle(title)
     db.withTransaction {
       val existing = bookmarks.getForItem(serverConfigId, libraryItemId).firstOrNull { it.time == time }
       if (existing != null && existing.deletedAt == null) {
@@ -42,6 +47,7 @@ class UserDataStore(
   /** @throws NoSuchElementException when there is no visible bookmark at [time] */
   suspend fun renameBookmark(serverConfigId: String, libraryItemId: String, time: Double, title: String) {
     requireValidTime(time)
+    requireValidTitle(title)
     db.withTransaction {
       val existing = bookmarks.getForItem(serverConfigId, libraryItemId).firstOrNull { it.time == time && it.deletedAt == null }
               ?: throw NoSuchElementException("No bookmark at $time")
@@ -69,9 +75,17 @@ class UserDataStore(
     if (removed) notifier.notify(SCOPE_BOOKMARKS, listOf(libraryItemId))
   }
 
-  suspend fun applyServerBookmarks(serverConfigId: String, list: List<ServerBookmark>) {
+  /**
+   * Merges the server's list. A list that arrived by itself ([fromSnapshot]: socket event, authorize answer) may have
+   * been built before an outbox row settled, so bookmarks settled within [RECENTLY_SETTLED_MS] keep their local state:
+   * a just-sent bookmark is not deleted and a just-removed one does not come back. A fresh pull touches everything.
+   */
+  suspend fun applyServerBookmarks(serverConfigId: String, list: List<ServerBookmark>, fromSnapshot: Boolean = false) {
+    val recent = if (fromSnapshot) recentlySettledKeys(serverConfigId) else emptySet()
     val plan = db.withTransaction {
-      val plan = mergeBookmarks(serverConfigId, bookmarks.getAll(serverConfigId), list)
+      val local = bookmarks.getAll(serverConfigId).filter { bookmarkItemKey(it.libraryItemId, it.time) !in recent }
+      val server = list.filter { !it.time.isFinite() || bookmarkItemKey(it.libraryItemId, it.time) !in recent }
+      val plan = mergeBookmarks(serverConfigId, local, server)
       plan.upserts.forEach { bookmarks.upsert(it) }
       plan.deletes.forEach { bookmarks.delete(it.serverConfigId, it.libraryItemId, it.time) }
       plan
@@ -101,6 +115,7 @@ class UserDataStore(
       val left = outbox.byItemKey(row.serverConfigId, row.itemKey).isNotEmpty()
       when (row.kind) {
         OutboxKind.BOOKMARK_ADD, OutboxKind.BOOKMARK_UPDATE, OutboxKind.BOOKMARK_REMOVE -> {
+          markSettled(row.serverConfigId, row.itemKey)
           val libraryItemId = bookmarkKeyLibraryItemId(row.itemKey)
           val bookmark = bookmarks.getForItem(row.serverConfigId, libraryItemId)
                   .firstOrNull { bookmarkItemKey(it.libraryItemId, it.time) == row.itemKey }
@@ -133,15 +148,33 @@ class UserDataStore(
     val incoming = OutboxEntity(serverConfigId = serverConfigId, kind = kind, itemKey = itemKey, payload = payload,
             createdAt = clock())
     val plan = coalesce(outbox.byItemKey(serverConfigId, itemKey), incoming, inFlightId())
+    // After coalescing: a folded payload is rebuilt from the action's own fields
+    val owner = ownerOf(serverConfigId)
+    fun owned(row: OutboxEntity) = if (owner == null) row else row.copy(payload = OutboxPayload.withUserId(row.payload, owner))
     plan.deleteIds.forEach { outbox.delete(it) }
-    plan.update?.let { outbox.update(it) }
-    plan.insert?.let { outbox.insert(it) }
+    plan.update?.let { outbox.update(owned(it)) }
+    plan.insert?.let { outbox.insert(owned(it)) }
+  }
+
+  private fun markSettled(serverConfigId: String, itemKey: String) = synchronized(recentlySettled) {
+    recentlySettled["$serverConfigId $itemKey"] = clock()
+  }
+
+  private fun recentlySettledKeys(serverConfigId: String): Set<String> = synchronized(recentlySettled) {
+    val now = clock()
+    recentlySettled.entries.removeAll { now - it.value >= RECENTLY_SETTLED_MS }
+    recentlySettled.keys.filter { it.startsWith("$serverConfigId ") }.map { it.substringAfter(' ') }.toSet()
   }
 
   private fun requireValidTime(time: Double) = require(time.isFinite() && time >= 0) { "Invalid bookmark time: $time" }
 
+  // The server rejects an empty title, which would drop the bookmark when it is sent
+  private fun requireValidTitle(title: String) = require(title.isNotBlank()) { "Bookmark title is empty" }
+
   companion object {
     const val SCOPE_BOOKMARKS = "bookmarks"
     const val SCOPE_PROGRESS = "progress"
+    /** How long a server snapshot is assumed to be possibly older than a settled outbox row. */
+    const val RECENTLY_SETTLED_MS = 120_000L
   }
 }

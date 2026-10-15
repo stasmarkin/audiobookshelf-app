@@ -10,10 +10,14 @@ class SyncFailure(message: String) : Exception(message)
 class UserDataReconciler(private val http: SyncHttp, private val store: UserDataStore) {
   private val mapper = jacksonObjectMapper()
 
-  /** GET /api/me/bookmarks from server 2.36.0, the bookmarks of GET /api/me before. */
+  /**
+   * GET /api/me/bookmarks from server 2.36.0, the bookmarks of GET /api/me before, and also when the split endpoint
+   * is missing (404: a server that reports a newer version than it runs).
+   */
   suspend fun reconcileBookmarks(config: ServerConnectionConfig): Result<Unit> {
     val split = versionAtLeast(config.version, "2.36.0")
-    val outcome = http.send(config, "GET", if (split) "/api/me/bookmarks" else "/api/me")
+    var outcome = http.send(config, "GET", if (split) "/api/me/bookmarks" else "/api/me")
+    if (split && outcome == HttpOutcome.HttpError(404)) outcome = http.send(config, "GET", "/api/me")
     if (outcome !is HttpOutcome.Ok) return Result.failure(SyncFailure(describe(outcome)))
     val root = readTree(outcome.body)
     // The split endpoint is read in both shapes it could have: a bare array or an object with `bookmarks`
@@ -26,7 +30,7 @@ class UserDataReconciler(private val http: SyncHttp, private val store: UserData
   /** A user object from the server (socket `user_updated`, `/api/authorize`); one without `bookmarks` changes nothing. */
   suspend fun applyUserObject(serverConfigId: String, userJson: String) {
     val list = parseBookmarks(readTree(userJson)?.get("bookmarks")) ?: return
-    store.applyServerBookmarks(serverConfigId, list)
+    store.applyServerBookmarks(serverConfigId, list, fromSnapshot = true)
   }
 
   private fun readTree(json: String): JsonNode? =

@@ -6,6 +6,8 @@ import app.absplus.android.db.userdata.UserDataDatabase
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.server.ApiHandler
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +43,12 @@ const val FOREGROUND_RECONCILE_AFTER_MS = 15 * 60_000L
  */
 const val RECONCILE_MIN_INTERVAL_MS = 30_000L
 
+/**
+ * Retry of the outbox after a push found no usable answer while the server still counts as online (a failed token
+ * refresh): nothing else would trigger it. Restarts after a run that is not stopped this way.
+ */
+val UNREACHABLE_RETRY_MS = listOf(30_000L, 60_000L, 300_000L)
+
 class SyncDeps(
         val db: UserDataDatabase,
         val http: SyncHttp,
@@ -52,7 +60,11 @@ class SyncDeps(
         val clock: () -> Long,
         val scope: CoroutineScope,
         val log: (String) -> Unit,
-        val notifyWindowMs: Long = 500
+        val notifyWindowMs: Long = 500,
+        val logError: (String) -> Unit = log,
+        /** The user a saved server is signed in as (see [UserDataStore]). */
+        val ownerOf: (serverConfigId: String) -> String? = { null },
+        val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS
 )
 
 /**
@@ -95,8 +107,12 @@ object SyncEngine {
             serverId = ServerReachability.serverConfigId,
             isForeground = { SyncRuntime.isForeground },
             clock = System::currentTimeMillis,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-            log = { AbsLogger.info("SyncEngine", it) }))
+            // A failure in any sync job is logged, never a crash of the process (the player may be running)
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO +
+                    CoroutineExceptionHandler { _, e -> AbsLogger.error("SyncEngine", "Sync job failed: $e") }),
+            log = { AbsLogger.info("SyncEngine", it) },
+            logError = { AbsLogger.error("SyncEngine", it) },
+            ownerOf = { id -> DeviceManager.getServerConnectionConfig(id)?.userId }))
   }
 
   private fun start(deps: SyncDeps) {
@@ -149,7 +165,7 @@ object SyncEngine {
     private val outbox = deps.db.outbox()
     private val notifier = DataChangeNotifier(deps.notifyWindowMs, scope) { name, ids -> _dataChanges.tryEmit(DataChange(name, ids)) }
     private lateinit var pusher: OutboxPusher
-    val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId })
+    val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId }, ownerOf = deps.ownerOf)
     private val reconciler = UserDataReconciler(deps.http, store)
 
     private val lock = Any()
@@ -160,7 +176,10 @@ object SyncEngine {
     private var reconcileDeferred = false
     private var socketLostInBackground = false
     private var lastReconcileAt: Long? = null
-    private var lastReconcileStartAt: Long? = null
+    /** Start of the last reconcile that succeeded; a failed one does not cover later requests. */
+    private var lastReconcileOkStartAt: Long? = null
+    private var reconcileRunning = false
+    private var unreachableRetries = 0
     private var backoffJob: Job? = null
     private val jobs = mutableListOf<Job>()
 
@@ -200,7 +219,7 @@ object SyncEngine {
           }
           reason == SyncReason.MANUAL -> wantReconcile = true
           else -> {
-            val recent = lastReconcileStartAt?.let { deps.clock() - it < RECONCILE_MIN_INTERVAL_MS } ?: false
+            val recent = reconcileRunning || lastReconcileOkStartAt?.let { deps.clock() - it < RECONCILE_MIN_INTERVAL_MS } ?: false
             if (!recent) wantReconcile = true
           }
         }
@@ -221,10 +240,11 @@ object SyncEngine {
       if (!deps.isForeground()) synchronized(lock) { socketLostInBackground = true }
     }
 
-    suspend fun applyEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean {
-      val active = deps.activeServer()?.id ?: return false
-      if (serverConfigId != active) return false
-      return when (name) {
+    /** Serialized with runs, so an event never merges between a push and the settling of its rows. */
+    suspend fun applyEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean = runMutex.withLock {
+      val active = deps.activeServer()?.id ?: return@withLock false
+      if (serverConfigId != active) return@withLock false
+      when (name) {
         "user_updated" -> {
           reconciler.applyUserObject(active, payloadJson)
           true
@@ -242,16 +262,25 @@ object SyncEngine {
 
     private suspend fun drain() {
       val self = coroutineContext[Job]
-      while (true) {
-        val reconcile = synchronized(lock) {
-          if (!wantPush) {
-            if (runner === self) runner = null
-            return
+      try {
+        while (true) {
+          val reconcile = synchronized(lock) {
+            if (!wantPush) return
+            wantPush = false
+            wantReconcile.also { wantReconcile = false }
           }
-          wantPush = false
-          wantReconcile.also { wantReconcile = false }
+          try {
+            runMutex.withLock { runOnce(reconcile) }
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            // A failing database or a bug in one run must not end syncing for the rest of the process
+            deps.logError("Sync run failed: $e")
+            _syncState.update { it.copy(running = false, lastError = e.message ?: e.javaClass.simpleName) }
+          }
         }
-        runMutex.withLock { runOnce(reconcile) }
+      } finally {
+        synchronized(lock) { if (runner === self) runner = null }
       }
     }
 
@@ -266,19 +295,33 @@ object SyncEngine {
       var error: String? = null
       try {
         if (reconcile) {
+          val startedAt = deps.clock()
           synchronized(lock) {
             reconcileDeferred = false
-            lastReconcileStartAt = deps.clock()
+            reconcileRunning = true
           }
           deps.log("Reconcile ${config.id}")
-          reconciler.reconcileBookmarks(config).onSuccess { lastReconcileAt = deps.clock() }.onFailure { failure ->
+          val result = try {
+            reconciler.reconcileBookmarks(config)
+          } finally {
+            synchronized(lock) { reconcileRunning = false }
+          }
+          result.onSuccess {
+            lastReconcileAt = deps.clock()
+            synchronized(lock) { lastReconcileOkStartAt = startedAt }
+          }.onFailure { failure ->
             error = failure.message
+            deps.logError("Reconcile ${config.id} failed: ${failure.message}")
             synchronized(lock) { reconcileDeferred = true }
           }
         }
         val result = pusher.pushAll(config)
         if (result.stoppedBy != null) error = error ?: result.stoppedBy.name.lowercase()
-        if (result.stoppedBy == StopReason.BACKOFF) scheduleBackoff(config.id)
+        when {
+          result.stoppedBy == StopReason.BACKOFF -> scheduleBackoff(config.id)
+          result.stoppedBy == StopReason.UNREACHABLE && deps.serverState.value == ServerState.ONLINE -> scheduleUnreachableRetry()
+          else -> unreachableRetries = 0
+        }
         _syncState.update {
           SyncState(running = false, pendingCount = result.remaining, lastError = error,
                   lastSyncAt = if (error == null) deps.clock() else it.lastSyncAt)
@@ -288,9 +331,18 @@ object SyncEngine {
       }
     }
 
+    private fun scheduleUnreachableRetry() {
+      val wait = deps.unreachableRetryMs[minOf(unreachableRetries, deps.unreachableRetryMs.lastIndex)]
+      unreachableRetries++
+      scheduleRetry(wait)
+    }
+
     private suspend fun scheduleBackoff(serverConfigId: String) {
       val head = outbox.head(serverConfigId) ?: return
-      val wait = (head.nextAttemptAt - deps.clock()).coerceAtLeast(0)
+      scheduleRetry((head.nextAttemptAt - deps.clock()).coerceAtLeast(0))
+    }
+
+    private fun scheduleRetry(wait: Long) {
       backoffJob?.cancel()
       backoffJob = scope.launch {
         delay(wait)
@@ -306,7 +358,8 @@ object SyncEngine {
         wantPush = false
         wantReconcile = false
         lastReconcileAt = null
-        lastReconcileStartAt = null
+        lastReconcileOkStartAt = null
+        unreachableRetries = 0
       }
       backoffJob?.cancel()
       refreshPendingCount()

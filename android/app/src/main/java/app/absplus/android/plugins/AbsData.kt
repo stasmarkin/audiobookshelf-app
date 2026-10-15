@@ -96,11 +96,11 @@ class AbsData : Plugin() {
     call.resolve()
   }
 
-  /** Visible bookmarks of the active server; empty without one. */
+  /** Visible bookmarks of `serverConfigId` (a downloaded copy's server), the active server by default; empty without one. */
   @PluginMethod
   fun getBookmarks(call: PluginCall) {
     val store = SyncEngine.store
-    val serverConfigId = ActiveServer.current()?.id
+    val serverConfigId = call.getString("serverConfigId") ?: ActiveServer.current()?.id
     if (store == null || serverConfigId == null) {
       call.resolve(JSObject().put("bookmarks", JSArray()))
       return
@@ -156,7 +156,7 @@ class AbsData : Plugin() {
       serverConfigId.isNullOrEmpty() -> return call.reject("No server")
       libraryItemId.isNullOrEmpty() || time == null || !time.isFinite() || time < 0 ->
         return call.reject("libraryItemId and a valid time are required")
-      needsTitle && title == null -> return call.reject("title is required")
+      needsTitle && title.isNullOrBlank() -> return call.reject("title is required")
     }
     io.launch {
       try {

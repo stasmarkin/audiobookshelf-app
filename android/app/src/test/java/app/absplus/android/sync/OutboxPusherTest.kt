@@ -312,4 +312,21 @@ class OutboxPusherTest {
     assertEquals(setOf("isFinished", "lastUpdate"), json(api.requests[1].body).keys().asSequence().toSet())
     assertFalse(db.mediaProgress().get("srv", "li1", "")!!.pending)
   }
+
+  @Test
+  fun rowOfAnotherUserOfTheSameServerIsDropped() = runBlocking {
+    // The saved server was signed in again as another user under the same id: the token now belongs to them
+    for ((owner, title) in listOf("someone-else" to "Theirs", "user" to "Mine")) {
+      db.outbox().insert(OutboxEntity(serverConfigId = "srv", kind = OutboxKind.BOOKMARK_ADD, itemKey = bookmarkItemKey("li1", title.length.toDouble()),
+              payload = OutboxPayload.withUserId(OutboxPayload.bookmark(title.length.toDouble(), title), owner), createdAt = 1L))
+    }
+    db.outbox().insert(OutboxEntity(serverConfigId = "srv", kind = OutboxKind.BOOKMARK_ADD, itemKey = bookmarkItemKey("li1", 9.0),
+            payload = OutboxPayload.bookmark(9.0, "Queued before owners"), createdAt = 1L))
+
+    assertEquals(PushResult(2, 1, 0, null), pusher.pushAll(config))
+
+    assertEquals(listOf("Mine", "Queued before owners"), api.requests.map { json(it.body).getString("title") })
+    assertTrue(logs.single().contains("another user"))
+    assertTrue("no user id in the log", logs.none { it.contains("someone-else") })
+  }
 }
