@@ -65,7 +65,10 @@ class SyncDeps(
         /** The user a saved server is signed in as (see [UserDataStore]). */
         val ownerOf: (serverConfigId: String) -> String? = { null },
         val recentlySettledMs: Long = UserDataStore.RECENTLY_SETTLED_MS,
-        val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS
+        val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS,
+        /** See [UserDataStore]: items whose listening sessions still wait for `local-all`. */
+        val unsentSessionKeys: (serverConfigId: String) -> Set<String> = { emptySet() },
+        val mirror: ProgressMirror = ProgressMirror.None
 )
 
 /**
@@ -113,7 +116,9 @@ object SyncEngine {
                     CoroutineExceptionHandler { _, e -> AbsLogger.error("SyncEngine", "Sync job failed: $e") }),
             log = { AbsLogger.info("SyncEngine", it) },
             logError = { AbsLogger.error("SyncEngine", it) },
-            ownerOf = { id -> DeviceManager.getServerConnectionConfig(id)?.userId }))
+            ownerOf = { id -> DeviceManager.getServerConnectionConfig(id)?.userId },
+            unsentSessionKeys = PaperProgressMirror::unsentSessionKeys,
+            mirror = PaperProgressMirror))
   }
 
   private fun start(deps: SyncDeps) {
@@ -136,6 +141,12 @@ object SyncEngine {
   fun onSocketLost() {
     core?.onSocketLost()
   }
+
+  /**
+   * Runs [block] with the store on the sync scope, off the caller's thread; false before [init]. For writes that must
+   * not hold up their caller, such as playback ticks.
+   */
+  fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean = core?.launchWrite(block) ?: false
 
   /**
    * A server event the WebView received while [serverConfigId] was active; dropped when another server is active now.
@@ -167,8 +178,8 @@ object SyncEngine {
     private val notifier = DataChangeNotifier(deps.notifyWindowMs, scope) { name, ids -> _dataChanges.tryEmit(DataChange(name, ids)) }
     private lateinit var pusher: OutboxPusher
     val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId }, ownerOf = deps.ownerOf,
-            recentlySettledMs = deps.recentlySettledMs)
-    private val reconciler = UserDataReconciler(deps.http, store)
+            recentlySettledMs = deps.recentlySettledMs, unsentSessionKeys = deps.unsentSessionKeys, mirror = deps.mirror)
+    private val reconciler = UserDataReconciler(deps.http, store, deps.db, deps.clock)
 
     private val lock = Any()
     private val runMutex = Mutex()
@@ -235,6 +246,11 @@ object SyncEngine {
       job.start()
     }
 
+    fun launchWrite(block: suspend (UserDataStore) -> Unit): Boolean {
+      scope.launch { block(store) }
+      return true
+    }
+
     fun onLocalWrite() {
       refreshPendingCount()
       if (deps.serverState.value == ServerState.ONLINE) syncNow(SyncReason.LOCAL_WRITE)
@@ -253,6 +269,7 @@ object SyncEngine {
           if (reconciler.applyUserObject(active, payloadJson)) reconcileAfterSettleWindow()
           true
         }
+        "user_item_progress_updated" -> reconciler.applyProgressEvent(active, payloadJson)
         else -> false
       }
     }
@@ -313,7 +330,7 @@ object SyncEngine {
           }
           deps.log("Reconcile ${config.id}")
           val result = try {
-            reconciler.reconcileBookmarks(config)
+            reconciler.reconcileUser(config)
           } finally {
             synchronized(lock) { reconcileRunning = false }
           }

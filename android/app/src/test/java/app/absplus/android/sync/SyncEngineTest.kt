@@ -40,7 +40,7 @@ class SyncEngineTest {
   private val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
   private val store get() = SyncEngine.store!!
 
-  private val serverBookmarks = """{"bookmarks":[{"libraryItemId":"li7","time":1,"title":"A","createdAt":1},
+  private val serverBookmarks = """{"mediaProgress":[],"bookmarks":[{"libraryItemId":"li7","time":1,"title":"A","createdAt":1},
     {"libraryItemId":"li8","time":2,"title":"B","createdAt":1}]}"""
 
   /** Starts the engine and lets its APP_START run finish, so later state changes are separate requests. */
@@ -84,7 +84,8 @@ class SyncEngineTest {
     }
   }
 
-  private fun gets() = api.paths().count { it.startsWith("GET") }
+  /** Reconciles: each starts with the progress list. */
+  private fun gets() = api.paths().count { it == "GET /api/me/progress" }
 
   @Test
   fun offlineThenReconnectSendsQueuedBookmark() = runBlocking {
@@ -112,8 +113,8 @@ class SyncEngineTest {
 
     state.value = ServerState.ONLINE
 
-    eventually("pull and push") { api.requests.size == 2 && db.outbox().count("srv") == 0 }
-    assertEquals(listOf("GET /api/me/bookmarks", "POST /api/me/item/li1/bookmark"), api.paths())
+    eventually("pull and push") { api.requests.size == 3 && db.outbox().count("srv") == 0 }
+    assertEquals(listOf("GET /api/me/progress", "GET /api/me/bookmarks", "POST /api/me/item/li1/bookmark"), api.paths())
     assertEquals(listOf("li1", "li7", "li8"), db.bookmarks().getVisible("srv").map { it.libraryItemId })
   }
 
@@ -397,7 +398,7 @@ class SyncEngineTest {
     start(recentlySettledMs = 300L)
     store.addBookmark("srv", "li1", 754.0, "Offline")
     // Another device deletes the bookmark right after it reaches the server: every list from the server is empty
-    api.handler = { request -> if (request.method == "GET") 200 to """{"bookmarks":[]}""" else 200 to "{}" }
+    api.handler = { request -> if (request.method == "GET") 200 to """{"mediaProgress":[],"bookmarks":[]}""" else 200 to "{}" }
     state.value = ServerState.ONLINE
     eventually("pull and push") { gets() == 1 && db.outbox().count("srv") == 0 }
 
@@ -412,7 +413,7 @@ class SyncEngineTest {
   fun heldBackSnapshotInTheBackgroundWaitsForTheForeground() = runBlocking {
     start(recentlySettledMs = 100L)
     store.addBookmark("srv", "li1", 754.0, "Offline")
-    api.handler = { request -> if (request.method == "GET") 200 to """{"bookmarks":[]}""" else 200 to "{}" }
+    api.handler = { request -> if (request.method == "GET") 200 to """{"mediaProgress":[],"bookmarks":[]}""" else 200 to "{}" }
     state.value = ServerState.ONLINE
     eventually("push") { db.outbox().count("srv") == 0 }
 
@@ -424,5 +425,52 @@ class SyncEngineTest {
     foreground = true
     SyncEngine.syncNow(SyncReason.FOREGROUND)
     eventually("the deferred pull") { gets() == 1 && db.bookmarks().getVisible("srv").isEmpty() }
+  }
+
+  @Test
+  fun offlineMarkFinishedIsSentOnReconnect() = runBlocking {
+    start()
+    db.mediaProgress().upsert(progressRow(400.0, lastUpdate = 5L, pending = false))
+    store.markFinished("srv", "li1", null, true)
+    SyncEngine.onLocalWrite()
+    settle()
+    assertTrue("nothing is sent while the server is unreachable", api.requests.isEmpty())
+    eventually("pending count 1") { SyncEngine.syncState.value.pendingCount == 1 }
+
+    state.value = ServerState.ONLINE
+
+    eventually("the queued action is sent") { db.outbox().count("srv") == 0 }
+    settle()
+    assertEquals(listOf("PATCH /api/me/progress/li1"), api.paths())
+    val body = org.json.JSONObject(api.requests.single().body!!)
+    assertTrue(body.getBoolean("isFinished"))
+    assertEquals(0, SyncEngine.syncState.value.pendingCount)
+    val row = db.mediaProgress().get("srv", "li1", "")!!
+    assertTrue(row.isFinished)
+    assertTrue(!row.pending)
+  }
+
+  @Test
+  fun reconcileThenPushOrder() = runBlocking {
+    foreground = true
+    start()
+    store.markFinished("srv", "li1", null, true)
+
+    state.value = ServerState.ONLINE
+
+    eventually("pull and push") { db.outbox().count("srv") == 0 && api.requests.size == 3 }
+    assertEquals(listOf("GET /api/me/progress", "GET /api/me/bookmarks", "PATCH /api/me/progress/li1"), api.paths())
+  }
+
+  @Test
+  fun progressEventOfAnotherServerIsDropped() = runBlocking {
+    start()
+    val event = """{"data":{"id":"mp1","libraryItemId":"li1","currentTime":120,"duration":1000,"progress":0.12,"lastUpdate":50}}"""
+
+    assertEquals(false, SyncEngine.applyEvent("user_item_progress_updated", event, "srvB"))
+    assertTrue(db.mediaProgress().getAll("srv").isEmpty())
+    assertEquals(true, SyncEngine.applyEvent("user_item_progress_updated", event, "srv"))
+    assertEquals(120.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)
+    assertEquals("an older value is not applied", false, SyncEngine.applyEvent("user_item_progress_updated", event, "srv"))
   }
 }

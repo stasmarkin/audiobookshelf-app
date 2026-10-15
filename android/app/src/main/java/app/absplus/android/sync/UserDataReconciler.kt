@@ -1,39 +1,106 @@
 package app.absplus.android.sync
 
+import androidx.room.withTransaction
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.db.userdata.ServerSyncStateEntity
+import app.absplus.android.db.userdata.UserDataDatabase
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class SyncFailure(message: String) : Exception(message)
 
-/** Pulls the user's data from the server into userdata.db. In this release: bookmarks. */
-class UserDataReconciler(private val http: SyncHttp, private val store: UserDataStore) {
+/** Pulls the user's data from the server into userdata.db: progress, bookmarks and the user object. */
+class UserDataReconciler(
+        private val http: SyncHttp,
+        private val store: UserDataStore,
+        private val db: UserDataDatabase,
+        private val clock: () -> Long = System::currentTimeMillis
+) {
   private val mapper = jacksonObjectMapper()
 
   /**
-   * GET /api/me/bookmarks from server 2.36.0, the bookmarks of GET /api/me before, and also when the split endpoint
-   * is missing (404: a server that reports a newer version than it runs).
+   * A full pull of the user's data. From server 2.36.0 GET /api/me/progress and /api/me/bookmarks; before that, and
+   * when a split endpoint is missing (404: a server that reports a newer version than it runs), one GET /api/me, which
+   * also brings the user object. Nothing is applied unless both lists were read. Only this pull deletes progress rows
+   * the server no longer has.
    */
-  suspend fun reconcileBookmarks(config: ServerConnectionConfig): Result<Unit> {
-    val split = versionAtLeast(config.version, "2.36.0")
-    var outcome = http.send(config, "GET", if (split) "/api/me/bookmarks" else "/api/me")
-    if (split && outcome == HttpOutcome.HttpError(404)) outcome = http.send(config, "GET", "/api/me")
-    if (outcome !is HttpOutcome.Ok) return Result.failure(SyncFailure(describe(outcome)))
-    val root = readTree(outcome.body)
-    // The split endpoint is read in both shapes it could have: a bare array or an object with `bookmarks`
-    val array = if (root?.isArray == true) root else root?.get("bookmarks")
-    val list = parseBookmarks(array) ?: return Result.failure(SyncFailure("no bookmarks in the response"))
-    store.applyServerBookmarks(config.id, list)
+  suspend fun reconcileUser(config: ServerConnectionConfig): Result<Unit> {
+    var user: JsonNode? = null
+    var progressNode: JsonNode? = null
+    var bookmarksNode: JsonNode? = null
+    var useMe = !versionAtLeast(config.version, "2.36.0")
+    if (!useMe) {
+      val progress = http.send(config, "GET", "/api/me/progress")
+      if (progress == HttpOutcome.HttpError(404)) useMe = true
+      else {
+        if (progress !is HttpOutcome.Ok) return Result.failure(SyncFailure(describe(progress)))
+        progressNode = listIn(readTree(progress.body), "mediaProgress")
+        val bookmarks = http.send(config, "GET", "/api/me/bookmarks")
+        if (bookmarks == HttpOutcome.HttpError(404)) useMe = true
+        else {
+          if (bookmarks !is HttpOutcome.Ok) return Result.failure(SyncFailure(describe(bookmarks)))
+          bookmarksNode = listIn(readTree(bookmarks.body), "bookmarks")
+        }
+      }
+    }
+    if (useMe) {
+      val me = http.send(config, "GET", "/api/me")
+      if (me !is HttpOutcome.Ok) return Result.failure(SyncFailure(describe(me)))
+      user = readTree(me.body)
+      progressNode = user?.get("mediaProgress")
+      bookmarksNode = user?.get("bookmarks")
+    }
+    val progress = parseProgressList(progressNode) ?: return Result.failure(SyncFailure("no progress in the response"))
+    val bookmarks = parseBookmarks(bookmarksNode) ?: return Result.failure(SyncFailure("no bookmarks in the response"))
+    store.applyServerProgress(config.id, progress, deleteMissing = true)
+    store.applyServerBookmarks(config.id, bookmarks)
+    if (user != null) saveUser(config.id, user, lastMeAt = clock())
     return Result.success(Unit)
   }
 
   /**
-   * A user object from the server (socket `user_updated`, `/api/authorize`); one without `bookmarks` changes nothing.
+   * A user object from the server (socket `user_updated`, `/api/authorize`). It may be older than a just-sent change,
+   * so it never deletes progress; parts it lacks change nothing. Parsed off the main thread: it can be megabytes.
    * @return whether it left recently settled bookmarks alone that it would have changed (see [UserDataStore])
    */
-  suspend fun applyUserObject(serverConfigId: String, userJson: String): Boolean {
-    val list = parseBookmarks(readTree(userJson)?.get("bookmarks")) ?: return false
-    return store.applyServerBookmarks(serverConfigId, list, fromSnapshot = true)
+  suspend fun applyUserObject(serverConfigId: String, userJson: String): Boolean = withContext(Dispatchers.Default) {
+    val user = readTree(userJson) ?: return@withContext false
+    parseProgressList(user.get("mediaProgress"))?.let { store.applyServerProgress(serverConfigId, it) }
+    if (user.isObject) saveUser(serverConfigId, user, lastMeAt = null)
+    val bookmarks = parseBookmarks(user.get("bookmarks")) ?: return@withContext false
+    store.applyServerBookmarks(serverConfigId, bookmarks, fromSnapshot = true)
+  }
+
+  /** Socket `user_item_progress_updated` (`{data: MediaProgress}`) or a bare record; whether it was taken. */
+  suspend fun applyProgressEvent(serverConfigId: String, payloadJson: String): Boolean = withContext(Dispatchers.Default) {
+    val root = readTree(payloadJson) ?: return@withContext false
+    val record = parseServerProgress(root.get("data")?.takeIf { it.isObject } ?: root) ?: return@withContext false
+    store.applyServerProgressCandidate(serverConfigId, record)
+  }
+
+  /**
+   * Keeps the user object for offline use (permissions, settings) without progress, bookmarks and any token, and
+   * tells the WebView when it changed. [lastMeAt]: set by a full pull only.
+   */
+  private suspend fun saveUser(serverConfigId: String, user: JsonNode, lastMeAt: Long?) {
+    val stripped = (user.deepCopy<JsonNode>() as? ObjectNode ?: return).also { strip(it) }
+    stripped.remove(listOf("mediaProgress", "bookmarks"))
+    val json = mapper.writeValueAsString(stripped)
+    val changed = db.withTransaction {
+      val state = db.syncState().get(serverConfigId)
+      val next = ServerSyncStateEntity(serverConfigId, lastMeAt ?: state?.lastMeAt, json, state?.schemaVersion ?: SYNC_STATE_SCHEMA)
+      if (next != state) db.syncState().upsert(next)
+      state?.userJson != json
+    }
+    if (changed) store.notifyUserChanged()
+  }
+
+  private fun strip(node: JsonNode) {
+    if (node is ObjectNode) node.remove(TOKEN_FIELDS)
+    node.forEach { strip(it) }
   }
 
   private fun readTree(json: String): JsonNode? =
@@ -42,6 +109,15 @@ class UserDataReconciler(private val http: SyncHttp, private val store: UserData
           } catch (e: Exception) {
             null
           }
+
+  /** The list itself, or the list under [field] of an object: the split endpoints are read in both shapes. */
+  private fun listIn(root: JsonNode?, field: String): JsonNode? = if (root?.isArray == true) root else root?.get(field)
+
+  /** Null when [array] is not a list; unreadable entries are skipped. */
+  private fun parseProgressList(array: JsonNode?): List<ServerProgress>? {
+    if (array == null || !array.isArray) return null
+    return array.mapNotNull { parseServerProgress(it) }
+  }
 
   /** Null when [array] is not a list; entries without an item id or a numeric time are skipped. */
   private fun parseBookmarks(array: JsonNode?): List<ServerBookmark>? {
@@ -66,6 +142,28 @@ class UserDataReconciler(private val http: SyncHttp, private val store: UserData
     HttpOutcome.Unauthorized -> "unauthorized"
     is HttpOutcome.Ok -> "ok"
   }
+
+  companion object {
+    const val SYNC_STATE_SCHEMA = 1
+    private val TOKEN_FIELDS = listOf("token", "accessToken", "refreshToken")
+  }
+}
+
+/** A server `MediaProgress` object; null without an item id or a numeric `lastUpdate`. */
+fun parseServerProgress(node: JsonNode?): ServerProgress? {
+  if (node == null || !node.isObject) return null
+  fun text(name: String) = node.get(name)?.takeIf { it.isTextual }?.asText()
+  fun number(name: String) = node.get(name)?.takeIf { it.isNumber }?.asDouble()?.takeIf { it.isFinite() }
+  fun long(name: String) = node.get(name)?.takeIf { it.isNumber }?.asLong()
+  val libraryItemId = text("libraryItemId")?.takeIf { it.isNotEmpty() } ?: return null
+  val lastUpdate = long("lastUpdate") ?: return null
+  return ServerProgress(
+          id = text("id").orEmpty(), libraryItemId = libraryItemId, episodeId = text("episodeId")?.takeIf { it.isNotEmpty() },
+          duration = number("duration") ?: 0.0, progress = number("progress") ?: 0.0,
+          currentTime = number("currentTime") ?: 0.0, isFinished = node.get("isFinished")?.asBoolean() ?: false,
+          hideFromContinueListening = node.get("hideFromContinueListening")?.asBoolean() ?: false,
+          ebookLocation = text("ebookLocation"), ebookProgress = number("ebookProgress"), lastUpdate = lastUpdate,
+          startedAt = long("startedAt") ?: 0L, finishedAt = long("finishedAt"))
 }
 
 /** Whether a server [version] such as "2.36.0" (or "v2.36.1-beta") is at least [min]; an unknown version is not. */
