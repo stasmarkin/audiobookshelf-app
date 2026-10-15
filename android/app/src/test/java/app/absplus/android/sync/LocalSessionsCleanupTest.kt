@@ -220,6 +220,30 @@ class LocalSessionsCleanupTest {
   }
 
   @Test
+  fun unmarkingWhileTheServerIsFinishedLeavesTheRowAsMarked() = runBlocking {
+    skippedProgressQueued(700.0)
+    SyncEngine.store!!.markFinished("srv", "li1", null, false)
+    serverAnswers(serverJson(900.0, lastUpdate = 300L, isFinished = true))
+    push()
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    assertFalse(JSONObject(api.requests.last().body!!).getBoolean("isFinished"))
+    val row = db.mediaProgress().get("srv", "li1", "")!!
+    assertFalse(row.isFinished)
+    assertEquals(700.0, row.currentTime, 0.0)
+    assertTrue(row.progress < 1.0)
+    assertFalse(row.pending)
+  }
+
+  @Test
+  fun unmarkingComparesOnlyThePositionWithAFinishedServer() = runBlocking {
+    skippedProgressQueued(700.0)
+    SyncEngine.store!!.markFinished("srv", "li1", null, false)
+    serverAnswers(serverJson(300.0, lastUpdate = 300L, isFinished = true))
+    push()
+    assertEquals("behind in position: it goes with the unmark", 700.0, JSONObject(api.requests.last().body!!).getDouble("currentTime"), 0.0)
+  }
+
+  @Test
   fun unmarkingKeepsThePositionCheckedAsUsual() = runBlocking {
     skippedProgressQueued(700.0)
     SyncEngine.store!!.markFinished("srv", "li1", null, false)

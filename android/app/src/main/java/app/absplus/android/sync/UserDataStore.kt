@@ -401,6 +401,8 @@ class UserDataStore(
     val (libraryItemId, episodeId) = progressKeyParts(row.itemKey)
     val local = progress.get(row.serverConfigId, libraryItemId, episodeId) ?: return null
     if (local.lastUpdate > ahead.builtFromLastUpdate) return null
+    // A finished mark sent with it changes the server's record (unmarking resets its position): the next pull settles it
+    if ("isFinished" in ahead.sentFields) return null
     val server = ahead.server
     if (ahead.sentFields.isEmpty()) {
       // Nothing sent: the server's whole record, as a pull takes it, with a time no older snapshot beats

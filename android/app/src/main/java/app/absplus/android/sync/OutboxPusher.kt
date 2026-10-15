@@ -147,7 +147,9 @@ class OutboxPusher(
     else if (conditional.isNotEmpty()) {
       when (val outcome = http.send(config, "GET", path)) {
         is HttpOutcome.Ok -> parseServerProgress(readTree(outcome.body))?.let { server ->
-          if (server.isFinished || server.currentTime >= progress.currentTime) {
+          // With an explicit mark the server's finished state is what the PATCH changes, not a position it is ahead with
+          val markSent = "isFinished" in fields
+          if ((!markSent && server.isFinished) || server.currentTime >= progress.currentTime) {
             sendFields = fields - conditional.toSet()
             serverAhead = ServerAhead(server, progress.lastUpdate, conditional, sendFields)
           }
