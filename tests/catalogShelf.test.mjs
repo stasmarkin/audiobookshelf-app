@@ -399,3 +399,76 @@ test('a late answer of a re-read is dropped after a reset', async () => {
   assert.ok(resets >= 1)
   delete globalThis.window
 })
+
+/** A page or component script with every import passed as a stub. */
+async function loadScript(path) {
+  const source = await read(path)
+  const script = source.match(/<script>([\s\S]*?)<\/script>/)[1]
+  const names = [...script.matchAll(/^import\s+(?:\{([^}]+)\}|(\w+))\s+from/gm)].flatMap((m) => (m[1] ? m[1].split(',').map((n) => n.split(' as ').pop().trim()) : [m[2]]))
+  const body = script.replace(/^import .*$/gm, '').replace('export default', 'return')
+  return new Function(...names, body)(...names.map(() => ({})))
+}
+
+test('a downloaded book opens from a catalog card without a server connection', async () => {
+  const page = await loadScript('../pages/item/_id/index.vue')
+  const run = async (query) => {
+    let target = null
+    await page.asyncData({ store: { state: { user: { serverConnectionConfig: null } } }, params: { id: 'li1' }, query, redirect: (to) => (target = to), app: {} })
+    return target
+  }
+  assert.equal(await run({ localLibraryItemId: 'local_li1' }), '/item/local_li1?noredirect=1')
+  assert.equal(await run({}), '/?error=No server connection to get library item')
+
+  // The list card passes the copy too (the grid card always did)
+  const list = await read('../components/cards/LazyListBookCard.vue')
+  assert.match(list, /else if \(this\.localLibraryItem\) router\.push\(`\/item\/\$\{this\.libraryItemId\}\?localLibraryItemId=\$\{this\.localLibraryItemId\}`\)/)
+})
+
+test('an undownloaded card offline says it is not available instead of leaving for Home', async () => {
+  for (const path of ['../components/cards/LazyBookCard.vue', '../components/cards/LazyListBookCard.vue']) {
+    const component = await loadScript(path)
+    for (const [serverState, localLibraryItem, opens] of [
+      ['offline', null, false],
+      ['offline', { id: 'local_li1' }, true],
+      ['online', null, true]
+    ]) {
+      const view = await card(path, { serverState, localLibraryItem })
+      const pushed = []
+      const toasts = []
+      Object.assign(view, { $router: { push: (to) => pushed.push(to) }, $toast: { info: (text) => toasts.push(text) }, $strings: { LabelNotAvailableOffline: 'Not available offline' } })
+      component.methods.clickCard.call(view, {})
+      assert.equal(pushed.length, opens ? 1 : 0, `${path} ${serverState} ${!!localLibraryItem}`)
+      assert.deepEqual(toasts, opens ? [] : ['Not available offline'])
+    }
+  }
+})
+
+test('a library whose reconcile did not finish says so while offline', async () => {
+  const answers = [
+    [{ total: 500, replica: { reconciledAt: null, complete: false } }, 'offline', true],
+    [{ total: 500, replica: { reconciledAt: 9, complete: false } }, 'offline', true],
+    [{ total: 500, replica: { reconciledAt: 9, complete: false } }, 'online', false],
+    [{ total: 500, replica: { reconciledAt: 9, complete: true } }, 'offline', false],
+    [{ total: 0, replica: { reconciledAt: null, complete: false } }, 'offline', false],
+    [{ total: 500, fromServer: true, replica: { reconciledAt: null, complete: false } }, 'offline', false]
+  ]
+  for (const [answer, serverState, shown] of answers) {
+    const shelf = await bookshelf({ answer: { results: [{ id: 'a' }], ...answer } })
+    shelf.store.state.serverState = serverState
+    await shelf.view.init()
+    assert.equal(shelf.view.showCatalogPartial, shown, JSON.stringify([answer, serverState]))
+  }
+  const template = (await read('../components/bookshelf/LazyBookshelf.vue')).match(/<template>([\s\S]*)<\/template>/)[1]
+  assert.match(template, /v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}/)
+})
+
+test('no book count over "the catalog isn\'t downloaded yet"', async () => {
+  const never = await bookshelf({ answer: { results: [], total: 0, replica: { reconciledAt: null, complete: false } } })
+  await never.view.init()
+  assert.deepEqual(never.emitted.filter(([name]) => name === 'bookshelf-total-entities').at(-1), ['bookshelf-total-entities', null])
+  const noLibrary = await bookshelf({ currentLibraryId: '' })
+  await noLibrary.view.init()
+  assert.deepEqual(noLibrary.emitted.filter(([name]) => name === 'bookshelf-total-entities').at(-1), ['bookshelf-total-entities', null])
+  const toolbar = await read('../components/home/BookshelfToolbar.vue')
+  assert.match(toolbar, /v-show="!selectedSeriesName && totalEntities !== null" class="toolbar-count/)
+})

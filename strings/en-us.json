@@ -454,6 +454,7 @@
   "MessageAudiobookshelfServerRequired": "<strong>Important!</strong> This app is designed to work with an Audiobookshelf server that you or someone you know is hosting. This app does not provide any content.",
   "MessageBookshelfEmpty": "Bookshelf empty",
   "MessageCatalogNotLoaded": "The catalog isn't downloaded yet. Connect to the server once to browse it offline.",
+  "MessageCatalogPartial": "Catalog partially downloaded — connect to the server to finish",
   "MessageConfirmAppExit": "Did you want to exit the app?",
   "MessageConfirmClearDiagnosticLog": "Delete the diagnostic log? Your downloads, listening progress, queue and settings are not affected.",
   "MessageConfirmDeleteEpisodeDownloadQueue": "Are you sure you want to clear episode download queue?",
