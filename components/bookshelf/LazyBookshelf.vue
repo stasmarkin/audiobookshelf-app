@@ -1,5 +1,7 @@
 <template>
   <div id="bookshelf" class="w-full max-w-full h-full">
+    <!-- Before the rows, sticky over the first one: its negative margin keeps the rows where the scroll maths expect them -->
+    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px; margin-bottom: -24px">{{ $strings.MessageCatalogPartial }}</div>
     <template v-for="shelf in totalShelves">
       <div :key="shelf" class="w-full px-2 relative" :class="showBookshelfListView || altViewEnabled ? '' : 'bookshelfRow'" :id="`shelf-${shelf - 1}`" :style="{ height: shelfHeight + 'px' }">
         <div v-if="!showBookshelfListView && !altViewEnabled" class="w-full absolute bottom-0 left-0 z-30 bookshelfDivider" style="min-height: 16px" :class="`h-${shelfDividerHeightIndex}`" />
@@ -7,8 +9,6 @@
       </div>
     </template>
 
-    <!-- Sticky over the first row without pushing the rows: the scroll maths count rows from the top -->
-    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px; margin-bottom: -24px">{{ $strings.MessageCatalogPartial }}</div>
     <div v-if="catalogNotLoaded" class="w-full py-16 px-6 text-center text-lg">
       <p class="py-4">{{ $strings.MessageCatalogNotLoaded }}</p>
     </div>

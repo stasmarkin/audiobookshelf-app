@@ -460,6 +460,9 @@ test('a library whose reconcile did not finish says so while offline', async () 
   }
   const template = (await read('../components/bookshelf/LazyBookshelf.vue')).match(/<template>([\s\S]*)<\/template>/)[1]
   assert.match(template, /v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}/)
+  // Sticky only lifts it within its place in the flow: it has to come before the rows to show at the top
+  assert.ok(template.indexOf('class="catalog-partial') < template.indexOf('<template v-for="shelf in totalShelves">'), 'the note precedes the rows')
+  assert.match(template, /class="catalog-partial sticky top-0[^"]*"[^>]*style="height: 24px; line-height: 24px; margin-bottom: -24px"/)
 })
 
 test('no book count over "the catalog isn\'t downloaded yet"', async () => {
