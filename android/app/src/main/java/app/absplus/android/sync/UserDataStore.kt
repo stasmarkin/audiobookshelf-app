@@ -18,7 +18,8 @@ class UserDataStore(
         private val inFlightId: () -> Long?,
         /** The user a saved server is signed in as; written into each outbox row so it is never sent as someone else. */
         private val ownerOf: (serverConfigId: String) -> String? = { null },
-        private val outbox: OutboxDao = db.outbox()
+        private val outbox: OutboxDao = db.outbox(),
+        private val recentlySettledMs: Long = RECENTLY_SETTLED_MS
 ) {
   private val bookmarks = db.bookmarks()
   private val progress = db.mediaProgress()
@@ -79,19 +80,25 @@ class UserDataStore(
    * Merges the server's list. A list that arrived by itself ([fromSnapshot]: socket event, authorize answer) may have
    * been built before an outbox row settled, so bookmarks settled within [RECENTLY_SETTLED_MS] keep their local state:
    * a just-sent bookmark is not deleted and a just-removed one does not come back. A fresh pull touches everything.
+   *
+   * @return whether the snapshot would have changed a bookmark it left alone (a fresh pull should follow)
    */
-  suspend fun applyServerBookmarks(serverConfigId: String, list: List<ServerBookmark>, fromSnapshot: Boolean = false) {
+  suspend fun applyServerBookmarks(serverConfigId: String, list: List<ServerBookmark>, fromSnapshot: Boolean = false): Boolean {
     val recent = if (fromSnapshot) recentlySettledKeys(serverConfigId) else emptySet()
-    val plan = db.withTransaction {
-      val local = bookmarks.getAll(serverConfigId).filter { bookmarkItemKey(it.libraryItemId, it.time) !in recent }
-      val server = list.filter { !it.time.isFinite() || bookmarkItemKey(it.libraryItemId, it.time) !in recent }
-      val plan = mergeBookmarks(serverConfigId, local, server)
+    val (plan, suppressed) = db.withTransaction {
+      val all = bookmarks.getAll(serverConfigId)
+      val isRecent = { libraryItemId: String, time: Double -> time.isFinite() && bookmarkItemKey(libraryItemId, time) in recent }
+      val full = if (recent.isEmpty()) null else mergeBookmarks(serverConfigId, all, list)
+      val suppressed = full != null && (full.upserts + full.deletes).any { isRecent(it.libraryItemId, it.time) }
+      val plan = mergeBookmarks(serverConfigId, all.filterNot { isRecent(it.libraryItemId, it.time) },
+              list.filterNot { isRecent(it.libraryItemId, it.time) })
       plan.upserts.forEach { bookmarks.upsert(it) }
       plan.deletes.forEach { bookmarks.delete(it.serverConfigId, it.libraryItemId, it.time) }
-      plan
+      plan to suppressed
     }
     val changed = (plan.upserts + plan.deletes).map { it.libraryItemId }.distinct()
     if (changed.isNotEmpty()) notifier.notify(SCOPE_BOOKMARKS, changed)
+    return suppressed
   }
 
   /** [row] reached the server; [followUp] is queued in the same transaction, before `pending` is recomputed. */
@@ -162,7 +169,7 @@ class UserDataStore(
 
   private fun recentlySettledKeys(serverConfigId: String): Set<String> = synchronized(recentlySettled) {
     val now = clock()
-    recentlySettled.entries.removeAll { now - it.value >= RECENTLY_SETTLED_MS }
+    recentlySettled.entries.removeAll { now - it.value >= recentlySettledMs }
     recentlySettled.keys.filter { it.startsWith("$serverConfigId ") }.map { it.substringAfter(' ') }.toSet()
   }
 

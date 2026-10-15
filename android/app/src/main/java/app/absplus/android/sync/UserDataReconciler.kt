@@ -27,10 +27,13 @@ class UserDataReconciler(private val http: SyncHttp, private val store: UserData
     return Result.success(Unit)
   }
 
-  /** A user object from the server (socket `user_updated`, `/api/authorize`); one without `bookmarks` changes nothing. */
-  suspend fun applyUserObject(serverConfigId: String, userJson: String) {
-    val list = parseBookmarks(readTree(userJson)?.get("bookmarks")) ?: return
-    store.applyServerBookmarks(serverConfigId, list, fromSnapshot = true)
+  /**
+   * A user object from the server (socket `user_updated`, `/api/authorize`); one without `bookmarks` changes nothing.
+   * @return whether it left recently settled bookmarks alone that it would have changed (see [UserDataStore])
+   */
+  suspend fun applyUserObject(serverConfigId: String, userJson: String): Boolean {
+    val list = parseBookmarks(readTree(userJson)?.get("bookmarks")) ?: return false
+    return store.applyServerBookmarks(serverConfigId, list, fromSnapshot = true)
   }
 
   private fun readTree(json: String): JsonNode? =

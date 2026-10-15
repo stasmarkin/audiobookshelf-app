@@ -44,7 +44,7 @@ class SyncEngineTest {
     {"libraryItemId":"li8","time":2,"title":"B","createdAt":1}]}"""
 
   /** Starts the engine and lets its APP_START run finish, so later state changes are separate requests. */
-  private suspend fun start(unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS) {
+  private suspend fun start(unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS, recentlySettledMs: Long = UserDataStore.RECENTLY_SETTLED_MS) {
     api.handler = { request -> if (request.method == "GET") 200 to serverBookmarks else 200 to "{}" }
     SyncEngine.initForTest(SyncDeps(
             db = db,
@@ -64,7 +64,8 @@ class SyncEngineTest {
             log = {},
             notifyWindowMs = 10,
             logError = { errors.add(it) },
-            unreachableRetryMs = unreachableRetryMs))
+            unreachableRetryMs = unreachableRetryMs,
+            recentlySettledMs = recentlySettledMs))
     settle()
   }
 
@@ -388,5 +389,40 @@ class SyncEngineTest {
 
     eventually("the next automatic trigger reconciles") { gets() == 2 }
     eventually("and its bookmarks arrive") { db.bookmarks().getVisible("srv").size == 2 }
+  }
+
+  @Test
+  fun heldBackSnapshotIsFollowedByAFreshPull() = runBlocking {
+    foreground = true
+    start(recentlySettledMs = 300L)
+    store.addBookmark("srv", "li1", 754.0, "Offline")
+    // Another device deletes the bookmark right after it reaches the server: every list from the server is empty
+    api.handler = { request -> if (request.method == "GET") 200 to """{"bookmarks":[]}""" else 200 to "{}" }
+    state.value = ServerState.ONLINE
+    eventually("pull and push") { gets() == 1 && db.outbox().count("srv") == 0 }
+
+    SyncEngine.applyEvent("user_updated", """{"bookmarks":[]}""", "srv")
+    assertEquals("held back by the settle window", 1, db.bookmarks().getVisible("srv").size)
+
+    eventually("a pull after the window") { gets() == 2 }
+    eventually("applies the deletion") { db.bookmarks().getVisible("srv").isEmpty() }
+  }
+
+  @Test
+  fun heldBackSnapshotInTheBackgroundWaitsForTheForeground() = runBlocking {
+    start(recentlySettledMs = 100L)
+    store.addBookmark("srv", "li1", 754.0, "Offline")
+    api.handler = { request -> if (request.method == "GET") 200 to """{"bookmarks":[]}""" else 200 to "{}" }
+    state.value = ServerState.ONLINE
+    eventually("push") { db.outbox().count("srv") == 0 }
+
+    SyncEngine.applyEvent("user_updated", """{"bookmarks":[]}""", "srv")
+    delay(300)
+    settle()
+    assertEquals("no pull in the background", 0, gets())
+
+    foreground = true
+    SyncEngine.syncNow(SyncReason.FOREGROUND)
+    eventually("the deferred pull") { gets() == 1 && db.bookmarks().getVisible("srv").isEmpty() }
   }
 }

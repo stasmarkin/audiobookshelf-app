@@ -64,6 +64,7 @@ class SyncDeps(
         val logError: (String) -> Unit = log,
         /** The user a saved server is signed in as (see [UserDataStore]). */
         val ownerOf: (serverConfigId: String) -> String? = { null },
+        val recentlySettledMs: Long = UserDataStore.RECENTLY_SETTLED_MS,
         val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS
 )
 
@@ -165,7 +166,8 @@ object SyncEngine {
     private val outbox = deps.db.outbox()
     private val notifier = DataChangeNotifier(deps.notifyWindowMs, scope) { name, ids -> _dataChanges.tryEmit(DataChange(name, ids)) }
     private lateinit var pusher: OutboxPusher
-    val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId }, ownerOf = deps.ownerOf)
+    val store = UserDataStore(deps.db, notifier, deps.clock, inFlightId = { pusher.inFlightId }, ownerOf = deps.ownerOf,
+            recentlySettledMs = deps.recentlySettledMs)
     private val reconciler = UserDataReconciler(deps.http, store)
 
     private val lock = Any()
@@ -181,6 +183,7 @@ object SyncEngine {
     private var reconcileRunning = false
     private var unreachableRetries = 0
     private var backoffJob: Job? = null
+    private var snapshotFollowUp: Job? = null
     private val jobs = mutableListOf<Job>()
 
     init {
@@ -204,6 +207,7 @@ object SyncEngine {
     fun stop() {
       synchronized(lock) { runner?.cancel() }
       backoffJob?.cancel()
+      snapshotFollowUp?.cancel()
       jobs.forEach { it.cancel() }
     }
 
@@ -246,7 +250,7 @@ object SyncEngine {
       if (serverConfigId != active) return@withLock false
       when (name) {
         "user_updated" -> {
-          reconciler.applyUserObject(active, payloadJson)
+          if (reconciler.applyUserObject(active, payloadJson)) reconcileAfterSettleWindow()
           true
         }
         else -> false
@@ -262,10 +266,16 @@ object SyncEngine {
 
     private suspend fun drain() {
       val self = coroutineContext[Job]
+      var finished = false
       try {
         while (true) {
           val reconcile = synchronized(lock) {
-            if (!wantPush) return
+            if (!wantPush) {
+              // In the same block as the check: a request after it sees no runner and starts one
+              if (runner === self) runner = null
+              finished = true
+              return
+            }
             wantPush = false
             wantReconcile.also { wantReconcile = false }
           }
@@ -280,7 +290,8 @@ object SyncEngine {
           }
         }
       } finally {
-        synchronized(lock) { if (runner === self) runner = null }
+        // Cancelled or failed outside a run: let the next request start a new runner
+        if (!finished) synchronized(lock) { if (runner === self) runner = null }
       }
     }
 
@@ -331,6 +342,18 @@ object SyncEngine {
       }
     }
 
+    /**
+     * A snapshot left recently settled bookmarks alone, so a change another device made to them is not applied yet: a
+     * fresh pull after the window does it. Background and offline defer it like any reconcile.
+     */
+    private fun reconcileAfterSettleWindow() {
+      snapshotFollowUp?.cancel()
+      snapshotFollowUp = scope.launch {
+        delay(deps.recentlySettledMs)
+        syncNow(SyncReason.MANUAL)
+      }
+    }
+
     private fun scheduleUnreachableRetry() {
       val wait = deps.unreachableRetryMs[minOf(unreachableRetries, deps.unreachableRetryMs.lastIndex)]
       unreachableRetries++
@@ -362,6 +385,7 @@ object SyncEngine {
         unreachableRetries = 0
       }
       backoffJob?.cancel()
+      snapshotFollowUp?.cancel()
       refreshPendingCount()
     }
 

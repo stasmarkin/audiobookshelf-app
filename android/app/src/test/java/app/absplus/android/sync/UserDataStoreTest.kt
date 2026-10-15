@@ -239,7 +239,7 @@ class UserDataStoreTest {
     store.onOutboxSent(queue().single())
 
     // An authorize answer requested before the POST arrives after it settled: it does not have the bookmark yet
-    store.applyServerBookmarks("srv", emptyList(), fromSnapshot = true)
+    assertTrue("a fresh pull should follow", store.applyServerBookmarks("srv", emptyList(), fromSnapshot = true))
     assertEquals(listOf(754.0), db.bookmarks().getVisible("srv").map { it.time })
 
     now += UserDataStore.RECENTLY_SETTLED_MS
@@ -267,7 +267,8 @@ class UserDataStoreTest {
     store.onOutboxSent(queue().single())
     db.bookmarks().upsert(BookmarkEntity("srv", "li2", 1.0, "Old", 1L, null, pending = false))
 
-    store.applyServerBookmarks("srv", listOf(ServerBookmark("li3", 2.0, "New", 1L)), fromSnapshot = true)
+    assertFalse("nothing held back: the snapshot agrees on li1",
+            store.applyServerBookmarks("srv", listOf(ServerBookmark("li1", 754.0, "Mark", 1_000L), ServerBookmark("li3", 2.0, "New", 1L)), fromSnapshot = true))
 
     assertEquals(listOf("li1" to 754.0, "li3" to 2.0), db.bookmarks().getVisible("srv").map { it.libraryItemId to it.time })
   }
