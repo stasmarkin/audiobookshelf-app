@@ -7,11 +7,18 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
-- **Catalog copy on the device (groundwork for browsing offline):** after each full sync with the server (on start,
-  on reconnect, on Sync now) the app now also copies the catalog of every library (libraries, books, series and the
-  filter lists) into a database on the phone, page by page in the background, and only rewrites what changed since
-  the last copy. Nothing changes on screen yet: the tabs still read the server as before. The first copy of a large
-  library takes a while and some mobile data; later ones only fetch the lists again.
+- **Library tab offline:** the app now keeps a copy of each library's catalog (libraries, books, series and the
+  filter lists) on the phone and the Library tab reads it, so it opens without the server, also on a cold start in
+  airplane mode, with the last synced state and the same filters, sorting and collapsed series as online. The copy is
+  filled in the background after each full sync with the server (on start, on reconnect, on Sync now; the app-bar
+  indicator shows "Syncing catalog" meanwhile), only rewrites what changed, and follows changes made on the server
+  while the app is connected. Until a library has been copied once, the tab reads the server as before; offline it
+  says the catalog isn't downloaded yet. Offline, books without a downloaded copy are dimmed, marked "Not available
+  offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
+  limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
+  the server; an author or narrator whose name contains a comma is not found by the author or narrator filter
+  offline; the "supplementary e-book" filter needs the server. The Series, Authors, Collections and Playlists tabs
+  are unchanged.
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer
   uses the broadcast symbol. Tabs keep equal widths, the labels name each destination for screen readers, and the
