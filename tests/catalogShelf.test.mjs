@@ -316,11 +316,12 @@ test('a refresh reads only pages near the view and stops at a reset', async () =
 test('a list read from the server still follows the socket', async () => {
   const fromServer = await bookshelf({ answer: { results: [], total: 0, fromServer: true, replica: { reconciledAt: null, complete: false } } })
   await fromServer.view.init()
-  let resets = 0
-  fromServer.view.resetEntities = () => resets++
-  fromServer.view.libraryItemAdded({ id: 'x' })
-  fromServer.view.libraryItemsAdded([{ id: 'x' }])
-  assert.equal(resets, 2)
+  let scheduled = 0
+  fromServer.view.refreshDebouncer = { schedule: () => scheduled++, cancel() {} }
+  fromServer.view.libraryItemAdded({ id: 'x', libraryId: 'l1' })
+  fromServer.view.libraryItemsAdded([{ id: 'x', libraryId: 'l1' }])
+  fromServer.view.libraryItemRemoved({ id: 'x', libraryId: 'l1' })
+  assert.equal(scheduled, 3, 'each one schedules a re-read of the loaded pages')
 
   const replica = await bookshelf({ answer: { results: [], total: 0, replica: { reconciledAt: 5, complete: true } } })
   await replica.view.init()
@@ -331,28 +332,64 @@ test('a list read from the server still follows the socket', async () => {
   assert.equal(replicaResets, 0, "the replica's own notice refreshes it")
 })
 
-test('a book removed from a server-read list leaves in place, keeping the scroll', async () => {
-  const results = Array.from({ length: 20 }, (_, i) => ({ id: `b${i}`, libraryId: 'l1' }))
-  const shelf = await bookshelf({ answer: { results, total: 300, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+test('a server-read list follows the socket by reading its pages again, keeping the scroll', async () => {
+  const page = (total, ids, extra = {}) => ({ results: ids.map((id) => ({ id, libraryId: 'l1', ...extra[id] })), total, fromServer: true, replica: { reconciledAt: null, complete: false } })
+  const collapsed = { s1: { collapsedSeries: { id: 'ser', numBooks: 3 } } }
+  const shelf = await bookshelf({ answer: page(300, ['s1', 'b1', 'b2'], collapsed) })
   const { view } = shelf
   await view.init()
-  Object.assign(view, { booksPerFetch: 20, entitiesPerShelf: 2, currScrollTop: 700 })
-  view.pagesLoaded = { 0: true, 1: true }
-  const shown = {}
-  view.entityComponentRefs = { 4: { setEntity: (e) => (shown[4] = e.id), setLocalLibraryItem() {} }, 1: { setEntity: (e) => (shown[1] = e.id), setLocalLibraryItem() {} } }
-  let scrolledTo = null
-  view.handleScroll = (top) => (scrolledTo = top)
-  view.resetEntities = () => assert.fail('the list is not reset')
+  const timers = fakeTimers()
+  view.refreshDebouncer = createDebouncer({ delayMs: 1000, ...timers })
+  const wrapper = { scrollTop: 700 }
+  globalThis.document = { getElementById: (id) => (id === 'bookshelf-wrapper' ? wrapper : null) }
+  globalThis.window = { innerWidth: 412 }
+  Object.defineProperty(view, 'shelfHeight', { get: () => 100, configurable: true })
+  Object.assign(view, { currScrollTop: 700, bookshelfHeight: 500, pagesLoaded: { 0: true } })
+  let scrolled = null
+  view.handleScroll = (top) => (scrolled = top)
+  // The server after the removal of b1: one less, the series card is still first
+  view.$absData.getLibraryItems = async () => page(299, ['s1', 'b2'], collapsed)
 
-  view.libraryItemRemoved({ id: 'b3', libraryId: 'l1' })
+  view.libraryItemRemoved({ id: 'b1', libraryId: 'l1' })
+  view.libraryItemRemoved({ id: 'x', libraryId: 'other' })
+  assert.deepEqual(timers.run(), [1000], 'one debounced re-read')
+  await flush()
 
   assert.equal(view.totalEntities, 299)
-  assert.equal(view.entities[3].id, 'b4')
-  assert.deepEqual(shown, { 4: 'b5' }, 'cards from the removed one on show the next book; earlier ones stay')
-  assert.deepEqual(Object.keys(view.pagesLoaded), [], 'pages from the removed one on are read again when in view')
-  assert.equal(scrolledTo, 700, 'the scroll position stays')
+  assert.equal(view.entities[0].collapsedSeries.id, 'ser', 'the collapsed series stays')
+  assert.equal(wrapper.scrollTop, 700)
+  assert.equal(scrolled, 700, 'the scroll position stays')
+  delete globalThis.document
+  delete globalThis.window
 
-  view.libraryItemRemoved({ id: 'b5', libraryId: 'other' })
-  view.libraryItemRemoved({ id: 'not-loaded', libraryId: 'l1' })
-  assert.equal(view.totalEntities, 299, 'another library, or a book not loaded, changes nothing')
+  // Only books of this library move it
+  view.libraryItemsAdded([{ id: 'y', libraryId: 'other' }])
+  assert.deepEqual(timers.run(), [])
+})
+
+test('a late answer of a re-read is dropped after a reset', async () => {
+  const shelf = await bookshelf({ answer: { results: [{ id: 'a', libraryId: 'l1' }], total: 1, fromServer: true, replica: { reconciledAt: null, complete: false } } })
+  const { view } = shelf
+  await view.init()
+  let release
+  view.$absData.getLibraryItems = () => new Promise((resolve) => (release = resolve))
+  view.pagesLoaded = { 0: true }
+  globalThis.window = { innerWidth: 412 }
+  Object.defineProperty(view, 'shelfHeight', { get: () => 100, configurable: true })
+  const refresh = view.refreshLoadedPages()
+  await flush()
+  // A filter change resets the list while the re-read waits for the server
+  let resets = 0
+  const reset = view.resetEntities
+  view.resetEntities = async () => {
+    resets++
+    return reset()
+  }
+  view.resetEntities()
+  release({ results: [{ id: 'stale', libraryId: 'l1' }], total: 1, fromServer: true, replica: { reconciledAt: null } })
+  await refresh
+  await flush()
+  assert.ok(!view.entities.some((e) => e && e.id === 'stale'), 'the old answer is not written into the new list')
+  assert.ok(resets >= 1)
+  delete globalThis.window
 })
