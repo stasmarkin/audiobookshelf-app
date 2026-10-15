@@ -187,3 +187,22 @@ test('a downloaded copy of another server shows and follows that server bookmark
   }
   assert.deepEqual(asked, [], 'no extra read for the active server')
 })
+
+test('a downloaded copy played offline keeps its server id, so the player shows the bookmark button', async () => {
+  const container = (await readFile(new URL('../components/app/AudioPlayerContainer.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const sandbox = { console }
+  vm.runInNewContext(container.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component =').replace(/mixins: \[[^\]]*\],/, ''), sandbox)
+  const { setServerIds } = sandbox.component.methods
+  const copySession = { libraryItemId: 'li-server', episodeId: null, localLibraryItem: { id: 'local_1', libraryItemId: 'li-server', serverConnectionConfigId: 'server-a' } }
+  const run = (ctx, args) => (setServerIds.apply(ctx, args), [ctx.serverLibraryItemId, ctx.serverEpisodeId])
+
+  // Offline cold start: the page could not tell the server id (no current server), the session watcher already did
+  assert.deepEqual(run({ currentPlaybackSession: copySession, serverLibraryItemId: 'li-server', serverEpisodeId: null }, ['local_1', null, null, null]), ['li-server', null])
+  // The answer came before the watcher ran: the copy's own session has it
+  assert.deepEqual(run({ currentPlaybackSession: copySession, serverLibraryItemId: null, serverEpisodeId: null }, ['local_1', null, null, null]), ['li-server', null])
+  // A session of something else still in the store is not taken
+  assert.deepEqual(run({ currentPlaybackSession: { ...copySession, localLibraryItem: { id: 'local_other' }, libraryItemId: 'li-other' }, serverLibraryItemId: null, serverEpisodeId: null }, ['local_1', null, null, null]), [null, null])
+  // Unchanged: ids the page passed, and server items
+  assert.deepEqual(run({ currentPlaybackSession: null, serverLibraryItemId: null }, ['local_1', 'local_ep', 'li-page', 'ep-page']), ['li-page', 'ep-page'])
+  assert.deepEqual(run({ currentPlaybackSession: null, serverLibraryItemId: null }, ['li-stream', 'ep-stream', null, null]), ['li-stream', 'ep-stream'])
+})

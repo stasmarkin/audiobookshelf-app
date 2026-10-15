@@ -76,6 +76,16 @@ export default {
     }
   },
   methods: {
+    /**
+     * The server ids of what started playing. A downloaded copy knows its own (the session's libraryItemId, from
+     * LocalLibraryItem.libraryItemId) even when the page could not tell them, offline or with another server active.
+     */
+    setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId) {
+      const session = this.currentPlaybackSession
+      const copySession = session?.localLibraryItem?.id === libraryItemId ? session : null
+      this.serverLibraryItemId = !libraryItemId.startsWith('local') ? libraryItemId : serverLibraryItemId || copySession?.libraryItemId || this.serverLibraryItemId
+      this.serverEpisodeId = episodeId && !episodeId.startsWith('local') ? episodeId : serverEpisodeId || copySession?.episodeId || this.serverEpisodeId
+    },
     showBookmarks() {
       this.showBookmarksModal = true
     },
@@ -444,16 +454,7 @@ export default {
             this.$toast.error(errorMsg)
           } else {
             console.log('Library item play response', JSON.stringify(data))
-            if (!libraryItemId.startsWith('local')) {
-              this.serverLibraryItemId = libraryItemId
-            } else {
-              this.serverLibraryItemId = serverLibraryItemId
-            }
-            if (episodeId && !episodeId.startsWith('local')) {
-              this.serverEpisodeId = episodeId
-            } else {
-              this.serverEpisodeId = serverEpisodeId
-            }
+            this.setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId)
           }
         })
         .catch((error) => {
