@@ -229,6 +229,7 @@ class MediaProgressSyncer(
 
     // The widget shows the confirmed seek position right away (also while paused, e.g. its own jump keys)
     playerNotificationService.showWidgetPosition(currentPlaybackSession?.id, currentPlaybackSession?.currentTime)
+    currentPlaybackSession?.let { recordSeek(it, it.currentTime) }
 
     MediaEventManager.seekEvent(currentPlaybackSession!!, null)
   }
@@ -409,6 +410,23 @@ class MediaProgressSyncer(
     val mirror = !session.isLocal
     SyncEngine.launchWrite { store ->
       store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate, mirror)
+    }
+  }
+
+  /**
+   * A seek is where the user put the player, also while paused, when no tick follows: without it the next refocus
+   * would take the last tick's position as the device's and move the player back.
+   */
+  internal fun recordSeek(session: PlaybackSession, currentTime: Double) {
+    val serverConfigId = session.serverConnectionConfigId?.takeIf { it.isNotEmpty() } ?: return
+    val libraryItemId = session.libraryItemId?.takeIf { it.isNotEmpty() } ?: return
+    val episodeId = session.episodeId
+    val duration = session.getTotalDuration()
+    if (duration <= 0) return
+    val progress = currentTime / duration
+    val lastUpdate = System.currentTimeMillis()
+    SyncEngine.launchWrite { store ->
+      store.recordPlayback(serverConfigId, libraryItemId, episodeId, currentTime, duration, progress, lastUpdate)
     }
   }
 

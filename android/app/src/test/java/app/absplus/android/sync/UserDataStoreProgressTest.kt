@@ -503,10 +503,26 @@ class UserDataStoreProgressTest {
     // What the server sends after this device's own /sync: the same position, stamped later by the server
     assertFalse(store.applyServerProgressCandidate("srv", server(600.0, lastUpdate = 200L)))
 
-    assertEquals(100L, row()!!.lastUpdate)
+    assertEquals("the server's time is kept", 200L, row()!!.lastUpdate)
     assertEquals("the copy is not rewritten", 5L, paper()!!.lastUpdate)
     kotlinx.coroutines.delay(50)
     assertTrue("nothing to re-read", changes.isEmpty())
+
+    // A snapshot older than the echo but newer than the device's own value
+    assertFalse(store.applyServerProgressCandidate("srv", server(500.0, lastUpdate = 150L)))
+    assertEquals(600.0, row()!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun resetWithoutTheServerIdThenListeningToTheEndIsFinished() = runBlocking {
+    db.mediaProgress().upsert(progressRow(500.0, lastUpdate = 5L, pending = false).copy(serverProgressId = null))
+    store.resetProgress("srv", "li1", null)
+    store.recordPlayback("srv", "li1", null, 600.0, 1000.0, 0.6, lastUpdate = now + 1)
+    store.recordPlayback("srv", "li1", null, 995.0, 1000.0, 0.995, lastUpdate = now + 2)
+
+    assertTrue(row()!!.isFinished)
+    pusher.pushAll(config)
+    assertTrue(json(api.requests.single().body).getBoolean("isFinished"))
   }
 
   @Test

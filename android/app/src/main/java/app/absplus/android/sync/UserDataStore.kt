@@ -189,9 +189,11 @@ class UserDataStore(
       if (existing != null && existing.pending && lastUpdate <= existing.lastUpdate) return@withTransaction null
       val row = existing ?: newRow(serverConfigId, libraryItemId, episodeId, lastUpdate).copy(pending = queued.isNotEmpty())
       // An unsent "finished" mark stays as the user set it, even while playing on: the PATCH sends the row's value.
-      // Not after a reset, whose own PATCH of the listening carries isFinished as playback leaves it
-      val keepFinished = queued.none { it.kind == OutboxKind.PROGRESS_DELETE } && queued.any {
-        it.kind == OutboxKind.PROGRESS_PATCH && "isFinished" in OutboxPayload.progressPatchFields(it.payload).orEmpty()
+      // Such a mark is a PATCH with isFinished but no position; one that also sends the position (a reset without the
+      // record's id, an import, listening after a reset) sends isFinished as playback leaves it
+      val keepFinished = queued.any {
+        val fields = OutboxPayload.progressPatchFields(it.payload).orEmpty()
+        it.kind == OutboxKind.PROGRESS_PATCH && "isFinished" in fields && "currentTime" !in fields
       }
       val finished = if (keepFinished) row.isFinished else progressValue >= FINISHED_PROGRESS
       var updated = row.copy(currentTime = currentTime, duration = duration, progress = progressValue,
@@ -217,7 +219,7 @@ class UserDataStore(
    * in [keep] (read in the deleting transaction, so a key remembered by an import that just committed is seen).
    * Anything else ([deleteMissing] false) is a snapshot, which may predate a reset that reached the server lately: its
    * records from before that reset are ignored. A taken record with the device's own values (the server's echo of
-   * this device's listening) changes nothing.
+   * this device's listening) only updates the row's time and id: no Paper mirror and no notice to the WebView.
    *
    * @return the rows taken from the server
    */
@@ -235,9 +237,10 @@ class UserDataStore(
         if (resetAt != null && server.lastUpdate <= resetAt) continue
         val local = progress.get(serverConfigId, server.libraryItemId, server.episodeId.orEmpty())
         val merge = mergeProgress(serverConfigId, local, server, key in unsent)
-        if (merge is ProgressMerge.TakeServer && (local == null || !sameValues(local, merge.row))) {
+        if (merge is ProgressMerge.TakeServer) {
+          // Kept even when only the time changed, so a later, older snapshot loses to it
           progress.upsert(merge.row)
-          taken.add(merge.row)
+          if (local == null || !sameValues(local, merge.row)) taken.add(merge.row)
         } else if (local != null && local.serverProgressId == null && server.id.isNotEmpty()) {
           // The id is what a later reset deletes
           progress.upsert(local.copy(serverProgressId = server.id))

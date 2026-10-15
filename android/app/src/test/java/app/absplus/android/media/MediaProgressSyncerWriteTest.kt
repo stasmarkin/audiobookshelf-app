@@ -154,4 +154,20 @@ class MediaProgressSyncerWriteTest {
     assertEquals(600.0, JSONObject(api.requests[1].body!!).getDouble("currentTime"), 0.0)
     assertNull(db.outbox().head("srv"))
   }
+
+  @Test
+  fun aSeekWhilePausedIsTheDevicesPosition() = runBlocking {
+    val session = session(PLAYMETHOD_DIRECTPLAY, null)
+    tick(session, 100.0)
+    eventually("the tick") { row()?.currentTime == 100.0 }
+
+    // Paused, the user moves the player on: no tick follows
+    syncer.recordSeek(session, 300.0)
+    eventually("the seek") { row()?.currentTime == 300.0 }
+
+    // Refocus asks native for the row after merging an older server value: it is where the user put the player
+    val result = SyncEngine.store!!.mergeServerProgress("srv",
+            app.absplus.android.sync.ServerProgress("mp1", "li1", null, 1000.0, 0.1, 100.0, false, false, null, null, 2L, 1L, null))
+    assertEquals(300.0, result.row!!.currentTime, 0.0)
+  }
 }

@@ -164,6 +164,15 @@ test('refocus after a sync already took the server position still moves the paus
   await component.methods.deviceFocused.call(synced.ctx, true)
   assert.deepEqual(synced.calls.seek, [9000])
 
+  // Moved on while paused: native wrote the seek into its row (MediaProgressSyncer.recordSeek), so the row is where
+  // the player is and nothing moves it back to the last tick
+  const sought = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 6000, lastUpdate: 1500 }, applied: false, rowTime: 7500 })
+  sought.ctx.$refs.audioPlayer.currentTime = 7500
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => ({ playbackSession: { id: 'session-1' }, currentTime: 7500 })
+  await component.methods.deviceFocused.call(sought.ctx, true)
+  assert.deepEqual(sought.calls.seek, [], 'a seek made while paused is kept')
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
+
   const pending = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }, applied: false, rowTime: 9000, protected: true })
   await component.methods.deviceFocused.call(pending.ctx, true)
   assert.deepEqual(pending.calls.seek, [], 'the device keeps its own position')
