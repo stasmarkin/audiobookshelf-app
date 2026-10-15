@@ -8,7 +8,7 @@ import org.json.JSONObject
 /** The user's data as the WebView reads it: progress in the server's `MediaProgress` shape, as `/api/me` has it. */
 object UserDataJson {
   fun progress(row: MediaProgressEntity): JSONObject = JSONObject()
-          .put("id", row.serverProgressId ?: JSONObject.NULL)
+          .put("id", UserDataStore.realServerProgressId(row.serverProgressId) ?: JSONObject.NULL)
           .put("libraryItemId", row.libraryItemId)
           .put("episodeId", row.episodeId.ifEmpty { null } ?: JSONObject.NULL)
           .put("duration", row.duration)

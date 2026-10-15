@@ -62,7 +62,7 @@ object PaperProgressMirror : ProgressMirror {
     val copies = copies()
     for (row in rows) {
       if (copyOf(copies, row) == null) continue
-      val progress = MediaProgress(row.serverProgressId.orEmpty(), row.libraryItemId, row.episodeId.ifEmpty { null },
+      val progress = MediaProgress(UserDataStore.realServerProgressId(row.serverProgressId).orEmpty(), row.libraryItemId, row.episodeId.ifEmpty { null },
               row.duration, row.progress, row.currentTime, row.isFinished, row.ebookLocation, row.ebookProgress,
               row.lastUpdate, row.startedAt, row.finishedAt)
       // A no-op for an item never played here: the history exists only after playback
@@ -80,7 +80,7 @@ object PaperProgressMirror : ProgressMirror {
   }
 
   private fun mirror(row: MediaProgressEntity, item: LocalLibraryItem, localEpisodeId: String?, fields: Collection<String>?,
-                     unlessNewer: Boolean) {
+                     unlessNewer: Boolean): Unit = synchronized(DbManager.localMediaProgressLock) {
     val db = DeviceManager.dbManager
     val id = localProgressId(item, localEpisodeId)
     val existing = db.getLocalMediaProgress(id)

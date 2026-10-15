@@ -51,7 +51,9 @@ Merged into `plus`, not yet in a published release.
 - **Rollback and a known limit:** rolling back to the previous version is safe: the downloaded-book progress it reads
   is kept up to date alongside, and it sends unsent "finished" and resets itself. Until a later release, a listening
   session the server accepts without taking its position (its own progress is newer) no longer protects the offline
-  position of that item.
+  position of that item. Progress of a downloaded book reset in the web client before updating to this version, while
+  the device never learned the server's record, stays on the device as its local position and is not sent to the
+  server (as in the previous version).
 
 ## v0.18.2 — LLAMA landscape cover frame fix
 

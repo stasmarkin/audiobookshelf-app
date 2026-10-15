@@ -8,6 +8,7 @@ import app.absplus.android.data.LocalMediaProgress
 import app.absplus.android.data.MediaProgress
 import app.absplus.android.data.PlaybackSession
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.managers.DbManager
 import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.player.ServerProgressAck
 import app.absplus.android.plugins.AbsLogger
@@ -388,7 +389,7 @@ class MediaProgressSyncer(
       if (it.progress.isNaN()) {
         DLog.e(tag, "Invalid progress on local media progress")
       } else {
-        DeviceManager.dbManager.saveLocalMediaProgress(it)
+        synchronized(DbManager.localMediaProgressLock) { DeviceManager.dbManager.saveLocalMediaProgress(it) }
         playerNotificationService.clientEventEmitter?.onLocalMediaProgressUpdate(it)
         DLog.d(
                 tag,
