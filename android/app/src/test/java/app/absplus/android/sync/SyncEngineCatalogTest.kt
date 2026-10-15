@@ -161,17 +161,21 @@ class SyncEngineCatalogTest {
   fun eventDuringPassIsAppliedAfterIt() = runBlocking {
     server.book("li1", title = "Old")
     server.book("li2")
-    start()
+    startOnline()
+    val applied = mutableListOf<Boolean>()
+    // The server answers the page as it was before the events (the old title, li2 still there)
     server.onItemsPage = { page ->
-      if (page.page == 0 && page.filter == null) runBlocking {
+      if (page.page == 0 && page.filter == null && applied.isEmpty()) runBlocking {
         val newer = FakeBook("li1", "lib1", "New", updatedAt = 2)
-        assertTrue(SyncEngine.applyEvent("item_updated", server.itemJson(newer).toString(), "srv"))
-        assertTrue(SyncEngine.applyEvent("item_removed", """{"id":"li2","libraryId":"lib1"}""", "srv"))
+        applied += SyncEngine.applyEvent("item_updated", server.itemJson(newer).toString(), "srv")
+        applied += SyncEngine.applyEvent("item_removed", """{"id":"li2","libraryId":"lib1"}""", "srv")
       }
     }
-    setState(ServerState.ONLINE)
-    awaitPasses(1)
+    SyncEngine.syncNow(SyncReason.MANUAL)
+    awaitPasses(2)
 
+    assertEquals(listOf(true, true), applied)
+    assertTrue(replica.libraryState().get("srv", "lib1")!!.itemsComplete)
     assertEquals("New", title("li1"))
     assertNull("a removed item does not come back with the page read before the event", title("li2"))
   }
