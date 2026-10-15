@@ -53,8 +53,8 @@ Merged into `plus`, not yet in a published release.
 - **Listening sessions offline:** listening to a streamed book while the server cannot be reached is no longer lost or
   inflated. The time the server did not get is saved as a listening session of its own, also when the app is closed
   before it could send it, and sent when the server is back, next to the streamed session, which it no longer
-  overwrites. Rarely, when the server applied an update but its answer was lost, that time can also count in the
-  offline session.
+  overwrites. Rarely, when the server applied an update but its answer was lost, or the app was closed while an update
+  was on its way, that time also goes into the offline session and can count twice.
   The server's answer is now read per session: the ones it took leave the phone, the ones it rejects because their
   book or library no longer exists are dropped (with a Diagnostics log entry), and any other is sent again next time.
   When the server takes a session but keeps its own newer position, the phone's position is sent to it as a progress

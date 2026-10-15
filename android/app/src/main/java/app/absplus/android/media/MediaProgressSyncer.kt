@@ -166,14 +166,14 @@ class MediaProgressSyncer(
     if (currentTime > 0) { // Current time should always be > 0 on stop
       val stopped = generation
       val session = currentPlaybackSession
-      sync(true, currentTime) { syncResult ->
+      sync(true, currentTime) { syncResult -> onMain {
         session?.let { playbackSession ->
           MediaEventManager.stopEvent(playbackSession, syncResult)
         }
 
         if (stopped == generation) reset()
         cb()
-      }
+      } }
     } else {
       currentPlaybackSession?.let { playbackSession ->
         MediaEventManager.stopEvent(playbackSession, null)
@@ -197,7 +197,7 @@ class MediaProgressSyncer(
     if (currentTime > 0) { // Current time should always be > 0 on pause
       val paused = generation
       val session = currentPlaybackSession
-      sync(true, currentTime) { syncResult ->
+      sync(true, currentTime) { syncResult -> onMain {
         if (paused == generation) {
           lastSyncTime = 0L
           DLog.d(tag, "pause: Set last sync time 0 $lastSyncTime")
@@ -209,7 +209,7 @@ class MediaProgressSyncer(
         }
 
         cb()
-      }
+      } }
     } else {
       lastSyncTime = 0L
       DLog.d(tag, "pause: Set last sync time 0 $lastSyncTime (current time < 0)")
@@ -232,7 +232,7 @@ class MediaProgressSyncer(
     DLog.d(tag, "finished: Stopping listening for $currentDisplayTitle")
 
     val finished = generation
-    sync(true, currentPlaybackSession?.duration ?: 0.0) { syncResult ->
+    sync(true, currentPlaybackSession?.duration ?: 0.0) { syncResult -> onMain {
       if (finished == generation) {
         reset()
 
@@ -242,7 +242,13 @@ class MediaProgressSyncer(
       }
 
       cb()
-    }
+    } }
+  }
+
+  /** Syncer state belongs to the main thread, where ticks and start() run; a /sync answer arrives on OkHttp's. */
+  private fun onMain(block: () -> Unit) {
+    val main = Looper.getMainLooper()
+    if (Looper.myLooper() == main) block() else Handler(main).post(block)
   }
 
   fun seek() {
@@ -457,13 +463,15 @@ class MediaProgressSyncer(
   }
 
   /**
-   * Time a previous process left unsettled becomes offline sessions. Time that was in flight counts as failed: like a
+   * Time a previous process left unsettled becomes offline sessions (a service created again in the same process
+   * leaves its ledgers to their own answers). Time that was in flight counts as failed: like a
    * lost answer, the server may have taken it already.
    */
   private fun recoverUnsettledListening() {
     val db = DeviceManager.dbManager
     try {
       for (key in db.unsettledListeningKeys()) {
+        if (ListeningLedger.isOfThisProcess(key)) continue
         val pending = db.getUnsettledListening(key)
         if (pending != null) {
           val saved = db.getPlaybackSession(pending.id)

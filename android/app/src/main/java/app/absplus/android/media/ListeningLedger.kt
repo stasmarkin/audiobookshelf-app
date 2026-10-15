@@ -1,6 +1,7 @@
 package app.absplus.android.media
 
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Listening time of a stream the server has not taken through `/sync`, saved as a session of its own (never under the
@@ -19,7 +20,7 @@ class ListeningLedger(
         private val clock: () -> Long = System::currentTimeMillis
 ) {
   /** Where the syncer saves [pendingSegment]: one ledger, one key. */
-  val key: String = UUID.randomUUID().toString()
+  val key: String = UUID.randomUUID().toString().also { ofThisProcess.add(it) }
 
   private var unsent = 0L
   private var inFlight = 0L
@@ -73,4 +74,13 @@ class ListeningLedger(
   }
 
   private fun takeNextId(): String = nextId?.also { nextId = null } ?: newId()
+
+  companion object {
+    // A ledger of this process settles its own time when its answers come, also after the service that made it is gone
+    private val ofThisProcess: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    fun isOfThisProcess(key: String) = key in ofThisProcess
+
+    internal fun forgetProcessForTest() = ofThisProcess.clear()
+  }
 }

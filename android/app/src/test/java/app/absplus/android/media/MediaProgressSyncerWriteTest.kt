@@ -300,12 +300,45 @@ class MediaProgressSyncerWriteTest {
     streamTick(session, ledger, 130.0, hasNetwork = true) { _, _, _ -> } // no answer before the process ends
     assertEquals("only the failed time is sent so far", 15L, paperSessions().single().timeListening)
 
+    ListeningLedger.forgetProcessForTest()
     restartProcess()
     val recovered = paperSessions().single()
     assertEquals("one offline session holds all of it", ledger.segment()!!.id, recovered.id)
     assertEquals(45L, recovered.timeListening)
     assertEquals(130.0, recovered.currentTime, 0.0)
     assertTrue(unsettledKeys().isEmpty())
+  }
+
+  @Test
+  fun aServiceCreatedAgainLeavesLiveLedgersToTheirAnswers() {
+    val ledger = ListeningLedger()
+    var answer: ((Boolean, String?) -> Unit)? = null
+    streamTick(stream(), ledger, 100.0, hasNetwork = true) { _, _, done -> answer = done }
+
+    // The service is destroyed and created again (a widget, a headset) while that /sync is on the wire
+    restartProcess()
+    assertTrue("its time is still the request's", paperSessions().isEmpty())
+    answer!!(true, null)
+    assertTrue("the server took it: nothing to send again", paperSessions().isEmpty())
+    assertTrue(unsettledKeys().isEmpty())
+  }
+
+  @Test
+  fun anAnswerOnAnotherThreadIsSettledOnTheMainThread() {
+    var now = 1_000_000L
+    var answer: ((Boolean, String?) -> Unit)? = null
+    val streamed = MediaProgressSyncer(Robolectric.buildService(PlayerNotificationService::class.java).get(),
+            apiHandler = { throw AssertionError() }, clock = { now }, hasNetwork = { true }, playerTime = { 100.0 },
+            sendProgressSync = { _, _, done -> answer = done })
+    streamed.start(stream("srv-1"))
+    now += 15_000
+    var stopped = false
+    streamed.stop { stopped = true }
+    Thread { answer!!(true, null) }.apply { start(); join() }
+    assertEquals("nothing reset off the main thread", "srv-1", streamed.currentSessionId)
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    assertTrue(stopped)
+    assertEquals("", streamed.currentSessionId)
   }
 
   @Test
