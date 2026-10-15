@@ -80,7 +80,7 @@ test('indicator shows pending changes', () => {
   const syncing = model({ syncState: { running: true, pendingCount: 1 } })
   assert.deepEqual([syncing.labelKey, syncing.icon], ['LabelSyncing', 'cloud_sync'])
 
-  const waiting = model({ syncState: { running: false, pendingCount: 1 } })
+  const waiting = model({ syncState: { running: false, pendingCount: 4 } })
   assert.equal(waiting.labelKey, 'LabelChangesPending', 'online with changes held back (backoff)')
 
   assert.equal(model({ syncState: { running: false, pendingCount: 0 } }).count, null)
@@ -132,4 +132,11 @@ test('indicator dialog sync button calls syncNow', async () => {
   const offline = await indicator({ serverState: 'offline', socketConnected: false, syncState: { running: false, pendingCount: 3 } })
   assert.deepEqual(offline.calls, ['retryServer'], 'no Sync now while the server is unreachable')
   assert.deepEqual(offline.dialogs, [['confirm', 'Retry', '3 pending']])
+})
+
+test('a single pending change reads in the singular', () => {
+  const one = model({ serverState: 'offline', socketConnected: false, syncState: { running: false, pendingCount: 1 } })
+  assert.deepEqual([one.labelKey, one.count], ['LabelChangePending', 1])
+  assert.equal(model({ syncState: { running: false, pendingCount: 1 } }).labelKey, 'LabelChangePending')
+  assert.equal(model({ networkConnected: false, syncState: { pendingCount: 2 } }).labelKey, 'LabelChangesPending')
 })

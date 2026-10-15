@@ -71,11 +71,34 @@ export default {
     currentPlaybackSession() {
       // Sessions arrive on native advancement, including after background playback.
       this.onPlaybackEnded()
-      this.serverLibraryItemId = this.currentPlaybackSession?.libraryItemId || null
-      this.serverEpisodeId = this.currentPlaybackSession?.episodeId || null
+      // A copy of another saved server: its ids mean nothing to the active server (see setServerIds)
+      const copyServer = this.currentPlaybackSession?.localLibraryItem?.serverConnectionConfigId
+      const foreignCopy = !!this.currentPlaybackSession?.localLibraryItem && copyServer !== this.$store.state.activeServerConfigId
+      this.serverLibraryItemId = foreignCopy ? null : this.currentPlaybackSession?.libraryItemId || null
+      this.serverEpisodeId = foreignCopy ? null : this.currentPlaybackSession?.episodeId || null
     }
   },
   methods: {
+    /**
+     * The server ids of what started playing, both from one source. A downloaded copy of the active server knows its
+     * own (the session's ids, from LocalLibraryItem.libraryItemId) when the page could not tell them, e.g. offline on
+     * a cold start. A copy of another saved server gets none: its ids mean nothing to the active server.
+     */
+    setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId) {
+      let ids = [null, null]
+      if (!libraryItemId.startsWith('local')) {
+        ids = [libraryItemId, episodeId && !episodeId.startsWith('local') ? episodeId : serverEpisodeId]
+      } else if (serverLibraryItemId) {
+        ids = [serverLibraryItemId, serverEpisodeId]
+      } else {
+        const session = this.currentPlaybackSession
+        const copy = session?.localLibraryItem
+        const ownCopy = copy?.id === libraryItemId && !!copy.serverConnectionConfigId && copy.serverConnectionConfigId === this.$store.state.activeServerConfigId
+        if (ownCopy) ids = [session.libraryItemId || null, session.episodeId || null]
+      }
+      this.serverLibraryItemId = ids[0]
+      this.serverEpisodeId = ids[1] || null
+    },
     showBookmarks() {
       this.showBookmarksModal = true
     },
@@ -444,16 +467,7 @@ export default {
             this.$toast.error(errorMsg)
           } else {
             console.log('Library item play response', JSON.stringify(data))
-            if (!libraryItemId.startsWith('local')) {
-              this.serverLibraryItemId = libraryItemId
-            } else {
-              this.serverLibraryItemId = serverLibraryItemId
-            }
-            if (episodeId && !episodeId.startsWith('local')) {
-              this.serverEpisodeId = episodeId
-            } else {
-              this.serverEpisodeId = serverEpisodeId
-            }
+            this.setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId)
           }
         })
         .catch((error) => {

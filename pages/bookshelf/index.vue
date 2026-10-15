@@ -20,14 +20,22 @@
         <p class="mb-4 text-center text-xl">
           {{ $strings.MessageBookshelfEmpty }}
         </p>
-        <div class="w-full" v-if="!user">
+        <div class="w-full" v-if="!user && serverUnreachable">
+          <div class="flex justify-center items-center mb-3">
+            <span class="material-symbols text-warning text-lg">cloud_off</span>
+            <p class="pl-2 text-warning text-sm">{{ $strings.MessageServerUnreachableShowingDevice }}</p>
+          </div>
+          <!-- A way out when the saved server is gone for good -->
+          <p class="text-center text-sm text-fg-muted underline" @click="$router.push('/connect')">{{ $strings.ButtonSwitchServerUser }}</p>
+        </div>
+        <div class="w-full" v-else-if="!user">
           <div class="flex justify-center items-center mb-3">
             <span class="material-symbols text-error text-lg">cloud_off</span>
             <p class="pl-2 text-error text-sm">{{ $strings.MessageAudiobookshelfServerNotConnected }}</p>
           </div>
         </div>
         <div class="flex justify-center">
-          <ui-btn v-if="!user" small @click="$router.push('/connect')" class="w-32">{{ $strings.ButtonConnect }}</ui-btn>
+          <ui-btn v-if="!user && !serverUnreachable" small @click="$router.push('/connect')" class="w-32">{{ $strings.ButtonConnect }}</ui-btn>
         </div>
       </div>
     </div>
@@ -83,6 +91,10 @@ export default {
     }
   },
   computed: {
+    // A saved server that does not answer: connecting again is not what helps, the indicator already says so
+    serverUnreachable() {
+      return this.$store.getters['getHasActiveServer'] && this.$store.state.serverState === 'offline'
+    },
     user() {
       return this.$store.state.user.user
     },
