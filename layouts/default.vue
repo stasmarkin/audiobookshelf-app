@@ -286,7 +286,7 @@ export default {
         this.queueUserForNative(user)
       }
     },
-    /** The user object carries the server's bookmarks; native merges them into userdata.db. */
+    /** The user object carries the server's progress and bookmarks; native merges them into userdata.db. */
     forwardUserToNative(user, serverConfigId) {
       this.$absData.applyServerEvent({ event: 'user_updated', payload: user, serverConfigId }).catch((error) => console.error('[default] Could not hand the user to native', error))
     },
@@ -308,71 +308,18 @@ export default {
       this.pendingNativeUser = null
       if (pending) this.forwardUserToNative(pending.user, pending.serverConfigId)
     },
+    /**
+     * A socket progress event, already merged natively by $socket (`applied`: the server value won over the device's).
+     * A paused player of that item follows it only then: a value that lost to an unsent local change must not move it.
+     */
     async userMediaProgressUpdated(payload) {
       const prog = payload.data // MediaProgress
-      await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Received updated media progress for current user from socket event. Media item id ${payload.id}` })
-      const mediaProgressId = payload.id
+      if (!prog || payload.applied !== true) return
       const itemLabel = `${prog.libraryItemId}${prog.episodeId ? ` episodeId: ${prog.episodeId}` : ''}`
-
-      // Check if this media item is currently open in the player, paused, and this progress update is coming from a different session
       const isMediaOpenInPlayer = this.$store.getters['getIsMediaStreaming'](prog.libraryItemId, prog.episodeId)
       if (isMediaOpenInPlayer && this.$store.getters['getCurrentPlaybackSessionId'] !== payload.sessionId && !this.$store.state.playerIsPlaying) {
-        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Updating paused player playback time to ${payload.data.currentTime} (${itemLabel}, mediaProgressId: ${mediaProgressId})` })
-        this.$eventBus.$emit('playback-time-update', payload.data.currentTime)
-      }
-
-      // Get local media progress if exists
-      const localProg = await this.$db.getLocalMediaProgressForServerItem({ libraryItemId: prog.libraryItemId, episodeId: prog.episodeId })
-
-      let newLocalMediaProgress = null
-      // Progress update is more recent then local progress
-      if (localProg && localProg.lastUpdate < prog.lastUpdate) {
-        if (localProg.currentTime == prog.currentTime && localProg.isFinished == prog.isFinished) {
-          await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: server lastUpdate is more recent but progress is up-to-date (${itemLabel}, mediaProgressId: ${mediaProgressId}, server lastUpdate=${prog.lastUpdate} > local lastUpdate=${localProg.lastUpdate})` })
-          return
-        }
-
-        // Server progress is more up-to-date
-        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Syncing server progress to local (${itemLabel}, mediaProgressId: ${mediaProgressId}, server lastUpdate=${prog.lastUpdate} > local lastUpdate=${localProg.lastUpdate})` })
-        const syncPayload = {
-          localMediaProgressId: localProg.id,
-          mediaProgress: prog
-        }
-        newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress(syncPayload)
-      } else if (!localProg) {
-        // Check if local library item exists
-        //   local media progress may not exist yet if it hasn't been played
-        const localLibraryItem = await this.$db.getLocalLibraryItemByLId(prog.libraryItemId)
-        if (localLibraryItem) {
-          if (prog.episodeId) {
-            // If episode check if local episode exists
-            const lliEpisodes = localLibraryItem.media.episodes || []
-            const localEpisode = lliEpisodes.find((ep) => ep.serverEpisodeId === prog.episodeId)
-            if (localEpisode) {
-              // Add new local media progress
-              const syncPayload = {
-                localLibraryItemId: localLibraryItem.id,
-                localEpisodeId: localEpisode.id,
-                mediaProgress: prog
-              }
-              newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress(syncPayload)
-            }
-          } else {
-            // Add new local media progress
-            const syncPayload = {
-              localLibraryItemId: localLibraryItem.id,
-              mediaProgress: prog
-            }
-            newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress(syncPayload)
-          }
-        } else {
-          console.log(`[default] userMediaProgressUpdate no local media progress or lli found for this server item ${prog.id}`)
-        }
-      }
-
-      if (newLocalMediaProgress?.id) {
-        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Local media progress updated (${itemLabel}, localId: ${newLocalMediaProgress.id})` })
-        this.$store.commit('globals/updateLocalMediaProgress', newLocalMediaProgress)
+        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Updating paused player playback time to ${prog.currentTime} (${itemLabel}, mediaProgressId: ${payload.id})` })
+        this.$eventBus.$emit('playback-time-update', prog.currentTime)
       }
     },
     async visibilityChanged() {
@@ -422,8 +369,9 @@ export default {
 
       // Native may already know the server is down; then the serverState watcher connects once it answers again
       await this.$absData.getServerState().catch((error) => console.error('[default] Could not read the server state', error))
-      // Bookmarks are kept on the device, so they show before (and without) a connection
-      await this.$absData.reloadBookmarks().catch((error) => console.error('[default] Could not read bookmarks', error))
+      // Progress, bookmarks and the last known user (rights) are kept on the device, so they show before (and without)
+      // a connection; the live user still comes from authorize
+      await this.$absData.reloadUserData().catch((error) => console.error('[default] Could not read the user data', error))
 
       if (this.$store.state.user.serverConnectionConfig) {
         AbsLogger.info({ tag: 'default', message: `mounted: Server connected, init libraries (${this.$store.getters['user/getServerConfigName']})` })

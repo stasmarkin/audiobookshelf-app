@@ -42,15 +42,25 @@ async function loadContainer() {
   return { component: sandbox.component, sandbox }
 }
 
-function makeContext(component, { native, server } = {}) {
-  const calls = { seek: [], sync: [], native: 0 }
+// $absData.applyServerProgress stands for native's merge: by default it takes only a newer value than the saved one;
+// `applied` forces its answer (false: an unsent local change wins). calls.sync: values it took
+function makeContext(component, { native, server, applied } = {}) {
+  const calls = { seek: [], sync: [], asked: [], db: [], native: 0 }
   const ctx = {
     currentPlaybackSession: session,
     currentTime: SAVED,
     $store: { getters: { 'globals/getLocalMediaProgressById': (id) => (id === 'local_oz' ? { id: 'progress-1', currentTime: SAVED, lastUpdate: 2000 } : null) } },
     onPlaybackEnded: async () => {},
     getServerMediaProgressForCurrentSession: async () => server || { currentTime: SAVED, lastUpdate: 1000 },
-    syncServerMediaProgressWithLocalMediaProgress: async (...args) => calls.sync.push(args)
+    $absData: {
+      applyServerProgress: async ({ progress }) => {
+        calls.asked.push(progress)
+        const taken = applied ?? progress.lastUpdate > 2000
+        if (taken) calls.sync.push(progress)
+        return { applied: taken }
+      }
+    },
+    $db: new Proxy({}, { get: (_, name) => (...args) => calls.db.push([name, args]) })
   }
   ctx.$refs = {
     audioPlayer: {
@@ -125,7 +135,24 @@ test('deviceFocused keeps its other behaviour: no work while playing or unfocuse
   const remote = makeContext(component, { server: { currentTime: 9000, lastUpdate: 3000 } })
   await component.methods.deviceFocused.call(remote.ctx, true)
   assert.deepEqual(remote.calls.seek, [9000])
-  assert.equal(remote.calls.sync.length, 1)
+  assert.equal(remote.calls.sync.length, 1, 'taken through $absData.applyServerProgress')
+  assert.deepEqual(remote.calls.db, [], 'nothing written to Paper from JS')
+})
+
+test('refocus applies server progress through Room and seeks only if accepted', async () => {
+  const { component, sandbox } = await loadContainer()
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
+  const newer = { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }
+  // The device has an unsent change of this item: native keeps it although the server value is newer
+  const kept = makeContext(component, { server: newer, applied: false })
+  await component.methods.deviceFocused.call(kept.ctx, true)
+  assert.deepEqual(kept.calls.asked, [newer], 'the server value is handed to native')
+  assert.deepEqual(kept.calls.seek, [], 'no seek to a value native did not take')
+  assert.deepEqual(kept.calls.db, [])
+
+  const taken = makeContext(component, { server: newer, applied: true })
+  await component.methods.deviceFocused.call(taken.ctx, true)
+  assert.deepEqual(taken.calls.seek, [9000])
 })
 
 test('Bookmark timestamp: the modal saves the container time, which after refocus is the live paused position', async () => {

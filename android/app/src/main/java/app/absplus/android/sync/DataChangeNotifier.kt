@@ -6,7 +6,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Tells the WebView what changed, at most once per [windowMs] per scope: a burst of writes (a merge of many bookmarks,
- * playback ticks) becomes one event with the ids of all of them. Scopes: "bookmarks", "progress", "user", "sync".
+ * playback ticks) becomes one event with the ids of all of them. Scopes: "bookmarks", "progress", "playback" (ticks), "user", "sync".
  */
 class DataChangeNotifier(
         private val windowMs: Long = 500,

@@ -57,6 +57,7 @@ import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
+import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
 
 export default {
   async asyncData({ store, params, redirect, app }) {
@@ -148,8 +149,7 @@ export default {
     },
     isConnectedToServer() {
       if (!this.isLocal) return true
-      if (!this.libraryItem.serverAddress) return false
-      return this.$store.getters['user/getServerAddress'] === this.libraryItem.serverAddress
+      return isCopyOfActiveServer(this.libraryItem, this.$store.state.activeServerConfigId)
     },
     serverLibraryItemId() {
       if (!this.isLocal) return this.libraryItemId
@@ -520,23 +520,16 @@ export default {
       if (value) {
         this.resettingProgress = true
 
-        const serverItemProgressId = this.serverItemProgress?.id
-        if (this.localItemProgress) {
+        const target = progressTarget(this.libraryItem, this.episode)
+        if (target) {
+          // Native deletes the server record (now or once the server is back) and the copy's own progress
+          await this.$absData
+            .resetProgress(target)
+            .then(() => this.$toast.success(`Your progress was reset`))
+            .catch((error) => console.error('Progress reset failed', error))
+        } else if (this.localItemProgress) {
           await this.$db.removeLocalMediaProgress(this.localItemProgress.id)
           this.$store.commit('globals/removeLocalMediaProgress', this.localItemProgress.id)
-        }
-
-        if (serverItemProgressId) {
-          await this.$nativeHttp
-            .delete(`/api/me/progress/${serverItemProgressId}`)
-            .then(() => {
-              console.log('Progress reset complete')
-              this.$toast.success(`Your progress was reset`)
-              this.$store.commit('user/removeMediaProgress', serverItemProgressId)
-            })
-            .catch((error) => {
-              console.error('Progress reset failed', error)
-            })
         }
 
         this.resettingProgress = false
@@ -545,7 +538,11 @@ export default {
     async toggleFinished() {
       await this.$hapticsImpact()
 
-      if (this.isLocal || this.localEpisode) {
+      const target = progressTarget(this.libraryItem, this.episode)
+      if (target) {
+        // Works offline; native also updates the downloaded copy's own progress
+        await this.$absData.markFinished({ ...target, isFinished: !this.userIsFinished }).catch((error) => console.error('[episode] Could not save finished', error))
+      } else {
         const isFinished = !this.userIsFinished
         const localLibraryItemId = this.localLibraryItemId
         const localEpisodeId = this.localEpisodeId
@@ -561,14 +558,6 @@ export default {
             this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
           }
         }
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        this.$nativeHttp.patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload).catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedFailed : this.$strings.ToastItemMarkedAsNotFinishedFailed)
-        })
       }
     },
     async deleteEpisodeFromServerClick() {

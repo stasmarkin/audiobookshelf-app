@@ -57,7 +57,7 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
           return { state: store.state.serverState }
         }),
       // Arrays, so the string-only filters below keep listing just the connection steps
-      reloadBookmarks: async () => calls.push(['reloadBookmarks']),
+      reloadUserData: async () => calls.push(['reloadUserData']),
       applyServerEvent: async (args) => calls.push(['applyServerEvent', args])
     },
     $setOrientationLock() {},
@@ -316,19 +316,19 @@ test('a background library re-read does not override a library the user picked m
 // with the user object (authorize, socket user_updated) and is handed to native
 
 const plain = (value) => JSON.parse(JSON.stringify(value)) // objects made inside the vm sandbox
-const order = (calls) => calls.filter((c) => typeof c === 'string' || c[0] === 'reloadBookmarks').map((c) => (typeof c === 'string' ? c : c[0]))
+const order = (calls) => calls.filter((c) => typeof c === 'string' || c[0] === 'reloadUserData').map((c) => (typeof c === 'string' ? c : c[0]))
 
-test('a cold start loads saved bookmarks before connecting, also with the server unreachable', async () => {
+test('a cold start loads saved progress and bookmarks before connecting, also with the server unreachable', async () => {
   const offline = layout({ serverState: 'offline' })
   await offline.mounted()
-  assert.deepEqual(order(offline.calls), ['getServerState', 'reloadBookmarks'])
+  assert.deepEqual(order(offline.calls), ['getServerState', 'reloadUserData'])
 
   const unknown = layout({ serverState: 'unknown' })
   await unknown.mounted()
-  assert.deepEqual(order(unknown.calls), ['getServerState', 'reloadBookmarks', 'attemptConnection'])
+  assert.deepEqual(order(unknown.calls), ['getServerState', 'reloadUserData', 'attemptConnection'])
 
   const failing = layout({ serverState: 'unknown' })
-  failing.view.$absData.reloadBookmarks = async () => {
+  failing.view.$absData.reloadUserData = async () => {
     throw new Error('plugin not implemented')
   }
   await failing.mounted()

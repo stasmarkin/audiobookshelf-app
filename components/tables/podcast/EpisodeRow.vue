@@ -87,6 +87,9 @@ export default {
       default: () => {}
     },
     isLocal: Boolean,
+    // For a downloaded podcast (isLocal): its server item and saved server, so "finished" reaches that server
+    serverLibraryItemId: String,
+    serverConfigId: String,
     sortKey: String
   },
   mixins: [cellularPermissionHelpers],
@@ -100,6 +103,12 @@ export default {
   computed: {
     isIos() {
       return this.$platform === 'ios'
+    },
+    /** Where "finished" goes: the server episode (also for a linked copy), or null for a copy without a server. */
+    progressTarget() {
+      if (!this.isLocal) return { libraryItemId: this.libraryItemId, episodeId: this.episode.id, serverConfigId: null }
+      if (!this.serverLibraryItemId || !this.serverConfigId || !this.episode?.serverEpisodeId) return null
+      return { libraryItemId: this.serverLibraryItemId, episodeId: this.episode.serverEpisodeId, serverConfigId: this.serverConfigId }
     },
     mediaType() {
       return 'podcast'
@@ -292,7 +301,11 @@ export default {
       await this.$hapticsImpact()
 
       this.isProcessingReadUpdate = true
-      if (this.isLocal || this.localEpisode) {
+      if (this.progressTarget) {
+        // Works offline; native also updates the downloaded copy's own progress
+        await this.$absData.markFinished({ ...this.progressTarget, isFinished: !this.userIsFinished }).catch((error) => console.error('[EpisodeRow] Could not save finished', error))
+        this.isProcessingReadUpdate = false
+      } else {
         const isFinished = !this.userIsFinished
         const localLibraryItemId = this.isLocal ? this.libraryItemId : this.localLibraryItemId
         const localEpisodeId = this.isLocal ? this.episode.id : this.localEpisode.id
@@ -308,19 +321,6 @@ export default {
           }
         }
         this.isProcessingReadUpdate = false
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        this.$nativeHttp
-          .patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload)
-          .catch((error) => {
-            console.error('Failed', error)
-            this.$toast.error(`Failed to mark as ${updatePayload.isFinished ? 'Finished' : 'Not Finished'}`)
-          })
-          .finally(() => {
-            this.isProcessingReadUpdate = false
-          })
       }
     }
   }

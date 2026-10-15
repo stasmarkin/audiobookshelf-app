@@ -101,10 +101,6 @@ class DbService {
     return AbsDatabase.syncLocalSessionsWithServer({ isFirstSync })
   }
 
-  syncServerMediaProgressWithLocalMediaProgress(payload) {
-    return AbsDatabase.syncServerMediaProgressWithLocalMediaProgress(payload)
-  }
-
   updateLocalTrackOrder(payload) {
     return AbsDatabase.updateLocalTrackOrder(payload)
   }

@@ -369,67 +369,6 @@ class AbsDatabase : Plugin() {
     }
   }
 
-  // Updates received via web socket
-  // This function doesn't need to sync with the server also because this data is coming from the server
-  // If sending the localMediaProgressId then update existing media progress
-  // If sending localLibraryItemId then save new local media progress
-  @PluginMethod
-  fun syncServerMediaProgressWithLocalMediaProgress(call:PluginCall) {
-    val serverMediaProgress = call.getObject("mediaProgress").toString()
-    val localLibraryItemId = call.getString("localLibraryItemId", "").toString()
-    var localEpisodeId:String? = call.getString("localEpisodeId", "").toString()
-    if (localEpisodeId.isNullOrEmpty()) localEpisodeId = null
-    var localMediaProgressId = call.getString("localMediaProgressId") ?: ""
-
-    val mediaProgress =  jacksonMapper.readValue<MediaProgress>(serverMediaProgress)
-
-    if (localMediaProgressId == "") {
-      val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItem(localLibraryItemId)
-      if (localLibraryItem != null) {
-        localMediaProgressId = if (localEpisodeId.isNullOrEmpty()) localLibraryItemId else "$localLibraryItemId-$localEpisodeId"
-
-        val localMediaProgress = LocalMediaProgress(
-          id = localMediaProgressId,
-          localLibraryItemId = localLibraryItemId,
-          localEpisodeId = localEpisodeId,
-          duration = mediaProgress.duration,
-          progress = mediaProgress.progress,
-          currentTime = mediaProgress.currentTime,
-          isFinished = mediaProgress.isFinished,
-          ebookLocation = mediaProgress.ebookLocation,
-          ebookProgress = mediaProgress.ebookProgress,
-          lastUpdate = mediaProgress.lastUpdate,
-          startedAt = mediaProgress.startedAt,
-          finishedAt = mediaProgress.finishedAt,
-          serverConnectionConfigId = localLibraryItem.serverConnectionConfigId,
-          serverAddress = localLibraryItem.serverAddress,
-          serverUserId = localLibraryItem.serverUserId,
-          libraryItemId = localLibraryItem.libraryItemId,
-          episodeId = mediaProgress.episodeId)
-
-        Log.d(tag, "syncServerMediaProgressWithLocalMediaProgress: Saving new local media progress $localMediaProgress")
-        DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
-        call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
-      } else {
-        Log.e(tag, "syncServerMediaProgressWithLocalMediaProgress: Local library item not found")
-      }
-    } else {
-      Log.d(tag, "syncServerMediaProgressWithLocalMediaProgress $localMediaProgressId")
-      val localMediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId)
-
-      if (localMediaProgress == null) {
-        Log.w(tag, "syncServerMediaProgressWithLocalMediaProgress Local media progress not found $localMediaProgressId")
-        call.resolve()
-      } else {
-        MediaEventManager.syncEvent(mediaProgress, "Received from webhook event")
-
-        localMediaProgress.updateFromServerMediaProgress(mediaProgress)
-        DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
-        call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
-      }
-    }
-  }
-
   @PluginMethod
   fun updateLocalMediaProgressFinished(call:PluginCall) {
     val localLibraryItemId = call.getString("localLibraryItemId", "").toString()

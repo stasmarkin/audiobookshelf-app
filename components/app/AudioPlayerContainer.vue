@@ -545,37 +545,27 @@ export default {
       return this.$store.getters['globals/getLocalMediaProgressById'](this.currentPlaybackSession.localLibraryItem?.id, this.currentPlaybackSession.localEpisodeId)
     },
     /**
-     * Sync the server media progress with the local media progress
-     */
-    async syncServerMediaProgressWithLocalMediaProgress(localMediaProgressId, serverMediaProgress) {
-      try {
-        const newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress({
-          localMediaProgressId,
-          mediaProgress: serverMediaProgress
-        })
-        if (newLocalMediaProgress?.id) {
-          this.$store.commit('globals/updateLocalMediaProgress', newLocalMediaProgress)
-        }
-      } catch (error) {
-        console.error('[AudioPlayerContainer] Failed to sync server progress with local media progress', error)
-      }
-    },
-    /**
-     * Check if the server media progress is more recent than the local media progress and sync if so
+     * The server's progress of the downloaded item open in the player, merged natively by the one rule (its Paper copy
+     * follows). The paused player moves to it only when it was taken: an unsent local change keeps its position.
      */
     async checkSyncServerProgressWithLocalProgress(localMediaProgress) {
       if (!localMediaProgress) return
       console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: checking server media progress for local media item open in player')
       const serverMediaProgress = await this.getServerMediaProgressForCurrentSession()
-      if (!serverMediaProgress?.lastUpdate || serverMediaProgress.lastUpdate <= localMediaProgress.lastUpdate) return
+      if (!serverMediaProgress?.lastUpdate) return
 
-      console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: server progress is more recent than local progress. Server current time:', serverMediaProgress.currentTime, 'vs local', localMediaProgress.currentTime, `(server lastUpdate=${serverMediaProgress.lastUpdate} > local lastUpdate=${localMediaProgress.lastUpdate})`)
+      let applied = false
+      try {
+        applied = (await this.$absData.applyServerProgress({ progress: serverMediaProgress }))?.applied === true
+      } catch (error) {
+        console.error('[AudioPlayerContainer] Failed to apply the server progress', error)
+      }
+      if (!applied) return
+      console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: server progress taken. Server current time:', serverMediaProgress.currentTime, 'vs local', localMediaProgress.currentTime)
       if (!this.$refs.audioPlayer?.isPlaying && serverMediaProgress.currentTime !== localMediaProgress.currentTime) {
         // Use seek() so the native audio player's current session is updated
         this.$refs.audioPlayer.seek(serverMediaProgress.currentTime)
       }
-
-      await this.syncServerMediaProgressWithLocalMediaProgress(localMediaProgress.id, serverMediaProgress)
     },
     /**
      * When socket is reconnected after a delay, if a local media item is open in the player (paused)

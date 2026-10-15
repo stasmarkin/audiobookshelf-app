@@ -190,7 +190,8 @@ class UserDataStore(
       updated
     }
     if (mirrorToPaper) mirror.mirror(listOf(row), PLAYBACK_MIRROR_FIELDS)
-    notifier.notify(SCOPE_PROGRESS, listOf(libraryItemId))
+    // Its own scope: the WebView re-reads just this row for a tick, not the Paper progress of every copy
+    notifier.notify(SCOPE_PLAYBACK, listOf(libraryItemId))
   }
 
   /**
@@ -375,6 +376,7 @@ class UserDataStore(
     const val SCOPE_BOOKMARKS = "bookmarks"
     const val SCOPE_PROGRESS = "progress"
     const val SCOPE_USER = "user"
+    const val SCOPE_PLAYBACK = "playback"
     /** The progress at which playback counts as finished, as for the Paper copy. */
     const val FINISHED_PROGRESS = 0.99
     /** A reset without the server record's id is a PATCH of these. */

@@ -126,10 +126,22 @@ class ServerSocket extends EventEmitter {
     this.emit('user_updated', data)
   }
 
-  onUserItemProgressUpdated(payload) {
+  /**
+   * Native merges the record into userdata.db by the one rule (and the store follows through onDataChanged); listeners
+   * get `applied`, so nothing acts on a value that lost to an unsent local change.
+   */
+  async onUserItemProgressUpdated(payload) {
     console.log('[SOCKET] User Item Progress Updated', JSON.stringify(payload))
-    this.$store.commit('user/updateUserMediaProgress', payload.data)
-    this.emit('user_media_progress_updated', payload)
+    // The server it came from, before any await: native drops it if another server is active by then
+    const serverConfigId = this.$store.state.activeServerConfigId
+    let applied = false
+    try {
+      const result = await this.app.$absData.applyServerEvent({ event: 'user_item_progress_updated', payload, serverConfigId })
+      applied = result?.applied === true
+    } catch (error) {
+      console.error('[SOCKET] Could not apply the progress update', error)
+    }
+    this.emit('user_media_progress_updated', { ...payload, applied })
   }
 
   onPlaylistAdded() {

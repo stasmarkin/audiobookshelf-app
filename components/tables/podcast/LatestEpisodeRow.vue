@@ -295,7 +295,11 @@ export default {
       await this.$hapticsImpact()
 
       this.isProcessingReadUpdate = true
-      if (this.isLocal || this.localEpisode) {
+      if (!this.isLocal) {
+        // Works offline; native also updates a downloaded copy's own progress
+        await this.$absData.markFinished({ libraryItemId: this.libraryItemId, episodeId: this.episode.id, isFinished: !this.userIsFinished }).catch((error) => console.error('[LatestEpisodeRow] Could not save finished', error))
+        this.isProcessingReadUpdate = false
+      } else {
         const isFinished = !this.userIsFinished
         const localLibraryItemId = this.isLocal ? this.libraryItemId : this.localLibraryItemId
         const localEpisodeId = this.isLocal ? this.episode.id : this.localEpisode.id
@@ -315,19 +319,6 @@ export default {
           }
         }
         this.isProcessingReadUpdate = false
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        this.$nativeHttp
-          .patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload)
-          .catch((error) => {
-            console.error('Failed', error)
-            this.$toast.error(`Failed to mark as ${updatePayload.isFinished ? 'Finished' : 'Not Finished'}`)
-          })
-          .finally(() => {
-            this.isProcessingReadUpdate = false
-          })
       }
     }
   }

@@ -9,6 +9,7 @@
 <script>
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem } from '@/plugins/capacitor'
+import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
 
 export default {
   props: {
@@ -172,8 +173,7 @@ export default {
     },
     isConnectedToServer() {
       if (!this.isLocal) return true
-      if (!this.libraryItem?.serverAddress) return false
-      return this.$store.getters['user/getServerAddress'] === this.libraryItem.serverAddress
+      return isCopyOfActiveServer(this.libraryItem, this.$store.state.activeServerConfigId)
     },
     isLocal() {
       return !!this.libraryItem?.isLocal
@@ -328,60 +328,31 @@ export default {
       }
 
       this.$emit('update:processing', true)
-      if (this.isLocal) {
-        const isFinished = !this.userIsFinished
-        const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId: this.localLibraryItemId, isFinished })
-        console.log('toggleFinished payload', JSON.stringify(payload))
-        if (payload?.error) {
-          this.$toast.error(payload?.error || 'Unknown error')
-        } else {
-          const localMediaProgress = payload.localMediaProgress
-          console.log('toggleFinished localMediaProgress', JSON.stringify(localMediaProgress))
-          if (localMediaProgress) {
-            this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
-          }
-        }
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        await this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}`, updatePayload).catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedFailed : this.$strings.ToastItemMarkedAsNotFinishedFailed)
-        })
-      }
+      await this.setFinished(progressTarget(this.libraryItem), { localLibraryItemId: this.localLibraryItemId }, !this.userIsFinished)
       this.$emit('update:processing', false)
     },
     async toggleEpisodeFinished() {
       await this.$hapticsImpact()
 
       this.$emit('update:processing', true)
-      if (this.isLocal || this.localEpisode) {
-        const isFinished = !this.userIsFinished
-        const localLibraryItemId = this.localLibraryItemId
-        const localEpisodeId = this.localEpisodeId
-        const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId, localEpisodeId, isFinished })
-        console.log('toggleFinished payload', JSON.stringify(payload))
-
-        if (payload?.error) {
-          this.$toast.error(payload?.error || 'Unknown error')
-        } else {
-          const localMediaProgress = payload.localMediaProgress
-          console.log('toggleFinished localMediaProgress', JSON.stringify(localMediaProgress))
-          if (localMediaProgress) {
-            this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
-          }
-        }
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        await this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}/${this.serverEpisodeId}`, updatePayload).catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedFailed : this.$strings.ToastItemMarkedAsNotFinishedFailed)
-        })
-      }
+      await this.setFinished(progressTarget(this.libraryItem, this.episode), { localLibraryItemId: this.localLibraryItemId, localEpisodeId: this.localEpisodeId }, !this.userIsFinished)
       this.$emit('update:processing', false)
+    },
+    /**
+     * A server item (or a copy linked to one) goes through $absData: it works offline, and native updates the copy's
+     * own progress. Only a copy without a server keeps the Paper-only path.
+     */
+    async setFinished(target, local, isFinished) {
+      if (target) {
+        await this.$absData.markFinished({ ...target, isFinished }).catch((error) => console.error('[ItemMoreMenuModal] Could not save finished', error))
+        return
+      }
+      const payload = await this.$db.updateLocalMediaProgressFinished({ ...local, isFinished })
+      if (payload?.error) {
+        this.$toast.error(payload?.error || 'Unknown error')
+      } else if (payload?.localMediaProgress) {
+        this.$store.commit('globals/updateLocalMediaProgress', payload.localMediaProgress)
+      }
     },
     async clearProgressClick() {
       await this.$hapticsImpact()
@@ -392,23 +363,16 @@ export default {
       })
       if (value) {
         this.$emit('update:processing', true)
-        const serverMediaProgressId = this.serverItemProgress?.id
-        if (this.localItemProgress) {
+        const target = progressTarget(this.libraryItem, this.episode)
+        if (target) {
+          // Native deletes the server record (now or once the server is back) and the copy's own progress
+          await this.$absData
+            .resetProgress(target)
+            .then(() => this.$toast.success(`Your progress was reset`))
+            .catch((error) => console.error('Progress reset failed', error))
+        } else if (this.localItemProgress) {
           await this.$db.removeLocalMediaProgress(this.localItemProgress.id)
           this.$store.commit('globals/removeLocalMediaProgressForItem', this.localItemProgress.id)
-        }
-
-        if (serverMediaProgressId) {
-          await this.$nativeHttp
-            .delete(`/api/me/progress/${serverMediaProgressId}`)
-            .then(() => {
-              console.log('Progress reset complete')
-              this.$toast.success(`Your progress was reset`)
-              this.$store.commit('user/removeMediaProgress', serverMediaProgressId)
-            })
-            .catch((error) => {
-              console.error('Progress reset failed', error)
-            })
         }
 
         this.$emit('update:processing', false)
