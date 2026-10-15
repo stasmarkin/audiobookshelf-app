@@ -13,12 +13,30 @@ ensure_avd() {
   echo no | "$AVDMANAGER" create avd -n "$AVD_NAME" -k "$SYSTEM_IMAGE" -d pixel_6 2>&1 | { grep -v devices.xml || true; } >&2
 }
 
+# An emulator with audio input opens the host microphone, and macOS asks the launching app (the terminal) for access
+# on every boot. Audio output stays on for playback.
+disable_mic() {
+  # Only the stand AVD is changed; an AVD passed via AVD_NAME may be someone's own.
+  [[ "$AVD_NAME" == absplus-api35 ]] || return 0
+  # The AVD's <name>.ini points to its directory, wherever avdmanager put it.
+  local avd_home="${ANDROID_AVD_HOME:-${ANDROID_EMULATOR_HOME:-$HOME/.android}/avd}" dir config
+  dir="$(sed -n 's/^path=//p' "$avd_home/$AVD_NAME.ini" 2>/dev/null || true)"
+  config="${dir:-$avd_home/$AVD_NAME.avd}/config.ini"
+  [[ -f "$config" ]] || { echo "Not disabling the emulator microphone: $config not found" >&2; return 0; }
+  if grep -q '^hw\.audioInput[[:space:]]*=' "$config"; then
+    sed -i '' 's/^hw\.audioInput[[:space:]]*=.*/hw.audioInput=no/' "$config"
+  else
+    echo 'hw.audioInput=no' >>"$config"
+  fi
+}
+
 up() {
   local serial
   serial="$(stand_serial)"
   if [[ -n "$serial" ]]; then echo "Emulator already running: $serial ($AVD_NAME)"; return 0; fi
 
   ensure_avd
+  disable_mic
   mkdir -p "$STATE_DIR"
   local args=(-avd "$AVD_NAME" -no-boot-anim -no-snapshot-save -netdelay none -netspeed full)
   [[ "${1:-}" == "--window" ]] || args+=(-no-window)
