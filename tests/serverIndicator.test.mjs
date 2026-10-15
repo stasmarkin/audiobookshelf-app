@@ -140,3 +140,13 @@ test('a single pending change reads in the singular', () => {
   assert.equal(model({ syncState: { running: false, pendingCount: 1 } }).labelKey, 'LabelChangePending')
   assert.equal(model({ networkConnected: false, syncState: { pendingCount: 2 } }).labelKey, 'LabelChangesPending')
 })
+
+test('indicator shows catalog sync', () => {
+  const m = model({ syncState: { running: false, pendingCount: 0, catalogRunning: true } })
+  assert.equal(m.labelKey, 'LabelSyncingCatalog')
+  assert.equal(m.icon, 'cloud_sync')
+  assert.equal(m.tone, 'ok')
+  assert.equal(model({ syncState: { pendingCount: 2, catalogRunning: true } }).labelKey, 'LabelChangesPending', 'waiting changes come first')
+  assert.equal(model({ syncState: { running: true, catalogRunning: true } }).labelKey, 'LabelSyncing')
+  assert.equal(model({ serverState: 'offline', socketConnected: false, syncState: { catalogRunning: true } }).labelKey, 'LabelServerUnreachable')
+})

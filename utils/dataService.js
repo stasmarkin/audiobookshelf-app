@@ -1,3 +1,56 @@
+/** Socket events about the catalog; native applies them to replica.db (`CATALOG_EVENTS` in CatalogEventApplier.kt). */
+export const CATALOG_EVENTS = [
+  'item_added',
+  'item_updated',
+  'items_added',
+  'items_updated',
+  'item_removed',
+  'library_added',
+  'library_updated',
+  'library_removed',
+  'series_added',
+  'series_updated',
+  'series_removed',
+  'rss_feed_open',
+  'rss_feed_closed',
+  'author_updated',
+  'backup_applied'
+]
+
+/**
+ * The `catalog` topics a socket event changes, as native names them (`libraries`, `library:<id>`, `items:<id>`, ...).
+ * A feed event has no library: it is taken for the current one. A missing library id sends no topic.
+ */
+export function catalogTopics(event, payload, currentLibraryId) {
+  const topics = new Set()
+  const lib = (id) => (typeof id === 'string' && id ? id : null)
+  const item = (it) => {
+    const libraryId = lib(it?.libraryId)
+    if (!libraryId) return
+    topics.add(`items:${libraryId}`)
+    const series = it?.media?.metadata?.series
+    if (Array.isArray(series) && series.length) topics.add(`series:${libraryId}`)
+  }
+  const family = (event || '').replace(/_(added|updated|removed|open|closed|applied)$/, '')
+  if (family === 'items') (Array.isArray(payload) ? payload : [payload]).forEach(item)
+  else if (family === 'item') item(payload)
+  else if (family === 'library') {
+    topics.add('libraries')
+    if (lib(payload?.id)) topics.add(`library:${payload.id}`)
+  } else if (family === 'series') {
+    if (lib(payload?.libraryId)) topics.add(`series:${payload.libraryId}`)
+  } else if (family === 'rss_feed') {
+    if (payload?.entityType === 'libraryItem' && lib(currentLibraryId)) topics.add(`items:${currentLibraryId}`)
+  } else if (family === 'author') {
+    if (lib(payload?.libraryId)) topics.add(`authors:${payload.libraryId}`).add(`library:${payload.libraryId}`)
+  } else if (family === 'collection') {
+    if (lib(payload?.libraryId)) topics.add(`collections:${payload.libraryId}`)
+  } else if (family === 'playlist') {
+    if (lib(payload?.libraryId)) topics.add(`playlists:${payload.libraryId}`).add(`library:${payload.libraryId}`)
+  } else if (family === 'backup') topics.add('libraries')
+  return [...topics]
+}
+
 /**
  * $absData: the WebView side of the native AbsData plugin.
  * - Mirrors the active server's reachability into the store (`serverState`, `activeServerConfigId`) and forwards what
@@ -11,12 +64,16 @@
  *   Paper progress of downloaded copies. Writes ("finished", reset, e-book position) go to native and work offline.
  * - Another saved server becoming active clears the user's data in the store and reads that server's; an answer that
  *   was asked for the previous server is dropped.
+ * - The catalog (libraries, items) is read from native replica.db, at most 100 entities a call. While a library was
+ *   never reconciled (or the filter needs data the replica lacks) and the server is online, the same request goes to
+ *   the server instead. `onDataChanged {scope:'catalog'}` keeps the libraries in the store current.
  * - In the browser (`platform: 'web'`, development only) there is no native side: everything goes straight to the
  *   server through $axios, and subscribers get the same `onDataChanged` events.
  *
- * @param {{ plugin: object, store: { commit: Function, dispatch?: Function }, platform?: string, $axios?: object }} deps
+ * @param {{ plugin: object, store: { commit: Function, dispatch?: Function }, platform?: string, $axios?: object,
+ *   eventBus?: { $emit: Function }, nativeHttp?: () => object }} deps `nativeHttp` returns $nativeHttp (injected later)
  */
-export function createDataService({ plugin, store, platform = null, $axios = null }) {
+export function createDataService({ plugin, store, platform = null, $axios = null, eventBus = null, nativeHttp = null }) {
   const isWeb = platform === 'web'
   const listeners = new Set()
   const dataListeners = new Set()
@@ -34,6 +91,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     if (before && before !== activeServer()) {
       store.commit('user/clearUserData')
       reloadUserData().catch((error) => console.error('[data] Could not read the user data', error))
+      switchLibraries().catch((error) => console.error('[data] Could not read the libraries', error))
     }
   }
 
@@ -119,9 +177,39 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     return store.dispatch('globals/loadLocalMediaProgress')
   }
 
+  const currentLibraryId = () => store.state?.libraries?.currentLibraryId || null
+  const canDispatch = () => typeof store.dispatch === 'function'
+
+  /** Another saved server became active: its libraries, and pages follow its current one. */
+  const switchLibraries = async () => {
+    if (!canDispatch()) return
+    await store.dispatch('libraries/load', { force: true })
+    if (currentLibraryId()) await store.dispatch('libraries/fetch', currentLibraryId())
+    eventBus?.$emit('library-changed')
+  }
+
+  const catalogChanged = async (ids) => {
+    if (!canDispatch()) return
+    if (ids.includes('libraries')) {
+      const before = currentLibraryId()
+      await store.dispatch('libraries/load', { force: true })
+      // The current library went away: filterdata, issues and playlists of the new one, and pages follow it
+      if (currentLibraryId() && currentLibraryId() !== before) {
+        await store.dispatch('libraries/fetch', currentLibraryId())
+        eventBus?.$emit('library-changed')
+        return
+      }
+    }
+    if (currentLibraryId() && ids.includes(`library:${currentLibraryId()}`)) {
+      await store.dispatch('libraries/fetch', { libraryId: currentLibraryId(), onlyIfCurrent: true })
+    }
+  }
+
   const dataChanged = (payload) => {
     const fail = (what) => (error) => console.error(`[data] Could not reload ${what}`, error)
-    if (payload?.scope === 'bookmarks') {
+    if (payload?.scope === 'catalog') {
+      catalogChanged(payload.ids || []).catch(fail('the catalog'))
+    } else if (payload?.scope === 'bookmarks') {
       reloadBookmarks().catch(fail('bookmarks'))
     } else if (payload?.scope === 'progress' || payload?.scope === 'playback') {
       reloadProgressOf(payload.ids).catch(fail('progress'))
@@ -163,6 +251,85 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     store.commit('user/upsertMediaProgress', progress)
     dataListeners.forEach((cb) => cb({ scope: 'progress', ids: [progress.libraryItemId] }))
     return { applied: true, protected: false, currentTime: progress.currentTime }
+  }
+
+  // ---- Catalog reads
+  const webReplica = () => ({ reconciledAt: Date.now(), complete: true })
+  const libraryShape = (data) => ({ library: data?.library ?? null, filterdata: data?.filterdata ?? null, issues: data?.issues || 0, numUserPlaylists: data?.numUserPlaylists || 0 })
+  const librariesShape = (data) => ({ libraries: data?.libraries || (Array.isArray(data) ? data : []) })
+  // The filter is already in the URL form FilterModal makes ($encode), so it goes in as it is
+  const itemsQuery = ({ sort, desc, filter, collapseseries, limit, page }) => {
+    const parts = []
+    if (filter && filter !== 'all') parts.push(`filter=${filter}`)
+    if (sort) parts.push(`sort=${encodeURIComponent(sort)}`, `desc=${desc ? 1 : 0}`)
+    if (collapseseries) parts.push('collapseseries=1')
+    parts.push(`limit=${limit}`, `page=${page}`, 'minified=1', 'include=rssfeed,numEpisodesIncomplete')
+    return parts.join('&')
+  }
+  const itemsPath = (args) => `/api/libraries/${encodeURIComponent(args.libraryId)}/items?${itemsQuery(args)}`
+
+  /** Native's answer, asked again once when it was for a server that is no longer active. */
+  const fromNative = async (call) => {
+    const answer = await call()
+    if ((answer?.serverConfigId ?? null) !== activeServer()) return call()
+    return answer
+  }
+
+  /**
+   * A library never reconciled (`replica.reconciledAt` null) or a filter the replica cannot answer reads the server
+   * while it is online, as before the replica; the server's answer keeps native's `replica` and says `fromServer`.
+   * Before the sign-in $nativeHttp has no server address, so native's answer stands.
+   */
+  const withServerFallback = async (answer, path, shape) => {
+    const needsServer = answer?.replica?.reconciledAt == null || answer?.unsupportedFilter === true
+    const http = typeof nativeHttp === 'function' ? nativeHttp() : null
+    if (!needsServer || !http || store.state?.serverState !== 'online' || !store.state?.user?.serverConnectionConfig) return answer
+    try {
+      const data = await http.get(path)
+      return { ...shape(data), serverConfigId: answer?.serverConfigId ?? activeServer(), replica: answer?.replica ?? null, fromServer: true }
+    } catch (error) {
+      console.warn('[data] Server read failed, showing the replica', error)
+      return answer
+    }
+  }
+
+  const getLibraries = async () => {
+    if (isWeb) return { ...librariesShape(await $axios.$get('/api/libraries')), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getLibraries())
+    return withServerFallback(answer, '/api/libraries', librariesShape)
+  }
+
+  /** Rejects 'not found' when neither the replica nor (online) the server has the library. */
+  const getLibrary = async ({ id }) => {
+    const path = `/api/libraries/${encodeURIComponent(id)}?include=filterdata`
+    let answer
+    if (isWeb) {
+      try {
+        answer = { ...libraryShape(await $axios.$get(path)), serverConfigId: activeServer(), replica: webReplica() }
+      } catch (error) {
+        if (error?.response?.status !== 404) throw error
+        answer = { ...libraryShape(null), serverConfigId: activeServer(), replica: webReplica() }
+      }
+    } else {
+      answer = await withServerFallback(await fromNative(() => plugin.getLibrary({ id })), path, libraryShape)
+    }
+    if (!answer?.library) throw new Error('not found')
+    return answer
+  }
+
+  const getLibraryItems = async (args) => {
+    const { libraryId, sort = null, desc = false, filter = null, collapseseries = false, limit, page = 0, sortingIgnorePrefix = false } = args
+    if (isWeb) {
+      const params = { limit, page, minified: 1, include: 'rssfeed,numEpisodesIncomplete' }
+      if (filter && filter !== 'all') params.filter = filter
+      if (sort) Object.assign(params, { sort, desc: desc ? 1 : 0 })
+      if (collapseseries) params.collapseseries = 1
+      const data = await $axios.$get(`/api/libraries/${encodeURIComponent(libraryId)}/items`, { params })
+      return { ...data, serverConfigId: activeServer(), replica: webReplica() }
+    }
+    const request = { libraryId, sort, desc: !!desc, filter: filter && filter !== 'all' ? filter : null, collapseseries: !!collapseseries, limit, page, sortingIgnorePrefix: !!sortingIgnorePrefix }
+    const answer = await fromNative(() => plugin.getLibraryItems(request))
+    return withServerFallback(answer, itemsPath(request), (data) => data || {})
   }
 
   // Without this the indicator stays hidden until something else asks
@@ -249,6 +416,11 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
      * In the browser a `user_updated` goes straight into the store.
      */
     async applyServerEvent({ event, payload, serverConfigId }) {
+      if (isWeb && CATALOG_EVENTS.includes(event)) {
+        // Nothing to apply in the browser: the shelves read the server again, as native's notice would make them
+        dataChanged({ scope: 'catalog', ids: catalogTopics(event, payload, currentLibraryId()) })
+        return { applied: false }
+      }
       if (isWeb) {
         if (event === 'user_item_progress_updated') return webApplyProgress(payload?.data)
         const hasBookmarks = Array.isArray(payload?.bookmarks)
@@ -261,6 +433,20 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
         return { applied: true }
       }
       return plugin.applyServerEvent({ event, payload, serverConfigId })
+    },
+    /** `{ serverConfigId, libraries, replica: { reconciledAt, complete } }`. */
+    getLibraries,
+    /** `{ serverConfigId, library, filterdata, issues, numUserPlaylists, replica }`. */
+    getLibrary,
+    /**
+     * A page of a library's items in the server's shape, plus `replica` (and `fromServer`, `unsupportedFilter`).
+     * `limit` at most 100.
+     */
+    getLibraryItems,
+    /** The library native reconciles first. */
+    async setCurrentLibrary({ libraryId }) {
+      if (isWeb || !plugin.setCurrentLibrary) return
+      await plugin.setCurrentLibrary({ libraryId })
     },
     onDataChanged(cb) {
       dataListeners.add(cb)

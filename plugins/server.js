@@ -1,5 +1,6 @@
 import { io } from 'socket.io-client'
 import EventEmitter from 'events'
+import { CATALOG_EVENTS } from '@/utils/dataService'
 
 class ServerSocket extends EventEmitter {
   constructor(store, app) {
@@ -58,6 +59,7 @@ class ServerSocket extends EventEmitter {
     this.socket.on('user_updated', this.onUserUpdated.bind(this))
     this.socket.on('user_item_progress_updated', this.onUserItemProgressUpdated.bind(this))
     this.socket.on('playlist_added', this.onPlaylistAdded.bind(this))
+    CATALOG_EVENTS.forEach((event) => this.socket.on(event, (payload) => this.onCatalogEvent(event, payload)))
     this.socket.io.on('reconnect_attempt', this.onReconnectAttempt.bind(this))
     this.socket.io.on('reconnect_error', this.onReconnectError.bind(this))
     this.socket.io.on('reconnect_failed', this.onReconnectFailed.bind(this))
@@ -142,6 +144,17 @@ class ServerSocket extends EventEmitter {
       console.error('[SOCKET] Could not apply the progress update', error)
     }
     this.emit('user_media_progress_updated', { ...payload, applied })
+  }
+
+  /** Into replica.db through native; the open pages follow its `catalog` notice, not the socket. */
+  async onCatalogEvent(event, payload) {
+    // The server it came from, before any await: native drops it if another server is active by then
+    const serverConfigId = this.$store.state.activeServerConfigId
+    try {
+      await this.app.$absData.applyServerEvent({ event, payload: payload ?? {}, serverConfigId })
+    } catch (error) {
+      console.error(`[SOCKET] Could not apply ${event}`, error)
+    }
   }
 
   onPlaylistAdded() {

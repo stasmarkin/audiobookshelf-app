@@ -35,6 +35,21 @@ class AbsDataWeb extends WebPlugin {
   async applyServerEvent() {
     return { applied: false }
   }
+
+  // The catalog is read from the server in the browser (utils/dataService.js); these answer an empty replica
+  async getLibraries() {
+    return { serverConfigId: null, libraries: [], replica: { reconciledAt: null, complete: false } }
+  }
+
+  async getLibrary() {
+    return { serverConfigId: null, library: null, filterdata: null, issues: 0, numUserPlaylists: 0, replica: { reconciledAt: null, complete: false } }
+  }
+
+  async getLibraryItems({ limit, page }) {
+    return { serverConfigId: null, results: [], total: 0, limit, page, replica: { reconciledAt: null, complete: false } }
+  }
+
+  async setCurrentLibrary() {}
 }
 
 const AbsData = registerPlugin('AbsData', {

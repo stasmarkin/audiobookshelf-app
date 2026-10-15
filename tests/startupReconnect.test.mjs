@@ -113,8 +113,8 @@ test('server coming online retries authorization when there is no user and syncs
   assert.deepEqual(signedIn.emitted, ['server-reachable'], 'Home re-reads its shelves')
   assert.deepEqual(
     signedIn.calls.filter((c) => c[0] === 'dispatch').map((c) => c[1]),
-    ['libraries/load', 'libraries/fetch'],
-    'libraries that failed to load while offline are re-read'
+    [],
+    'libraries come from the replica; the reconcile of this return updates them through a catalog notice'
   )
   assert.ok(!signedIn.emitted.includes('library-changed'), 'open pages and filters stay where they are')
 
@@ -266,19 +266,40 @@ test('Authors re-reads its list when the server is reachable again', async () =>
   assert.equal(handlers['server-reachable'], undefined)
 })
 
+// The libraries follow the catalog notices of native ($absData dataChanged), not the server coming back
+const { createDataService } = await import(`data:text/javascript;base64,${Buffer.from((await readFile(new URL('../utils/dataService.js', import.meta.url), 'utf8'))).toString('base64')}`)
+
+function catalogService({ currentLibraryId = 'lib-1', onLoad = () => {} } = {}) {
+  const listeners = {}
+  const plugin = {
+    addListener: (name, cb) => ((listeners[name] = cb), { remove() {} }),
+    getServerState: async () => ({ state: 'online', serverConfigId: 'a' })
+  }
+  const dispatched = []
+  const emitted = []
+  const store = {
+    state: { serverState: 'online', activeServerConfigId: 'a', user: {}, libraries: { currentLibraryId } },
+    commit() {},
+    async dispatch(type, payload) {
+      dispatched.push([type, payload])
+      if (type === 'libraries/load') onLoad(store)
+    }
+  }
+  createDataService({ plugin, store, eventBus: { $emit: (name) => emitted.push(name) } })
+  return { send: (payload) => listeners.onDataChanged(payload), dispatched, emitted, store }
+}
+
 test('a library removed while the server was away still switches pages to the new one', async () => {
   for (const [switched, expected] of [
-    [true, ['library-changed', 'server-reachable']],
-    [false, ['server-reachable']]
+    [true, ['library-changed']],
+    [false, []]
   ]) {
-    const l = layout({ user: { id: 'user-1' }, currentLibraryId: 'lib-1' })
-    l.view.hasMounted = true
-    l.store.dispatch = async (type) => {
-      if (type === 'libraries/load' && switched) l.store.state.libraries.currentLibraryId = 'lib-2'
-    }
-    l.watch('serverState', 'online', 'offline')
+    const c = catalogService({ onLoad: (store) => switched && (store.state.libraries.currentLibraryId = 'lib-2') })
+    c.send({ scope: 'catalog', ids: ['libraries'] })
     await flush()
-    assert.deepEqual(l.emitted, expected, `library switched by load: ${switched}`)
+    assert.deepEqual(c.emitted, expected, `library switched by load: ${switched}`)
+    assert.deepEqual(JSON.parse(JSON.stringify(c.dispatched[0])), ['libraries/load', { force: true }])
+    assert.equal(c.dispatched.some(([type, payload]) => type === 'libraries/fetch' && payload === 'lib-2'), switched)
   }
 })
 
@@ -290,8 +311,8 @@ test('a background library re-read does not override a library the user picked m
     let answer
     const commits = []
     const state = { currentLibraryId: 'lib-a' }
-    const store = { $nativeHttp: { get: () => new Promise((resolve) => (answer = resolve)) } }
-    const ctx = { state, rootState: { user: { user: { id: 'user-1' } } }, dispatch() {}, commit: (type, value) => commits.push(type) && type === 'setCurrentLibrary' && (state.currentLibraryId = value) }
+    const store = { $absData: { getLibrary: () => new Promise((resolve) => (answer = resolve)), setCurrentLibrary: async () => {} } }
+    const ctx = { state, rootGetters: { getHasActiveServer: true }, dispatch() {}, commit: (type, value) => commits.push(type) && type === 'setCurrentLibrary' && (state.currentLibraryId = value) }
     const done = sandbox.actions.fetch.call(store, ctx, payload)
     if (switchTo) state.currentLibraryId = switchTo
     answer({ library: { id: 'lib-a', mediaType: 'book' }, filterdata: {} })
@@ -305,11 +326,15 @@ test('a background library re-read does not override a library the user picked m
   const picked = await run('lib-a', 'lib-b')
   assert.equal(picked.current, 'lib-a', 'an explicit pick still applies as before')
 
-  const l = layout({ user: { id: 'user-1' }, currentLibraryId: 'lib-1' })
-  l.view.hasMounted = true
-  l.watch('serverState', 'online', 'offline')
+  // A change of the current library's filterdata re-reads it in the background
+  const c = catalogService({ currentLibraryId: 'lib-1' })
+  c.send({ scope: 'catalog', ids: ['library:lib-1'] })
   await flush()
-  assert.deepEqual({ ...l.calls.find((c) => c[1] === 'libraries/fetch')[2] }, { libraryId: 'lib-1', onlyIfCurrent: true })
+  assert.deepEqual(JSON.parse(JSON.stringify(c.dispatched)), [['libraries/fetch', { libraryId: 'lib-1', onlyIfCurrent: true }]])
+  const other = catalogService({ currentLibraryId: 'lib-1' })
+  other.send({ scope: 'catalog', ids: ['library:lib-9', 'items:lib-1'] })
+  await flush()
+  assert.deepEqual(other.dispatched, [], "another library's topics do not refetch the current one")
 })
 
 // Bookmarks (offline-first 2a): kept natively, so a cold start without the server shows them; the server's copy arrives
@@ -420,4 +445,58 @@ test('Home on a cold start with the saved server unreachable says so instead of 
   assert.match(template, /<ui-btn v-if="!user && !serverUnreachable"[^>]*\$router\.push\('\/connect'\)/)
   const unreachableBlock = template.match(/v-if="!user && serverUnreachable">([\s\S]*?)<div class="w-full" v-else-if/)[1]
   assert.match(unreachableBlock, /@click="\$router\.push\('\/connect'\)">\{\{ \$strings\.ButtonSwitchServerUser \}\}/, 'a way to another server when this one is gone')
+})
+
+// The catalog (offline-first 4a): libraries come from the replica on the device, before and without a connection
+
+test('cold start offline shows libraries from the replica before connecting', async () => {
+  const l = layout({ serverState: 'offline' })
+  l.store.getters.getHasActiveServer = true
+  await l.mounted()
+  assert.deepEqual(
+    l.calls.filter((c) => typeof c === 'string' || c[0] === 'dispatch').map((c) => (typeof c === 'string' ? c : c[1])),
+    ['setupNetworkListener', 'getServerState', 'libraries/load', 'libraries/fetch'],
+    'libraries are read, no connection is attempted'
+  )
+  assert.ok(l.emitted.includes('library-changed'))
+
+  const online = layout({ serverState: 'unknown' })
+  online.store.getters.getHasActiveServer = true
+  await online.mounted()
+  const steps = online.calls.filter((c) => typeof c === 'string' || c[0] === 'dispatch').map((c) => (typeof c === 'string' ? c : c[1]))
+  assert.deepEqual(steps, ['setupNetworkListener', 'getServerState', 'libraries/load', 'libraries/fetch', 'attemptConnection'], 'the replica first, then the connection')
+})
+
+test('libraries are read again after connecting', async () => {
+  for (const pending of [false, true]) {
+    const l = layout({ serverState: 'online' })
+    const config = { id: 'server-a', name: 'Synthetic', address: 'https://a.test.invalid', token: 'access-1' }
+    const user = { id: 'user-1', token: 'other', librariesAccessible: [] }
+    let releaseFirst
+    l.store.dispatch = async (type, payload) => {
+      l.calls.push(['dispatch', type, payload])
+      // The startup read is still waiting on the replica when the connection succeeds
+      if (pending && type === 'libraries/load' && !payload?.force) await new Promise((resolve) => (releaseFirst = resolve))
+    }
+    Object.assign(l.view, {
+      $db: {
+        getDeviceData: async () => ({ deviceSettings: {}, lastServerConnectionConfigId: 'server-a', serverConnectionConfigs: [config] }),
+        setServerConnectionConfig: async (c) => c
+      },
+      $nativeHttp: { post: async () => ({ user, userDefaultLibraryId: 'lib-1', serverSettings: { version: '2.30.0' }, ereaderDevices: [] }) },
+      $isValidVersion: () => true,
+      $authRenewal: { latestToken: () => null },
+      $localStore: { getLastLibraryId: async () => null },
+      $socket: { connect() {}, on() {}, off() {} }
+    })
+    const first = pending ? l.view.initLibraries() : null
+    const connecting = l.component.methods.attemptConnection.call(l.view)
+    await flush()
+    if (pending) releaseFirst()
+    await connecting
+    await first
+    const loads = l.calls.filter((c) => c[0] === 'dispatch' && c[1] === 'libraries/load').map((c) => c[2])
+    assert.deepEqual(plain(loads.at(-1)), { force: true }, `pending startup read: ${pending}`)
+    assert.equal(loads.length, pending ? 2 : 1)
+  }
 })

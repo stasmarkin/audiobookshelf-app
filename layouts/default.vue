@@ -22,6 +22,7 @@ export default {
   data() {
     return {
       inittingLibraries: false,
+      initLibrariesRun: null,
       hasMounted: false,
       initialSessionsSynced: false,
       disconnectTime: 0,
@@ -195,6 +196,7 @@ export default {
       }
 
       // Set library - Use last library if set and available fallback to default user library
+      const libraryBefore = this.currentLibraryId
       const lastLibraryId = await this.$localStore.getLastLibraryId()
       if (lastLibraryId && (!user.librariesAccessible.length || user.librariesAccessible.includes(lastLibraryId))) {
         this.$store.commit('libraries/setCurrentLibrary', lastLibraryId)
@@ -212,7 +214,8 @@ export default {
       this.$socket.connect(serverConnectionConfig.address, serverConnectionConfig.token)
 
       AbsLogger.info({ tag: 'default', message: `attemptConnection: Successful connection to last saved server config (${serverConnectionConfig.name})` })
-      await this.initLibraries()
+      // The replica may have been read before the sign-in (or be empty): read again, now able to fall back to the server
+      await this.initLibraries({ force: true, notify: this.currentLibraryId !== libraryBefore })
       this.attemptingConnection = false
     },
     serverCameOnline() {
@@ -223,9 +226,8 @@ export default {
       if (!this.currentLibraryId) {
         this.initLibraries()
       } else {
-        // Re-read libraries that may have failed to load while offline, but without library-changed: that sends item,
-        // collection and playlist pages back to lists and resets filters
-        this.initLibraries({ notify: false }).then(() => this.$eventBus.$emit('server-reachable'))
+        // Libraries come from the replica; the reconcile this return starts updates them (catalog notice)
+        this.$eventBus.$emit('server-reachable')
       }
       setTimeout(() => {
         this.syncLocalSessions(false)
@@ -250,19 +252,30 @@ export default {
     socketConnectionFailed(err) {
       this.$toast.error('Socket connection error: ' + err.message)
     },
-    async initLibraries({ notify = true } = {}) {
+    /** force: read the libraries again (skip the 5-minute cache), also after a read that is still running. */
+    async initLibraries({ notify = true, force = false } = {}) {
       if (this.inittingLibraries) {
-        return
+        if (!force) return
+        await this.initLibrariesRun
+        return this.initLibraries({ notify, force })
       }
       this.inittingLibraries = true
-      const libraryBefore = this.currentLibraryId
-      await this.$store.dispatch('libraries/load')
+      const run = (async () => {
+        const libraryBefore = this.currentLibraryId
+        await this.$store.dispatch('libraries/load', { force })
 
-      AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
-      await this.$store.dispatch('libraries/fetch', notify ? this.currentLibraryId : { libraryId: this.currentLibraryId, onlyIfCurrent: true })
-      // load switches away from a library that was removed or became inaccessible; pages must follow it
-      if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
-      this.inittingLibraries = false
+        AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
+        // An empty replica before the first sign-in has no library to read yet
+        if (this.currentLibraryId) await this.$store.dispatch('libraries/fetch', notify ? this.currentLibraryId : { libraryId: this.currentLibraryId, onlyIfCurrent: true })
+        // load switches away from a library that was removed or became inaccessible; pages must follow it
+        if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
+      })()
+      this.initLibrariesRun = run
+      try {
+        await run
+      } finally {
+        this.inittingLibraries = false
+      }
     },
     async syncLocalSessions(isFirstSync) {
       if (!this.user) {
@@ -373,9 +386,16 @@ export default {
       // a connection; the live user still comes from authorize
       await this.$absData.reloadUserData().catch((error) => console.error('[default] Could not read the user data', error))
 
+      // The catalog of the saved server is on the device: the tabs show it before (and without) a connection
+      const hasActiveServer = !!this.$store.getters.getHasActiveServer
+      if (hasActiveServer) {
+        AbsLogger.info({ tag: 'default', message: 'mounted: init libraries from the replica' })
+        await this.initLibraries()
+      }
+
       if (this.$store.state.user.serverConnectionConfig) {
         AbsLogger.info({ tag: 'default', message: `mounted: Server connected, init libraries (${this.$store.getters['user/getServerConfigName']})` })
-        await this.initLibraries()
+        if (!hasActiveServer) await this.initLibraries()
       } else if (this.serverState === 'offline') {
         AbsLogger.info({ tag: 'default', message: 'mounted: Server unreachable, waiting for it before connecting' })
       } else {

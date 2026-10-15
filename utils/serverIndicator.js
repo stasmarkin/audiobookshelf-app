@@ -31,6 +31,7 @@ export function indicatorModel({ serverState, networkConnected, hasServer, signe
   if (serverState === 'offline') return show('cloud_off', 'warning', unsentOr('LabelServerUnreachable'))
   if (serverState === 'online' && syncState?.running) return show('cloud_sync', 'ok', 'LabelSyncing')
   if (serverState === 'online' && pending) return show('cloud_upload', 'warning', pendingKey)
+  if (serverState === 'online' && syncState?.catalogRunning) return show('cloud_sync', 'ok', 'LabelSyncingCatalog')
 
   // online, or unknown while the first probe is pending: the socket tells whether live updates arrive
   if (!socketConnected) return show('cloud_off', 'warning', 'MessageSocketNotConnected')

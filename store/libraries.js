@@ -35,16 +35,17 @@ export const getters = {
 
 export const actions = {
   // payload: a library id, or { libraryId, onlyIfCurrent } for a background re-read that must not override a library
-  // the user picked while it was in flight
-  fetch({ state, commit, dispatch, rootState }, payload) {
+  // the user picked while it was in flight. Read through $absData: the replica, or the server while it was never
+  // reconciled, so it works without a signed-in user (offline, after a refused sign-in)
+  fetch({ state, commit, dispatch, rootGetters }, payload) {
     const { libraryId, onlyIfCurrent = false } = typeof payload === 'object' && payload ? payload : { libraryId: payload }
-    if (!rootState.user || !rootState.user.user) {
-      console.error('libraries/fetch - User not set')
+    if (!rootGetters.getHasActiveServer) {
+      console.error('libraries/fetch - No active server')
       return false
     }
 
-    return this.$nativeHttp
-      .get(`/api/libraries/${libraryId}?include=filterdata`)
+    return this.$absData
+      .getLibrary({ id: libraryId })
       .then((data) => {
         if (onlyIfCurrent && state.currentLibraryId !== libraryId) return false
         const library = data.library
@@ -59,6 +60,9 @@ export const actions = {
         commit('setLibraryFilterData', filterData)
         commit('setNumUserPlaylists', numUserPlaylists)
         commit('setCurrentLibrary', libraryId)
+        // The current library changes here from every place (connection, first library, the picker): native
+        // reconciles it first
+        this.$absData.setCurrentLibrary({ libraryId }).catch((error) => console.error('Could not set the current library', error))
         return data
       })
       .catch((error) => {
@@ -66,29 +70,29 @@ export const actions = {
         return false
       })
   },
-  // Return true if calling load
-  load({ state, commit, rootState }) {
-    if (!rootState.user || !rootState.user.user) {
-      console.error('libraries/load - User not set')
+  // Return true if calling load. force: skip the 5-minute cache (after connecting, a catalog change, a server switch)
+  load({ state, commit, rootGetters }, { force = false } = {}) {
+    if (!rootGetters.getHasActiveServer) {
+      console.error('libraries/load - No active server')
       return false
     }
 
     // Don't load again if already loaded in the last 5 minutes
     var lastLoadDiff = Date.now() - state.lastLoad
-    if (lastLoadDiff < 5 * 60 * 1000) {
+    if (!force && lastLoadDiff < 5 * 60 * 1000) {
       // Already up to date
       return false
     }
 
-    return this.$nativeHttp
-      .get(`/api/libraries`)
-      .then((data) => {
-        // TODO: Server release 2.2.9 changed response to an object. Remove after a few releases
-        const libraries = data.libraries || data
+    return this.$absData
+      .getLibraries()
+      .then(async (data) => {
+        const libraries = data.libraries || []
 
-        // Set current library if not already set or was not returned in results
-        if (libraries.length && (!state.currentLibraryId || !libraries.find(li => li.id == state.currentLibraryId))) {
-          commit('setCurrentLibrary', libraries[0].id)
+        // Keep the current library if it is still there, else the last one picked, else the first
+        if (libraries.length && (!state.currentLibraryId || !libraries.find((li) => li.id == state.currentLibraryId))) {
+          const lastLibraryId = await this.$localStore.getLastLibraryId()
+          commit('setCurrentLibrary', libraries.find((li) => li.id === lastLibraryId) ? lastLibraryId : libraries[0].id)
         }
 
         commit('set', libraries)
@@ -100,8 +104,7 @@ export const actions = {
         commit('set', [])
         return false
       })
-  },
-
+  }
 }
 
 export const mutations = {
