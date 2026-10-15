@@ -23,10 +23,10 @@
           </div>
         </div>
         <div class="bookmarks-list w-full h-full" v-else>
-          <template v-for="bookmark in bookmarks">
+          <template v-for="bookmark in shownBookmarks">
             <modals-bookmarks-bookmark-item :key="bookmark.id" :highlight="currentTime === bookmark.time" :bookmark="bookmark" :playback-rate="_playbackRate" @click="clickBookmark" @edit="editBookmark" @delete="deleteBookmark" />
           </template>
-          <div v-if="!bookmarks.length" class="flex h-32 items-center justify-center">
+          <div v-if="!shownBookmarks.length" class="flex h-32 items-center justify-center">
             <p class="text-xl">{{ $strings.MessageNoBookmarks }}</p>
           </div>
         </div>
@@ -69,7 +69,9 @@ export default {
     return {
       selectedBookmark: null,
       showBookmarkTitleInput: false,
-      newBookmarkTitle: ''
+      newBookmarkTitle: '',
+      copyBookmarks: [],
+      stopListening: null
     }
   },
   watch: {
@@ -77,7 +79,14 @@ export default {
       if (newVal) {
         this.showBookmarkTitleInput = false
         this.newBookmarkTitle = ''
+        this.loadCopyBookmarks()
       }
+    },
+    serverConfigId() {
+      this.loadCopyBookmarks()
+    },
+    libraryItemId() {
+      this.loadCopyBookmarks()
     }
   },
   computed: {
@@ -89,8 +98,15 @@ export default {
         this.$emit('input', val)
       }
     },
+    // A downloaded copy of another saved server: its bookmarks are not the active server's list in the store
+    foreignServer() {
+      return !!this.serverConfigId && this.serverConfigId !== this.$store.state.activeServerConfigId
+    },
+    shownBookmarks() {
+      return this.foreignServer ? this.copyBookmarks : this.bookmarks
+    },
     canCreateBookmark() {
-      return !this.bookmarks.find((bm) => bm.time === this.currentTime)
+      return !this.shownBookmarks.find((bm) => bm.time === this.currentTime)
     },
     _playbackRate() {
       if (!this.playbackRate || isNaN(this.playbackRate)) return 1
@@ -98,6 +114,17 @@ export default {
     }
   },
   methods: {
+    async loadCopyBookmarks() {
+      if (!this.foreignServer) return
+      const serverConfigId = this.serverConfigId
+      const libraryItemId = this.libraryItemId
+      const list = await this.$absData.getBookmarks({ serverConfigId }).catch((error) => {
+        console.error('[BookmarksModal] Could not read bookmarks', error)
+        return null
+      })
+      if (!list || serverConfigId !== this.serverConfigId || libraryItemId !== this.libraryItemId) return
+      this.copyBookmarks = list.filter((bm) => bm.libraryItemId === libraryItemId)
+    },
     bookmarkPlaceholder() {
       // using a method prevents caching the date
       return this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
@@ -177,6 +204,13 @@ export default {
       }
     }
   },
-  mounted() {}
+  mounted() {
+    this.stopListening = this.$absData.onDataChanged((change) => {
+      if (change?.scope === 'bookmarks') this.loadCopyBookmarks()
+    })
+  },
+  beforeDestroy() {
+    if (this.stopListening) this.stopListening()
+  }
 }
 </script>

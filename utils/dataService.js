@@ -45,17 +45,20 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     }
   }
 
-  const getBookmarks = async () => {
+  const getBookmarks = async ({ serverConfigId } = {}) => {
     if (isWeb) {
       const user = await $axios.$get('/api/me')
       return user?.bookmarks || []
     }
-    const { bookmarks } = await plugin.getBookmarks()
+    const { bookmarks } = await plugin.getBookmarks(withServer({}, serverConfigId))
     return bookmarks || []
   }
 
   const reloadBookmarks = async () => {
+    const serverBefore = store.state?.activeServerConfigId ?? null
     const bookmarks = await getBookmarks()
+    // The active server changed while native answered: that list belongs to the previous one, so ask again
+    if ((store.state?.activeServerConfigId ?? null) !== serverBefore) return reloadBookmarks()
     store.commit('user/setBookmarks', bookmarks)
     return bookmarks
   }
@@ -101,7 +104,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
       return () => listeners.delete(cb)
     },
 
-    /** Visible bookmarks of the active server: [{ libraryItemId, time, title, createdAt }]. */
+    /** Visible bookmarks of the active server, or of `serverConfigId`: [{ libraryItemId, time, title, createdAt }]. */
     getBookmarks,
     reloadBookmarks,
     /**

@@ -134,3 +134,56 @@ test('signing in through the connect form hands the user to native and reloads t
     [['applyServerEvent', { event: 'user_updated', payload: user, serverConfigId: 'server-b' }], ['reloadBookmarks']]
   )
 })
+
+test('a downloaded copy of another server shows and follows that server bookmarks, not the store', async () => {
+  const sandbox = { Dialog: {}, console: { ...console, error: () => {} } }
+  vm.runInNewContext(script, sandbox)
+  const { component } = sandbox
+  const native = {
+    'server-a': [{ libraryItemId: 'li1', time: 1, title: 'Active server' }],
+    'server-b': [
+      { libraryItemId: 'li1', time: 2, title: 'Copy server' },
+      { libraryItemId: 'li9', time: 3, title: 'Other item' }
+    ]
+  }
+  let listener = null
+  const asked = []
+  const view = (serverConfigId) => {
+    const ctx = {
+      ...component.data(),
+      bookmarks: [{ libraryItemId: 'li1', time: 1, title: 'From store' }],
+      libraryItemId: 'li1',
+      currentTime: 0,
+      serverConfigId,
+      $store: { state: { activeServerConfigId: 'server-a' } },
+      $absData: {
+        getBookmarks: async ({ serverConfigId: id }) => (asked.push(id), native[id]),
+        onDataChanged: (cb) => ((listener = cb), () => (listener = null))
+      }
+    }
+    for (const [name, def] of Object.entries(component.computed)) Object.defineProperty(ctx, name, { get: (def.get || def).bind(ctx) })
+    for (const [name, fn] of Object.entries(component.methods)) ctx[name] = fn.bind(ctx)
+    component.mounted.call(ctx)
+    return ctx
+  }
+
+  const copy = view('server-b')
+  await copy.loadCopyBookmarks()
+  assert.deepEqual(copy.shownBookmarks.map((b) => b.title), ['Copy server'])
+  assert.equal(copy.canCreateBookmark, true)
+
+  native['server-b'].push({ libraryItemId: 'li1', time: 4, title: 'Added offline' })
+  listener({ scope: 'bookmarks', ids: ['li1'] })
+  await flush()
+  assert.deepEqual(copy.shownBookmarks.map((b) => b.title), ['Copy server', 'Added offline'], 'a new bookmark of the copy shows up')
+  component.beforeDestroy.call(copy)
+  assert.equal(listener, null)
+
+  asked.length = 0
+  for (const serverConfigId of [null, 'server-a']) {
+    const active = view(serverConfigId)
+    await active.loadCopyBookmarks()
+    assert.deepEqual(active.shownBookmarks.map((b) => b.title), ['From store'], `${serverConfigId}: the store list`)
+  }
+  assert.deepEqual(asked, [], 'no extra read for the active server')
+})

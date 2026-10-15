@@ -385,3 +385,30 @@ test('socket init triggers user reconcile', async () => {
   s.onInit({})
   assert.deepEqual(synced, [{ reason: 'socket-init' }])
 })
+
+test('bookmarks read for one server are not committed after a switch to another', async () => {
+  const store = bookmarkStore()
+  store.state.activeServerConfigId = 'server-a'
+  const plugin = nativeBookmarks()
+  const answers = []
+  plugin.getBookmarks = (args) => new Promise((resolve) => answers.push({ args, resolve }))
+  const $absData = createDataService({ plugin, store, platform: 'android' })
+
+  const reload = $absData.reloadBookmarks()
+  await flush()
+  store.state.activeServerConfigId = 'server-b'
+  answers[0].resolve({ bookmarks: [{ libraryItemId: 'li1', time: 1, title: 'Of server A' }] })
+  await flush()
+  assert.equal(store.state.bookmarks, undefined, 'the answer about server A is not committed')
+  assert.equal(answers.length, 2, 'the list is asked again for the server now active')
+  answers[1].resolve({ bookmarks: [{ libraryItemId: 'li2', time: 2, title: 'Of server B' }] })
+  await reload
+  assert.deepEqual(store.state.bookmarks.map((b) => b.title), ['Of server B'])
+
+  answers.length = 0
+  const copy = $absData.getBookmarks({ serverConfigId: 'server-c' })
+  await flush()
+  assert.deepEqual(answers[0].args, { serverConfigId: 'server-c' })
+  answers[0].resolve({ bookmarks: [] })
+  assert.deepEqual(await copy, [])
+})
