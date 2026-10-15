@@ -17,8 +17,10 @@ export function indicatorModel({ serverState, networkConnected, hasServer, signe
     return null
   }
   const show = (icon, tone, labelKey) => ({ icon, tone, labelKey, count: pending, action: icon ? actionFor(labelKey) : null })
+  // No plural rules in $strings: one key for a single change, one with {0} for more
+  const pendingKey = pending === 1 ? 'LabelChangePending' : 'LabelChangesPending'
   // Offline the message is about what still has to reach the server, not about the connection
-  const unsentOr = (labelKey) => (pending ? 'LabelChangesPending' : labelKey)
+  const unsentOr = (labelKey) => (pending ? pendingKey : labelKey)
 
   if (!hasServer && !attemptingConnection) return show(null, 'muted', null)
   // Signed out on purpose (Disconnect) while the server is fine: nothing to report, the socket is closed on purpose
@@ -28,7 +30,7 @@ export function indicatorModel({ serverState, networkConnected, hasServer, signe
   if (serverState === 'unauthorized') return show('lock', 'error', 'LabelSignInAgain')
   if (serverState === 'offline') return show('cloud_off', 'warning', unsentOr('LabelServerUnreachable'))
   if (serverState === 'online' && syncState?.running) return show('cloud_sync', 'ok', 'LabelSyncing')
-  if (serverState === 'online' && pending) return show('cloud_upload', 'warning', 'LabelChangesPending')
+  if (serverState === 'online' && pending) return show('cloud_upload', 'warning', pendingKey)
 
   // online, or unknown while the first probe is pending: the socket tells whether live updates arrive
   if (!socketConnected) return show('cloud_off', 'warning', 'MessageSocketNotConnected')

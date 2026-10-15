@@ -406,3 +406,16 @@ test('authorize result is handed to native once', async () => {
     [['applyServerEvent', { event: 'user_updated', payload: user, serverConfigId: 'server-a' }]]
   )
 })
+
+test('Home on a cold start with the saved server unreachable says so instead of offering Connect', async () => {
+  const page = (await readFile(new URL('../pages/bookshelf/index.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const sandbox = { console: { ...console, log: () => {} } }
+  vm.runInNewContext(page.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
+  const unreachable = (hasServer, serverState) => sandbox.component.computed.serverUnreachable.call({ $store: { getters: { getHasActiveServer: hasServer }, state: { serverState } } })
+  assert.equal(unreachable(true, 'offline'), true)
+  assert.equal(unreachable(true, 'online'), false)
+  assert.equal(unreachable(false, 'unknown'), false, 'no saved server: Connect as before')
+  const template = page.match(/<template>([\s\S]*)<\/template>/)[1]
+  assert.match(template, /v-if="!user && serverUnreachable"[\s\S]*MessageServerUnreachableShowingDevice/)
+  assert.match(template, /<ui-btn v-if="!user && !serverUnreachable"[^>]*\$router\.push\('\/connect'\)/)
+})
