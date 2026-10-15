@@ -93,7 +93,7 @@ export default {
     },
     /** A library whose reconcile never finished (or was unstable) shows what it has, with a note while offline. */
     showCatalogPartial() {
-      return this.entityName === 'books' && this.replicaIncomplete && this.$store.state.serverState !== 'online'
+      return this.readsCatalog && this.replicaIncomplete && this.$store.state.serverState !== 'online'
     },
     isBookEntity() {
       return this.entityName === 'books' || this.entityName === 'series-books'

@@ -536,3 +536,16 @@ test('no book count over "the catalog isn\'t downloaded yet"', async () => {
   const toolbar = await read('../components/home/BookshelfToolbar.vue')
   assert.match(toolbar, /<template v-if="totalEntities !== null"><p v-show="!selectedSeriesName" class="toolbar-count/)
 })
+
+test('the series tab and a series page show the partial note and no count like the Library tab', async () => {
+  for (const page of ['series', 'series-books']) {
+    const partial = await bookshelf({ page, seriesId: 's1', answer: { results: [{ id: 'a' }], total: 5, replica: { reconciledAt: null, complete: false } } })
+    partial.store.state.serverState = 'offline'
+    await partial.view.init()
+    assert.equal(partial.view.showCatalogPartial, true, page)
+
+    const never = await bookshelf({ page, seriesId: 's1', answer: { results: [], total: 0, replica: { reconciledAt: null, complete: false } } })
+    await never.view.init()
+    assert.deepEqual(never.emitted.filter(([name]) => name === 'bookshelf-total-entities').at(-1), ['bookshelf-total-entities', null], page)
+  }
+})
