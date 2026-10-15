@@ -347,6 +347,12 @@ test('a server-read list follows the socket by reading its pages again, keeping 
   Object.assign(view, { currScrollTop: 700, bookshelfHeight: 500, pagesLoaded: { 0: true } })
   let scrolled = null
   view.handleScroll = (top) => (scrolled = top)
+  // As in the WebView: rebuilding the rows drops the scroll position
+  const rebuild = view.resetEntities
+  view.resetEntities = async () => {
+    wrapper.scrollTop = 0
+    return rebuild()
+  }
   // The server after the removal of b1: one less, the series card is still first
   view.$absData.getLibraryItems = async () => page(299, ['s1', 'b2'], collapsed)
 
