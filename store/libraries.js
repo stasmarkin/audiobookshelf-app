@@ -34,7 +34,10 @@ export const getters = {
 }
 
 export const actions = {
-  fetch({ state, commit, dispatch, rootState }, libraryId) {
+  // payload: a library id, or { libraryId, onlyIfCurrent } for a background re-read that must not override a library
+  // the user picked while it was in flight
+  fetch({ state, commit, dispatch, rootState }, payload) {
+    const { libraryId, onlyIfCurrent = false } = typeof payload === 'object' && payload ? payload : { libraryId: payload }
     if (!rootState.user || !rootState.user.user) {
       console.error('libraries/fetch - User not set')
       return false
@@ -43,6 +46,7 @@ export const actions = {
     return this.$nativeHttp
       .get(`/api/libraries/${libraryId}?include=filterdata`)
       .then((data) => {
+        if (onlyIfCurrent && state.currentLibraryId !== libraryId) return false
         const library = data.library
         const filterData = data.filterdata
         const issues = data.issues || 0

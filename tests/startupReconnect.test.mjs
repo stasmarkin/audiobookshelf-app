@@ -277,3 +277,33 @@ test('a library removed while the server was away still switches pages to the ne
     assert.deepEqual(l.emitted, expected, `library switched by load: ${switched}`)
   }
 })
+
+test('a background library re-read does not override a library the user picked meanwhile', async () => {
+  const storeSource = (await readFile(new URL('../store/libraries.js', import.meta.url), 'utf8')).replace(/^import .*$/gm, '').replace(/^export const (\w+) =/gm, 'globalThis.$1 =')
+  const sandbox = { console: { ...console, error: () => {} }, require: () => ({ BookCoverAspectRatio: {} }) }
+  vm.runInNewContext(storeSource, sandbox)
+  const run = async (payload, switchTo) => {
+    let answer
+    const commits = []
+    const state = { currentLibraryId: 'lib-a' }
+    const store = { $nativeHttp: { get: () => new Promise((resolve) => (answer = resolve)) } }
+    const ctx = { state, rootState: { user: { user: { id: 'user-1' } } }, dispatch() {}, commit: (type, value) => commits.push(type) && type === 'setCurrentLibrary' && (state.currentLibraryId = value) }
+    const done = sandbox.actions.fetch.call(store, ctx, payload)
+    if (switchTo) state.currentLibraryId = switchTo
+    answer({ library: { id: 'lib-a', mediaType: 'book' }, filterdata: {} })
+    await done
+    return { commits, current: state.currentLibraryId }
+  }
+  const late = await run({ libraryId: 'lib-a', onlyIfCurrent: true }, 'lib-b')
+  assert.deepEqual(late, { commits: [], current: 'lib-b' })
+  const fresh = await run({ libraryId: 'lib-a', onlyIfCurrent: true })
+  assert.ok(fresh.commits.includes('setLibraryFilterData'))
+  const picked = await run('lib-a', 'lib-b')
+  assert.equal(picked.current, 'lib-a', 'an explicit pick still applies as before')
+
+  const l = layout({ user: { id: 'user-1' }, currentLibraryId: 'lib-1' })
+  l.view.hasMounted = true
+  l.watch('serverState', 'online', 'offline')
+  await flush()
+  assert.deepEqual({ ...l.calls.find((c) => c[1] === 'libraries/fetch')[2] }, { libraryId: 'lib-1', onlyIfCurrent: true })
+})
