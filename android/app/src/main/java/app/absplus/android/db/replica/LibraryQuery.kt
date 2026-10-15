@@ -342,9 +342,15 @@ private fun rowFilter(
   if (common != null) return common
   if (podcast) throw UnsupportedFilterException("podcast filter ${filter.group}")
   return when (filter.group) {
-    "narrators" -> { r -> value != null && value in r.narratorName.split(", ") }
+    // Names are joined with ", " in the minified item: a name containing one cannot be told apart, the server can
+    "narrators" -> {
+      if (value != null && value.contains(", ")) throw UnsupportedFilterException("narrator with a comma")
+      val byName: (ItemRow) -> Boolean = { r -> value != null && value in r.narratorName.split(", ") }
+      byName
+    }
     "authors" -> {
       val name = if (value == null) null else authorNames[value]
+      if (name != null && name.contains(", ")) throw UnsupportedFilterException("author with a comma")
       val byName: (ItemRow) -> Boolean = { r -> name != null && name in r.authorName.split(", ") }
       byName
     }

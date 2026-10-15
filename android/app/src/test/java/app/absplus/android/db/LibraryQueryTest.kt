@@ -159,4 +159,16 @@ class LibraryQueryTest {
     assertEquals(listOf("c", "b", "a"), ids(order(rows, q)))
     assertEquals(listOf("a", "b", "c"), ids(order(rows, q.copy(desc = true))))
   }
+
+  @Test
+  fun namesWithACommaNeedTheServer() {
+    val rows = listOf(itemRow("a", authorName = "Doe, John", narratorName = "Doe, Jane"))
+    for ((filter, authors) in listOf(CatalogFilter("authors", "au1") to mapOf("au1" to "Doe, John"), CatalogFilter("narrators", "Doe, Jane") to emptyMap())) {
+      try {
+        order(rows, query(filter = filter), authors = authors)
+        fail("$filter")
+      } catch (expected: UnsupportedFilterException) {
+      }
+    }
+  }
 }
