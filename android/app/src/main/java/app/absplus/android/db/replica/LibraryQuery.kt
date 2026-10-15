@@ -228,9 +228,11 @@ fun orderItems(
         series: SeriesIndex,
         authorNames: Map<String, String>,
         now: Long,
-        random: Random
+        random: Random,
+        /** The filterdata's narrators, for telling a narrator filter the replica cannot answer. */
+        narratorNames: Collection<String> = emptyList()
 ): List<QueryEntry> {
-  val prepared = prepareItems(rows, q, progress, series, authorNames, now)
+  val prepared = prepareItems(rows, q, progress, series, authorNames, now, narratorNames)
   val ordered = if (prepared.random) prepared.entries.shuffled(random) else prepared.entries.sortedWith(prepared.primary.then(TIEBREAK))
   return ordered.map { it.entry }
 }
@@ -241,12 +243,13 @@ internal fun prepareItems(
         progress: Map<String, MediaProgressEntity>,
         series: SeriesIndex,
         authorNames: Map<String, String>,
-        now: Long
+        now: Long,
+        narratorNames: Collection<String> = emptyList()
 ): Prepared {
   val podcast = q.mediaType == "podcast"
   val filter = q.filter
   val seriesFilter = !podcast && filter?.group == "series" && filter.value != "no-series"
-  val passes = rowFilter(filter, podcast, progress, series, authorNames, now)
+  val passes = rowFilter(filter, podcast, progress, series, authorNames, now, narratorNames)
   val filtered = rows.filter(passes)
 
   val ignorePrefix = q.sortingIgnorePrefix
@@ -306,6 +309,9 @@ internal fun prepareItems(
   return Prepared(keyed, primary ?: nocaseOrder(false) { it.displayTitle }, sort == "random")
 }
 
+private fun splitsWrongly(name: String, known: Collection<String>) =
+        name.contains(", ") || known.any { it.contains(", ") && name in it.split(", ") }
+
 private fun titleOf(row: ItemRow, ignorePrefix: Boolean) = if (ignorePrefix) withoutPrefix(row.title, row.titleIgnorePrefix) else row.title
 
 /**
@@ -324,7 +330,8 @@ private fun rowFilter(
         progress: Map<String, MediaProgressEntity>,
         series: SeriesIndex,
         authorNames: Map<String, String>,
-        now: Long
+        now: Long,
+        narratorNames: Collection<String>
 ): (ItemRow) -> Boolean {
   filter ?: return { true }
   val value = filter.value
@@ -342,15 +349,16 @@ private fun rowFilter(
   if (common != null) return common
   if (podcast) throw UnsupportedFilterException("podcast filter ${filter.group}")
   return when (filter.group) {
-    // Names are joined with ", " in the minified item: a name containing one cannot be told apart, the server can
+    // Names are joined with ", " in the minified item: a name that contains one, or is a part of a known name that
+    // does ("John" of "Doe, John"), cannot be told apart; the server can
     "narrators" -> {
-      if (value != null && value.contains(", ")) throw UnsupportedFilterException("narrator with a comma")
+      if (value != null && splitsWrongly(value, narratorNames)) throw UnsupportedFilterException("narrator with a comma")
       val byName: (ItemRow) -> Boolean = { r -> value != null && value in r.narratorName.split(", ") }
       byName
     }
     "authors" -> {
       val name = if (value == null) null else authorNames[value]
-      if (name != null && name.contains(", ")) throw UnsupportedFilterException("author with a comma")
+      if (name != null && splitsWrongly(name, authorNames.values)) throw UnsupportedFilterException("author with a comma")
       val byName: (ItemRow) -> Boolean = { r -> name != null && name in r.authorName.split(", ") }
       byName
     }

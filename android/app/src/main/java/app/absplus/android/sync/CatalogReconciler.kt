@@ -224,8 +224,8 @@ class CatalogReconciler(
             pending += parse.candidateSeriesIds
             // The book may have left a series that is not among the candidates
             pending += db.series().membershipOfItem(sc, item.id).map { it.seriesId }
-            // A series no list knew yet (created after the filterdata): no hash, so the next pass reads it again
-            if (parse.candidateSeriesIds.isEmpty()) item.copy(contentHash = "") else item
+            // A part no list knew yet (a series created after the filterdata): no hash, so the next pass reads it again
+            if (parse.unknownPart) item.copy(contentHash = "") else item
           }
         }
       }

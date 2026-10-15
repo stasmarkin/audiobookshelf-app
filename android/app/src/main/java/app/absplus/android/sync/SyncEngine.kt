@@ -285,6 +285,8 @@ object SyncEngine {
     private var lastCatalogStartAt: Long? = null
     private var delayedCatalog: Job? = null
     private var catalogAgain = false
+    /** A reconnect during a pass: one more, but through the reconnect interval. */
+    private var socketAgain = false
     /** The socket dropped and has not reconnected yet: its reconnect passes over the catalog again. */
     private var socketDown = false
     private var unreachableRetries = 0
@@ -339,7 +341,7 @@ object SyncEngine {
         if (reason == SyncReason.SOCKET_INIT) {
           // Decided by the socket's state, not by when it dropped: before, during or after a pass alike
           if (socketDown && deps.isForeground()) {
-            if (catalogJob != null) catalogAgain = true else passCatalog = true
+            if (catalogJob != null) socketAgain = true else passCatalog = true
           }
           socketDown = false
         }
@@ -383,7 +385,7 @@ object SyncEngine {
                 false
               }
               catalogJob != null -> {
-                catalogAgain = true
+                socketAgain = true
                 false
               }
               else -> true
@@ -600,6 +602,7 @@ object SyncEngine {
         delayedCatalog = null
         lastCatalogStartAt = null
         catalogAgain = false
+        socketAgain = false
         socketDown = false
         wantPush = false
         wantReconcile = false
@@ -660,19 +663,23 @@ object SyncEngine {
             else -> deps.log("Catalog ${config.id}: ${result.libraries} libraries, failed ${result.failedLibraries}")
           }
           applyBufferedEvents(passId)
-          val again = synchronized(lock) {
+          val (again, afterReconnect) = synchronized(lock) {
             val more = catalogAgain
+            val socket = socketAgain
             catalogAgain = false
+            socketAgain = false
+            val foreground = deps.isForeground()
             when {
-              more && deps.isForeground() -> true
+              more && foreground -> true to false
               else -> {
-                if (more) reconcileDeferred = true
+                if ((more || socket) && !foreground) reconcileDeferred = true
                 // In the same block as the check: a request after it sees no pass and starts one
                 if (catalogJob === self) catalogJob = null
-                false
+                false to (socket && foreground)
               }
             }
           }
+          if (afterReconnect) passCatalogAfterReconnect()
           if (!again) return
         }
       } finally {

@@ -171,4 +171,23 @@ class LibraryQueryTest {
       }
     }
   }
+
+  @Test
+  fun aPartOfACommaNameNeedsTheServer() {
+    val rows = listOf(itemRow("a", authorName = "Doe, John", narratorName = "Doe, Jane"), itemRow("b", authorName = "John", narratorName = "Jane"))
+    val q = { filter: CatalogFilter -> query(filter = filter) }
+    for (run in listOf(
+            { orderItems(rows, q(CatalogFilter("authors", "au2")), emptyMap(), SeriesIndex.EMPTY, mapOf("au1" to "Doe, John", "au2" to "John"), 0, Random(1)) },
+            { orderItems(rows, q(CatalogFilter("narrators", "Jane")), emptyMap(), SeriesIndex.EMPTY, emptyMap(), 0, Random(1), listOf("Doe, Jane", "Jane")) })) {
+      try {
+        run()
+        fail("a part of a comma name must not be answered from the replica")
+      } catch (expected: UnsupportedFilterException) {
+      }
+    }
+    // Without such names the replica answers
+    val plain = listOf(itemRow("b", authorName = "John", narratorName = "Jane"))
+    assertEquals(listOf("b"), ids(orderItems(plain, q(CatalogFilter("authors", "au2")), emptyMap(), SeriesIndex.EMPTY, mapOf("au2" to "John"), 0, Random(1))))
+    assertEquals(listOf("b"), ids(orderItems(plain, q(CatalogFilter("narrators", "Jane")), emptyMap(), SeriesIndex.EMPTY, emptyMap(), 0, Random(1), listOf("Jane"))))
+  }
 }

@@ -110,8 +110,8 @@ class CatalogJsonTest {
     val sameName = mapOf("Мир" to listOf("s1", "s9"))
     assertEquals(SeriesNameParse.Ambiguous(setOf("s1", "s9")), CatalogJson.parseSeriesName("Мир #2", sameName))
 
-    assertEquals(SeriesNameParse.Ambiguous(emptySet()), CatalogJson.parseSeriesName("Unknown #1", ids))
-    assertEquals(SeriesNameParse.Ambiguous(setOf("s1")), CatalogJson.parseSeriesName("Мир #1, Unknown", ids))
+    assertEquals(SeriesNameParse.Ambiguous(emptySet(), unknownPart = true), CatalogJson.parseSeriesName("Unknown #1", ids))
+    assertEquals(SeriesNameParse.Ambiguous(setOf("s1"), unknownPart = true), CatalogJson.parseSeriesName("Мир #1, Unknown", ids))
   }
 
   @Test
@@ -119,7 +119,7 @@ class CatalogJsonTest {
     val names = mapOf("Saga I" to listOf("s1"), "I" to listOf("s2"), "The Big One" to listOf("s3"), "Big" to listOf("s4"))
     // "I" and "Big" occur only inside a segment, so they are no candidates
     val parse = CatalogJson.parseSeriesName("Saga I, The Big Ones #1", names)
-    assertEquals(SeriesNameParse.Ambiguous(setOf("s1", "s3")), parse)
+    assertEquals(SeriesNameParse.Ambiguous(setOf("s1", "s3"), unknownPart = true), parse)
   }
 
   @Test

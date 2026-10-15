@@ -470,6 +470,27 @@ class SyncEngineCatalogTest {
     assertEquals("Applied at once", title("li9"))
   }
 
+  @Test
+  fun reconnectsDuringPassesKeepTheInterval() = runBlocking {
+    server.book("li1")
+    val starts = java.util.Collections.synchronizedList(mutableListOf<Long>())
+    val handler = api.handler
+    api.handler = { r ->
+      if (r.path == "/api/libraries") {
+        starts.add(System.nanoTime() / 1_000_000)
+        // Every pass sees a reconnect after a drop while it runs
+        SyncEngine.onSocketLost()
+        SyncEngine.syncNow(SyncReason.SOCKET_INIT)
+      }
+      handler(r)
+    }
+    start()
+    setState(ServerState.ONLINE)
+    eventually("three passes") { starts.size >= 3 }
+    val gaps = starts.zipWithNext { a, b -> b - a }
+    assertTrue("passes $gaps apart, interval $CATALOG_INTERVAL_MS", gaps.all { it >= CATALOG_INTERVAL_MS - 20 })
+  }
+
   private companion object {
     const val CATALOG_INTERVAL_MS = 300L
   }

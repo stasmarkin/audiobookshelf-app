@@ -16,7 +16,8 @@ sealed interface SeriesNameParse {
   /** (seriesId, sequence) per series of the book. */
   data class Parsed(val members: List<Pair<String, String?>>) : SeriesNameParse
   /** The name cannot be read with certainty: the membership of these series has to be asked from the server. */
-  data class Ambiguous(val candidateSeriesIds: Set<String>) : SeriesNameParse
+  /** [unknownPart]: no reading covers the whole string, so a series no list knows yet may be in it. */
+  data class Ambiguous(val candidateSeriesIds: Set<String>, val unknownPart: Boolean = false) : SeriesNameParse
 }
 
 /** Catalog answers of the server (2.37.1 shapes) turned into replica rows. */
@@ -237,6 +238,6 @@ object CatalogJson {
     // A part starts the string or follows ", ": a name found elsewhere is inside another series' name
     val candidates = idsByName.filterKeys { it.isNotEmpty() && (seriesName.startsWith(it) || seriesName.contains(", $it")) }
             .values.flatten().toSet()
-    return SeriesNameParse.Ambiguous(candidates)
+    return SeriesNameParse.Ambiguous(candidates, unknownPart = readings.isEmpty())
   }
 }

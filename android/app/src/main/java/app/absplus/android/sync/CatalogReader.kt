@@ -115,8 +115,11 @@ class CatalogReader(
         (0 until list.length()).mapNotNull { list.optJSONObject(it) }.associate { it.optString("id") to it.optString("name") }
       } ?: emptyMap()
     } else emptyMap()
+    val narratorNames = if (query.filter?.group == "narrators" && filterDataJson != null) {
+      JSONObject(filterDataJson).optJSONArray("narrators")?.let { list -> (0 until list.length()).mapNotNull { list.optString(it, null) } } ?: emptyList()
+    } else emptyList()
     // One seed per query: the pages of one random list are slices of the same shuffle
-    val entries = orderItems(rows, query, progressMap, series, authorNames, clock(), Random(key.hashCode()))
+    val entries = orderItems(rows, query, progressMap, series, authorNames, clock(), Random(key.hashCode()), narratorNames)
     synchronized(lock) {
       // A write while this was computed makes the order stale for the next call; this one still answers with it
       if (generation == generationAtStart) cached = key to entries

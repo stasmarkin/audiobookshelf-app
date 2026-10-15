@@ -430,4 +430,25 @@ class CatalogReconcilerTest {
 
     assertEquals(setOf("new" to "1"), membership("b1"))
   }
+
+  @Test
+  fun partlyUnknownSeriesNameIsReadAgainNextPass() {
+    server.library("lib1")
+    server.series("known", "Known")
+    val book = server.book("b1", series = listOf("known" to "1"))
+    // "Known #1, New #1": New is created after this pass read the series list and filterdata
+    server.onItemsPage = { p ->
+      if (p.filter == null && "new" !in server.series) {
+        server.series("new", "New")
+        book.series = listOf("known" to "1", "new" to "1")
+      }
+    }
+    reconcile()
+    assertTrue("the known part is asked from the server", pointRequests().any { it.query!!.contains("filter=series.${FilterCodec.encode("known")}") })
+    assertEquals("", runBlocking { db.items().get("srv", "b1") }!!.contentHash)
+
+    reconcile()
+
+    assertEquals(setOf("known" to "1", "new" to "1"), membership("b1"))
+  }
 }
