@@ -2,6 +2,8 @@ package app.absplus.android.player
 
 import android.net.Uri
 import app.absplus.android.player.AwaitingAction.ResumeStream
+import app.absplus.android.player.AwaitingAction.SwitchToLocal
+import app.absplus.android.sync.LocalCopyReady
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import app.absplus.android.sync.ServerState
 import com.google.android.exoplayer2.ExoPlaybackException
@@ -138,5 +140,36 @@ class AwaitingServerTest {
       recovered.onPlaybackReady()
       assertNull(recovered.onStreamLost("li1", null, 60.0, true, "a"))
     }
+  }
+
+  @Test fun localCopyOfCurrentStreamSwitchesAtSamePosition() {
+    val streaming = CurrentStream("li1", null, "a", 600.0, playWhenReady = true, isCast = false)
+    val waiting = AwaitingServer()
+    assertEquals(SwitchToLocal("li1", null, 600.0, true), waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), streaming))
+    assertNull("another item", waiting.onLocalCopyReady(LocalCopyReady("a", "li2", null), streaming))
+    assertNull("another server", waiting.onLocalCopyReady(LocalCopyReady("b", "li1", null), streaming))
+    assertNull("a cast device cannot play the file", waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), streaming.copy(isCast = true)))
+    assertNull("nothing streams", waiting.onLocalCopyReady(LocalCopyReady("a", "li1", null), null))
+    // An episode by its server episode id
+    val episode = CurrentStream("p", "e1", "a", 42.0, playWhenReady = false, isCast = false)
+    assertEquals(SwitchToLocal("p", "e1", 42.0, false), waiting.onLocalCopyReady(LocalCopyReady("a", "p", "e1"), episode))
+    assertNull(waiting.onLocalCopyReady(LocalCopyReady("a", "p", "e2"), episode))
+  }
+
+  @Test fun localCopyEndsTheWaitForIt() {
+    val lost = AwaitingServer()
+    lost.onStreamLost("li1", null, 300.0, false, "a")
+    lost.onUserSeek(320.0)
+    // The player's own position is stale after the loss: the wait's position wins
+    val stale = CurrentStream("li1", null, "a", 0.0, playWhenReady = false, isCast = false)
+    assertEquals(SwitchToLocal("li1", null, 320.0, false), lost.onLocalCopyReady(LocalCopyReady("a", "li1", null), stale))
+    assertFalse(lost.isAwaiting)
+
+    val blocked = AwaitingServer()
+    blocked.onQueueBlocked(PlaylistQueueItem("li2", null), "a")
+    assertNull(blocked.onLocalCopyReady(LocalCopyReady("a", "li3", null), null))
+    assertTrue(blocked.isAwaiting)
+    assertEquals(SwitchToLocal("li2", null, null, true), blocked.onLocalCopyReady(LocalCopyReady("a", "li2", null), null))
+    assertFalse(blocked.isAwaiting)
   }
 }

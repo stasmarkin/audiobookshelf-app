@@ -39,6 +39,7 @@ import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
 import app.absplus.android.sync.SyncRuntime
 import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.LocalCopyReady
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
 import app.absplus.android.managers.PlaybackRestoreStore
@@ -575,6 +576,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value))
       }
     }
+    // Download callbacks come from a worker thread; the collector runs on main
+    startScope.launch { SyncRuntime.localCopyReady.collect { onLocalCopyReady(it) } }
     startScope.launch {
       ServerReachability.serverConfigId.collect { id ->
         val waitingFor = awaiting.serverConfigId
@@ -944,6 +947,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         showAwaiting(false)
         resume(action)
       }
+      is AwaitingAction.SwitchToLocal -> {
+        showAwaiting(false)
+        switchToLocal(action)
+      }
     }
   }
 
@@ -967,6 +974,32 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         DLog.w(tag, "Resuming ${action.libraryItemId} failed (${result.message}) - waiting again")
         val again = awaiting.onStreamLost(action.libraryItemId, action.episodeId, action.position ?: 0.0, action.playWhenReady, action.serverConfigId)
         if (again != null) perform(again) else showAwaiting(true)
+      }
+    }
+  }
+
+  private fun onLocalCopyReady(ready: LocalCopyReady) {
+    val session = currentPlaybackSession
+    val stream = session?.takeIf { !it.isLocal }?.libraryItemId?.let { libraryItemId ->
+      CurrentStream(libraryItemId, session.episodeId, session.serverConnectionConfigId, getCurrentTimeSeconds(), currentPlayer.playWhenReady,
+              getMediaPlayer() == PLAYER_CAST)
+    }
+    perform(awaiting.onLocalCopyReady(ready, stream))
+  }
+
+  /** Plays the finished download instead of the stream (or the item a wait was for), without closing the player. */
+  private fun switchToLocal(action: AwaitingAction.SwitchToLocal) {
+    DLog.i(tag, "Download of ${action.libraryItemId} finished - switching to the file at ${action.position}s")
+    val session = currentPlaybackSession
+    val replacedStream = session?.takeIf { !it.isLocal && it.libraryItemId == action.libraryItemId }
+    val config = DeviceManager.getServerConnectionConfig(session?.serverConnectionConfigId)
+    val request = StartRequest(action.libraryItemId, action.episodeId, serverConfigId = session?.serverConnectionConfigId,
+            startTime = action.position, playWhenReady = action.playWhenReady, playbackRate = currentPlayer.playbackParameters.speed)
+    // Syncs the stream's last position to the server, then closes its server session; the player stays open
+    mediaProgressSyncer.stop(true) {
+      replacedStream?.let { stream -> apiHandler.closePlaybackSession(stream.id, config) { DLog.d(tag, "Closed streamed session ${stream.id}") } }
+      mainHandler.post {
+        startItem(request) { if (it is StartResult.Failed) DLog.e(tag, "Switch to the download of ${action.libraryItemId} failed: ${it.message}") }
       }
     }
   }

@@ -1,6 +1,7 @@
 package app.absplus.android.player
 
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
+import app.absplus.android.sync.LocalCopyReady
 import app.absplus.android.sync.ServerState
 import com.google.android.exoplayer2.ExoPlaybackException
 import com.google.android.exoplayer2.PlaybackException
@@ -36,9 +37,22 @@ sealed interface AwaitingAction {
           val queueItem: PlaylistQueueItem? = null
   ) : AwaitingAction
 
+  /** The item finished downloading: play the copy from [position] (null: where media_progress has it). */
+  data class SwitchToLocal(val libraryItemId: String, val episodeId: String?, val position: Double?, val playWhenReady: Boolean) : AwaitingAction
+
   /** Resuming keeps failing although the server answers: stop as for any playback error. */
   object GiveUp : AwaitingAction
 }
+
+/** The stream the player has now (server ids), for a switch to its copy when the download finishes. */
+data class CurrentStream(
+        val libraryItemId: String,
+        val episodeId: String?,
+        val serverConfigId: String?,
+        val position: Double,
+        val playWhenReady: Boolean,
+        val isCast: Boolean
+)
 
 /**
  * "Waiting for the server": a stream that lost its server, or a queue that reached an item it can only stream while the
@@ -117,6 +131,27 @@ class AwaitingServer {
       is Lost -> AwaitingAction.ResumeStream(w.libraryItemId, w.episodeId, w.position, w.playWhenReady, w.serverConfigId)
       is Blocked -> AwaitingAction.ResumeStream(w.item.libraryItemId, w.item.episodeId, null, w.playWhenReady, w.serverConfigId, w.item)
     }
+  }
+
+  /**
+   * A download finished. What waits for that item, or the stream playing it, switches to the copy: at the wait's
+   * position (the player's is stale after a loss) or the stream's. A cast device cannot play the file.
+   */
+  fun onLocalCopyReady(ready: LocalCopyReady, current: CurrentStream?): AwaitingAction? {
+    if (current?.isCast == true) return null
+    fun same(libraryItemId: String, episodeId: String?, serverConfigId: String?) = ready.libraryItemId == libraryItemId &&
+            ready.episodeId.orEmpty() == episodeId.orEmpty() && ready.serverConfigId == serverConfigId
+    val action = when (val w = wait) {
+      is Lost -> if (same(w.libraryItemId, w.episodeId, w.serverConfigId)) AwaitingAction.SwitchToLocal(w.libraryItemId, w.episodeId, w.position, w.playWhenReady) else null
+      is Blocked -> if (same(w.item.libraryItemId, w.item.episodeId, w.serverConfigId)) AwaitingAction.SwitchToLocal(w.item.libraryItemId, w.item.episodeId, null, w.playWhenReady) else null
+      null -> null
+    }
+    if (action != null) {
+      cancel(CancelReason.OTHER_ITEM_STARTED)
+      return action
+    }
+    if (wait != null || current == null || !same(current.libraryItemId, current.episodeId, current.serverConfigId)) return null
+    return AwaitingAction.SwitchToLocal(current.libraryItemId, current.episodeId, current.position, current.playWhenReady)
   }
 
   fun onPlaybackReady() {
