@@ -1,6 +1,8 @@
 package app.absplus.android.sync
 
 import androidx.room.withTransaction
+import app.absplus.android.db.replica.CollectionCounts
+import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
@@ -22,6 +24,10 @@ import kotlin.random.Random
 
 /** The most entities one bridge call returns. */
 const val MAX_READ_LIMIT = 100
+
+/** Collections a list call returns: each carries up to [COLLECTION_PREVIEW_BOOKS] books, so a call stays within 100 items. */
+const val MAX_COLLECTIONS_LIMIT = 20
+const val COLLECTION_PREVIEW_BOOKS = 4
 
 data class ItemsRequest(
         val libraryId: String,
@@ -46,6 +52,11 @@ data class SeriesRequest(
 
 /** `GET /api/libraries/:id/authors`: always ordered by name. */
 data class AuthorsRequest(val libraryId: String, val limit: Int, val page: Int)
+
+data class CollectionsRequest(val libraryId: String, val limit: Int, val page: Int)
+
+/** A page of the books of a collection. */
+data class CollectionBooksRequest(val id: String, val limit: Int, val page: Int)
 
 /**
  * Reads the catalog replica in the shape of the server's answers. The ordered ids of the last items query are kept,
@@ -222,6 +233,96 @@ class CatalogReader(
     return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
             .put("page", req.page).put("sortBy", "name").put("sortDesc", false)
             .put("replica", replica(state?.authorsReconciledAt, state?.itemsComplete ?: false))
+  }
+
+  private fun offset(page: Int, limit: Int) = minOf(page.toLong() * limit, Int.MAX_VALUE.toLong()).toInt()
+
+  /** As the server: a collection whose books are all out of the user's reach is not shown; an empty one is. */
+  private fun shown(counts: CollectionCounts?) = counts == null || counts.visible > 0
+
+  private fun collectionsReconciledAt(state: LibraryStateEntity?) = state?.collectionsReconciledAt?.takeIf { state.itemsReconciledAt != null }
+
+  /**
+   * A page of the library's collections in the server's order, each with `numBooks` and the first
+   * [COLLECTION_PREVIEW_BOOKS] books it can show in a cut-down form (enough for a cover); the books themselves are
+   * read with [collectionBooks].
+   */
+  suspend fun collections(sc: String, req: CollectionsRequest): JSONObject {
+    require(req.limit in 1..MAX_COLLECTIONS_LIMIT) { "limit must be 1..$MAX_COLLECTIONS_LIMIT" }
+    require(req.page >= 0) { "page must not be negative" }
+    val state = db.libraryState().get(sc, req.libraryId)
+    val results = JSONArray()
+    val total = db.withTransaction {
+      val counts = db.collections().counts(sc, req.libraryId).associateBy { it.collectionId }
+      val shown = db.collections().forLibrary(sc, req.libraryId).filter { shown(counts[it.id]) }
+      val slice = shown.drop(offset(req.page, req.limit)).take(req.limit)
+      val previewIds = slice.associate { it.id to db.collections().visibleItemIds(sc, it.id, COLLECTION_PREVIEW_BOOKS, 0) }
+      val books = db.items().json(sc, previewIds.values.flatten().distinct()).associateBy { it.id }
+      for (collection in slice) {
+        val previews = JSONArray()
+        previewIds.getValue(collection.id).forEach { id -> books[id]?.let { previews.put(JSONObject(CatalogJson.previewItem(it.json).toString())) } }
+        results.put(collectionJson(collection, counts[collection.id]).put("books", previews))
+      }
+      shown.size
+    }
+    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
+            .put("page", req.page).put("replica", replica(collectionsReconciledAt(state), state?.itemsComplete ?: false))
+  }
+
+  private fun collectionJson(collection: CollectionEntity, counts: CollectionCounts?) =
+          JSONObject(collection.json).put("numBooks", counts?.visible ?: 0)
+
+  /** The collection to show, with its counts; null when the replica lacks it or the user may read none of its books. */
+  private suspend fun shownCollection(sc: String, id: String): Pair<CollectionEntity, CollectionCounts?>? {
+    val collection = db.collections().get(sc, id) ?: return null
+    val counts = db.collections().countsOf(sc, id)
+    return if (shown(counts)) collection to counts else null
+  }
+
+  /**
+   * The replica state of a collection; for one the replica lacks, null while any book library of the server never had
+   * its collections read (it may be there), else the oldest collections pass.
+   */
+  private suspend fun collectionReplica(sc: String, collection: CollectionEntity?): JSONObject {
+    if (collection != null) {
+      val state = db.libraryState().get(sc, collection.libraryId)
+      return replica(collectionsReconciledAt(state), state?.itemsComplete ?: false)
+    }
+    val states = db.libraryState().all(sc).associateBy { it.libraryId }
+    val libraries = db.libraries().all(sc).filter { it.mediaType == "book" }.map { states[it.id] }
+    val times = libraries.map { collectionsReconciledAt(it) }
+    return replica(if (times.isEmpty() || times.any { it == null }) null else times.filterNotNull().min(),
+            libraries.isNotEmpty() && libraries.all { it?.itemsComplete == true })
+  }
+
+  /** `GET /api/collections/:id` without its books: `collection: null` when it is not to be shown. */
+  suspend fun collection(sc: String, id: String): JSONObject {
+    val (collection, replica) = db.withTransaction {
+      val found = shownCollection(sc, id)
+      found?.let { (c, counts) -> collectionJson(c, counts) } to collectionReplica(sc, found?.first)
+    }
+    return JSONObject().put("serverConfigId", sc).put("collection", collection ?: JSONObject.NULL).put("replica", replica)
+  }
+
+  /**
+   * A page of the books of a collection the replica has, minified as the items list gives them, in the collection's
+   * order; `found: false` (and no books) when the collection is not to be shown.
+   */
+  suspend fun collectionBooks(sc: String, req: CollectionBooksRequest): JSONObject {
+    require(req.limit in 1..MAX_READ_LIMIT) { "limit must be 1..$MAX_READ_LIMIT" }
+    require(req.page >= 0) { "page must not be negative" }
+    val results = JSONArray()
+    val (total, found, replica) = db.withTransaction {
+      val found = shownCollection(sc, req.id)
+      val ids = found?.let { db.collections().visibleItemIds(sc, req.id, req.limit, offset(req.page, req.limit)) } ?: emptyList()
+      val json = db.items().json(sc, ids).associateBy { it.id }
+      ids.forEach { id ->
+        json[id]?.let { row -> results.put(JSONObject(row.json).apply { row.rssFeedJson?.let { put("rssFeed", JSONObject(it)) } }) }
+      }
+      Triple(found?.second?.visible ?: 0, found != null, collectionReplica(sc, found?.first))
+    }
+    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
+            .put("page", req.page).put("found", found).put("replica", replica)
   }
 
   private suspend fun orderedSeries(sc: String, libraryId: String, desc: Boolean, ignorePrefix: Boolean, hideSingle: Boolean):

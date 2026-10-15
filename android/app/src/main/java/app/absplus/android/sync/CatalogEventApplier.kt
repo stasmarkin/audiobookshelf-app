@@ -14,6 +14,7 @@ val CATALOG_EVENTS: Set<String> = setOf(
         "series_added", "series_updated", "series_removed",
         "rss_feed_open", "rss_feed_closed",
         "author_added", "author_updated", "author_removed", "authors_num_books_updated",
+        "collection_added", "collection_updated", "collection_removed",
         "backup_applied")
 
 enum class CatalogEventResult { APPLIED, IGNORED, NEEDS_RECONCILE }
@@ -54,6 +55,8 @@ class CatalogEventApplier(
       }
       "author_removed" -> removeAuthor(serverConfigId, payload, topics)
       "authors_num_books_updated" -> updateAuthorCounts(serverConfigId, payload, topics)
+      "collection_added", "collection_updated" -> upsertCollection(serverConfigId, payload, topics)
+      "collection_removed" -> removeCollection(serverConfigId, payload, topics)
       "backup_applied" -> CatalogEventResult.NEEDS_RECONCILE
       else -> CatalogEventResult.IGNORED
     }
@@ -235,5 +238,34 @@ class CatalogEventApplier(
         }
       }
     }
+  }
+
+  /**
+   * The payload is the collection with all its books expanded (unfiltered by the user's access: the reader skips books
+   * the replica lacks). A known collection keeps its place in the list, a new one goes last.
+   */
+  private suspend fun upsertCollection(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
+    val id = payload.text("id") ?: return CatalogEventResult.IGNORED
+    val libraryId = payload.text("libraryId") ?: return CatalogEventResult.IGNORED
+    return db.withTransaction {
+      if (db.libraries().get(sc, libraryId) == null) return@withTransaction CatalogEventResult.IGNORED
+      val old = db.collections().get(sc, id)
+      if (old != null && payload.path("lastUpdate").asLong() < mapper.readTree(old.json).path("lastUpdate").asLong()) {
+        return@withTransaction CatalogEventResult.IGNORED
+      }
+      val position = old?.position ?: ((db.collections().maxPosition(sc, libraryId) ?: -1) + 1)
+      val (entity, bookIds) = CatalogJson.collectionEntity(sc, payload, position)
+      db.collections().replace(entity, bookIds)
+      topics += "collections:$libraryId"
+      CatalogEventResult.APPLIED
+    }
+  }
+
+  private suspend fun removeCollection(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
+    val id = payload.text("id") ?: return CatalogEventResult.IGNORED
+    val old = db.collections().get(sc, id) ?: return CatalogEventResult.IGNORED
+    db.collections().deleteByIds(sc, listOf(id))
+    topics += "collections:${old.libraryId}"
+    return CatalogEventResult.APPLIED
   }
 }

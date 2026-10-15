@@ -5,6 +5,9 @@ import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CatalogPrefs
 import app.absplus.android.sync.CatalogReader
+import app.absplus.android.sync.CollectionBooksRequest
+import app.absplus.android.sync.CollectionsRequest
+import app.absplus.android.sync.MAX_COLLECTIONS_LIMIT
 import app.absplus.android.sync.ItemsRequest
 import app.absplus.android.sync.MAX_READ_LIMIT
 import app.absplus.android.sync.SeriesRequest
@@ -66,15 +69,27 @@ internal fun authorsRequest(data: JSONObject): AuthorsRequest {
   return AuthorsRequest(libraryId, limit, page)
 }
 
+/** `getCollections` arguments: at most [MAX_COLLECTIONS_LIMIT] collections a call. */
+internal fun collectionsRequest(data: JSONObject): CollectionsRequest {
+  val (libraryId, limit, page) = pageArguments(data, MAX_COLLECTIONS_LIMIT)
+  return CollectionsRequest(libraryId, limit, page)
+}
+
+/** `getCollectionBooks` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun collectionBooksRequest(data: JSONObject): CollectionBooksRequest {
+  val (id, limit, page) = pageArguments(data, MAX_READ_LIMIT, idKey = "id")
+  return CollectionBooksRequest(id, limit, page)
+}
+
 private fun text(data: JSONObject, key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
 
-private fun pageArguments(data: JSONObject): Triple<String, Int, Int> {
-  val libraryId = data.optString("libraryId").takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("libraryId is required")
+private fun pageArguments(data: JSONObject, maxLimit: Int = MAX_READ_LIMIT, idKey: String = "libraryId"): Triple<String, Int, Int> {
+  val id = data.optString(idKey).takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("$idKey is required")
   val limit = (data.opt("limit") as? Number)?.toInt() ?: data.optString("limit").toIntOrNull()
-  if (limit == null || limit !in 1..MAX_READ_LIMIT) throw IllegalArgumentException("limit must be 1..$MAX_READ_LIMIT")
+  if (limit == null || limit !in 1..maxLimit) throw IllegalArgumentException("limit must be 1..$maxLimit")
   val page = (data.opt("page") as? Number)?.toInt() ?: data.optString("page").toIntOrNull() ?: 0
   if (page < 0) throw IllegalArgumentException("page must not be negative")
-  return Triple(libraryId, limit, page)
+  return Triple(id, limit, page)
 }
 
 /**
@@ -458,6 +473,42 @@ class AbsData : Plugin() {
       JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
               .put("replica", emptyReplica())
     }) { reader, sc -> reader.authors(sc, request) }
+  }
+
+  /** A page of `GET /api/libraries/:id/collections` from the replica, each with up to 4 preview books; `limit` must be 1..20. */
+  @PluginMethod
+  fun getCollections(call: PluginCall) {
+    val request = try {
+      collectionsRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.collections(sc, request) }
+  }
+
+  /** `{ serverConfigId, collection, replica }`: the collection without its books, `null` when the replica lacks it. */
+  @PluginMethod
+  fun getCollection(call: PluginCall) {
+    val id = call.getString("id")
+    if (id.isNullOrEmpty()) return call.reject("id is required")
+    readCatalog(call, { JSONObject().put("collection", JSONObject.NULL).put("replica", emptyReplica()) }) { reader, sc -> reader.collection(sc, id) }
+  }
+
+  /** A page of a collection's books (minified) in its order, `found: false` when the replica lacks it; `limit` must be 1..100. */
+  @PluginMethod
+  fun getCollectionBooks(call: PluginCall) {
+    val request = try {
+      collectionBooksRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("found", false).put("replica", emptyReplica())
+    }) { reader, sc -> reader.collectionBooks(sc, request) }
   }
 
   /** The library the next catalog pass reconciles first. */

@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -276,5 +277,64 @@ class CatalogEventApplierTest {
   @Test
   fun authorEventsAreCatalogEvents() {
     assertTrue(CATALOG_EVENTS.containsAll(listOf("author_added", "author_updated", "author_removed", "authors_num_books_updated")))
+  }
+
+  /** A collection event payload (`toOldJSONExpanded`): every book expanded, here the recorded expanded book with its id. */
+  private fun collection(id: String, books: List<String>, lastUpdate: Long = 100, libraryId: String = "lib1", name: String = "Collection $id"): ObjectNode {
+    val node = mapper.createObjectNode().put("id", id).put("libraryId", libraryId).put("name", name).putNull("description")
+            .put("lastUpdate", lastUpdate).put("createdAt", 1)
+    val list = node.putArray("books")
+    books.forEach { list.add(item(it)) }
+    return node
+  }
+
+  private fun collectionRow(id: String) = runBlocking { db.collections().get("srv", id) }
+  private fun collectionBooks(id: String) = runBlocking { db.collections().itemIds("srv", id) }
+
+  @Test
+  fun collectionEventsReplaceBooksKeepPlaceAndSkipDelayed() {
+    runBlocking { db.libraries().upsertAll(listOf(libraryRow("srv", "lib2", position = 1))) }
+    assertEquals(CatalogEventResult.APPLIED, apply("collection_added", collection("c1", listOf("li3", "li1"))))
+    assertEquals(CatalogEventResult.APPLIED, apply("collection_added", collection("c2", listOf("li2"))))
+    assertEquals(setOf("collections:lib1"), topics.toSet())
+    assertEquals(listOf("li3", "li1"), collectionBooks("c1"))
+    assertEquals("a new collection goes last", listOf(0, 1), listOf(collectionRow("c1")!!.position, collectionRow("c2")!!.position))
+    assertFalse("the expanded books are not kept in the row", json(collectionRow("c1")!!.json).has("books"))
+    assertNull("nor as library items", row("li3"))
+
+    topics.clear()
+    assertEquals(CatalogEventResult.APPLIED, apply("collection_updated", collection("c1", listOf("li1", "li4", "li3"), lastUpdate = 200, name = "Renamed")))
+    assertEquals(listOf("li1", "li4", "li3"), collectionBooks("c1"))
+    assertEquals("an updated collection keeps its place", 0, collectionRow("c1")!!.position)
+    assertEquals("Renamed", json(collectionRow("c1")!!.json).path("name").asText())
+    assertEquals(setOf("collections:lib1"), topics.toSet())
+
+    topics.clear()
+    assertEquals("delayed behind a newer write", CatalogEventResult.IGNORED, apply("collection_updated", collection("c1", listOf("li9"), lastUpdate = 150)))
+    assertEquals(listOf("li1", "li4", "li3"), collectionBooks("c1"))
+    assertTrue(topics.isEmpty())
+
+    assertEquals("a library the replica lacks", CatalogEventResult.IGNORED, apply("collection_added", collection("c3", listOf("li1"), libraryId = "nowhere")))
+    assertNull(collectionRow("c3"))
+    assertEquals(CatalogEventResult.APPLIED, apply("collection_added", collection("c4", listOf("li1"), libraryId = "lib2")))
+    assertEquals("another library's collection is written to it", "lib2", collectionRow("c4")!!.libraryId)
+    assertEquals(0, collectionRow("c4")!!.position)
+    assertEquals(setOf("collections:lib2"), topics.toSet())
+  }
+
+  @Test
+  fun collectionRemovedEventDeletesItems() {
+    apply("collection_added", collection("c1", listOf("li1", "li2")))
+    apply("collection_added", collection("c2", listOf("li1")))
+    topics.clear()
+    assertEquals(CatalogEventResult.APPLIED, apply("collection_removed", collection("c1", listOf("li1", "li2"))))
+    assertNull(collectionRow("c1"))
+    assertTrue(collectionBooks("c1").isEmpty())
+    assertEquals("other collections keep their books", listOf("li1"), collectionBooks("c2"))
+    assertEquals(setOf("collections:lib1"), topics.toSet())
+    topics.clear()
+    assertEquals("an unknown collection", CatalogEventResult.IGNORED, apply("collection_removed", json("""{"id":"c1","libraryId":"lib1"}""")))
+    assertTrue(topics.isEmpty())
+    assertTrue(CATALOG_EVENTS.containsAll(listOf("collection_added", "collection_updated", "collection_removed")))
   }
 }

@@ -1,6 +1,8 @@
 package app.absplus.android.plugins
 
 import app.absplus.android.sync.AuthorsRequest
+import app.absplus.android.sync.CollectionBooksRequest
+import app.absplus.android.sync.CollectionsRequest
 import app.absplus.android.sync.ItemsRequest
 import app.absplus.android.sync.SeriesRequest
 import org.json.JSONArray
@@ -72,6 +74,34 @@ class AbsDataPayloadTest {
       } catch (expected: IllegalArgumentException) {
         assertEquals("limit must be 1..100", expected.message)
       }
+    }
+  }
+
+  @Test
+  fun collectionsRequestsRejectLimitsAboveTheirCap() {
+    assertEquals(CollectionsRequest("lib1", 20, 3), collectionsRequest(JSONObject().put("libraryId", "lib1").put("limit", 20).put("page", 3)))
+    for (limit in listOf(21, 0)) {
+      try {
+        collectionsRequest(JSONObject().put("libraryId", "lib1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("each collection carries preview books", "limit must be 1..20", expected.message)
+      }
+    }
+    assertEquals(CollectionBooksRequest("c1", 100, 2), collectionBooksRequest(JSONObject().put("id", "c1").put("limit", 100).put("page", 2)))
+    for (limit in listOf(101, 0)) {
+      try {
+        collectionBooksRequest(JSONObject().put("id", "c1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..100", expected.message)
+      }
+    }
+    try {
+      collectionBooksRequest(JSONObject().put("limit", 10))
+      fail("no id")
+    } catch (expected: IllegalArgumentException) {
+      assertEquals("id is required", expected.message)
     }
   }
 }

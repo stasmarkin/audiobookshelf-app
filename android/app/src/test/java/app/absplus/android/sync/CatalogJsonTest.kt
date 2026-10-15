@@ -138,4 +138,31 @@ class CatalogJsonTest {
     assertEquals(2, members.map { it.seriesId }.toSet().size)
     assertTrue(members.all { it.libraryItemId == "ccbae3d4-63eb-4eff-85b2-911093527fa5" && it.serverConfigId == "srv" })
   }
+
+  /**
+   * `collections-page.json` is made from the server's code (2.37.1 LibraryController.getCollectionsForLibrary /
+   * Collection.toOldJSONExpanded), not recorded.
+   */
+  @Test
+  fun collectionEntityKeepsTheCollectionWithoutItsBooks() {
+    val page = fixture("collections-page.json").path("results")
+    val (row, bookIds) = CatalogJson.collectionEntity("srv", page[0], 7)
+    assertEquals("col-2", row.id)
+    assertEquals("lib1", row.libraryId)
+    assertEquals(7, row.position)
+    assertEquals(listOf("li-3", "li-1", "li-2"), bookIds)
+    val json = CatalogJson.mapper.readTree(row.json)
+    assertEquals(setOf("id", "libraryId", "name", "description", "lastUpdate", "createdAt"), json.fieldNames().asSequence().toSet())
+    assertEquals(emptyList<String>(), CatalogJson.collectionEntity("srv", page[1], 0).second)
+  }
+
+  @Test
+  fun previewItemIsWhatACoverReads() {
+    val minified = CatalogJson.itemEntity("srv", fixture("collections-page.json").path("results")[0].path("books")[0]).json
+    val preview = CatalogJson.previewItem(minified)
+    assertEquals(CatalogJson.mapper.readTree("""{"id":"li-3","ino":"9003","libraryId":"lib1","mediaType":"book","updatedAt":1792076690403,
+      "media":{"coverPath":"/metadata/items/li-3/cover.jpg","metadata":{"title":"Третья","authorName":"Лев Толстой"}}}"""), preview)
+    // Fields the item lacks are left out; the media and metadata objects are always there
+    assertEquals(CatalogJson.mapper.readTree("""{"id":"x","media":{"metadata":{}}}"""), CatalogJson.previewItem("""{"id":"x","path":"/a"}"""))
+  }
 }

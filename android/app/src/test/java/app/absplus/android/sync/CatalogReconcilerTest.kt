@@ -5,6 +5,7 @@ import app.absplus.android.db.inMemoryReplica
 import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
 import app.absplus.android.db.member
+import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.seriesRow
 import kotlinx.coroutines.CoroutineStart
@@ -599,5 +600,135 @@ class CatalogReconcilerTest {
     server.onAuthorsPage = { if (it.page == 1) it.total = 300 + it.call }
     reconcile()
     assertEquals("the last complete read stays", 1_000L, state("lib1")!!.authorsReconciledAt)
+  }
+
+  private fun collectionRequests(libraryId: String = "lib1") = api.requests.filter { it.path == "/api/libraries/$libraryId/collections" }
+
+  private fun collectionRows(libraryId: String = "lib1") = runBlocking { db.collections().forLibrary("srv", libraryId) }
+
+  private fun collectionBookIds(id: String) = runBlocking { db.collections().itemIds("srv", id) }
+
+  private val reader = CatalogReader(db, { emptyList() }, { _, _ -> emptyList() }, { 0L }, { 1L })
+
+  private fun readBooks(id: String) = runBlocking { reader.collectionBooks("srv", CollectionBooksRequest(id, 100, 0)) }.getJSONArray("results")
+          .let { list -> (0 until list.length()).map { list.getJSONObject(it).getString("id") } }
+
+  @Test
+  fun collectionKeepsServerOrderOfBooks() {
+    server.library("lib1")
+    listOf("b1", "b2", "b3", "b4").forEach { server.book(it) }
+    server.collection("c1", listOf("b3", "b1", "b4", "b2"))
+
+    reconcile()
+
+    assertEquals("the order of `books`, not of the items", listOf("b3", "b1", "b4", "b2"), collectionBookIds("c1"))
+    assertEquals(listOf("b3", "b1", "b4", "b2"), readBooks("c1"))
+    val row = collectionRows().single()
+    assertFalse("the expanded books are not kept in the row", CatalogJson.mapper.readTree(row.json).has("books"))
+
+    // Reordered in the web client: the event carries the new order
+    val applier = CatalogEventApplier(db, {}, { reader.onReplicaChanged() })
+    val moved = server.collection("c1", listOf("b2", "b4", "b1", "b3")).apply { lastUpdate = 2L }
+    runBlocking { applier.apply("srv", "collection_updated", server.collectionJson(moved)) }
+    assertEquals(listOf("b2", "b4", "b1", "b3"), readBooks("c1"))
+
+    // And the next pass keeps it, or follows the server again
+    server.collections.getValue("c1").books = listOf("b4", "b3")
+    reconcile()
+    assertEquals(listOf("b4", "b3"), collectionBookIds("c1"))
+  }
+
+  @Test
+  fun collectionsPassDeletesMissing() {
+    server.library("lib1").library("pods", "podcast")
+    server.book("b1")
+    repeat(45) { server.collection("c%02d".format(it), listOf("b1")) }
+    runBlocking {
+      db.collections().replace(CollectionEntity("srv", "gone", "lib1", 0, """{"id":"gone"}"""), listOf("b1", "b9"))
+    }
+
+    reconcile()
+
+    assertEquals(listOf(0, 1, 2), collectionRequests().map { it.query!!.substringAfter("page=").toInt() })
+    collectionRequests().forEach { assertTrue(it.query!!, it.query!!.matches(Regex("limit=20&page=\\d"))) }
+    assertTrue("no collections pass for a podcast library", collectionRequests("pods").isEmpty())
+    assertEquals("server order is the position", (0 until 45).map { "c%02d".format(it) }, collectionRows().map { it.id })
+    assertEquals((0 until 45).toList(), collectionRows().map { it.position })
+    assertTrue("the books of a deleted collection go with it", collectionBookIds("gone").isEmpty())
+    assertEquals(1_000L, state("lib1")!!.collectionsReconciledAt)
+    assertTrue(topics.contains("collections:lib1"))
+
+    // Unchanged rows are not written again
+    topics.clear()
+    now = 2_000L
+    reconcile()
+    assertFalse(topics.contains("collections:lib1"))
+    assertEquals(2_000L, state("lib1")!!.collectionsReconciledAt)
+
+    // A moved collection takes its new position; a total that moves twice deletes nothing
+    server.collections.remove("c00")
+    server.onCollectionsPage = { if (it.page == 1) it.total = 100 + it.call }
+    reconcile()
+    assertTrue("c00" in collectionRows().map { it.id })
+    assertEquals("the last complete read stays", 2_000L, state("lib1")!!.collectionsReconciledAt)
+    server.onCollectionsPage = {}
+    reconcile()
+    assertFalse("a stable walk deletes", "c00" in collectionRows().map { it.id })
+    assertEquals(0, collectionRows().first { it.id == "c01" }.position)
+  }
+
+  @Test
+  fun collectionsAnswerWithoutResultsDeletesNothing() {
+    server.library("lib1")
+    server.book("b1")
+    server.collection("c1", listOf("b1"))
+    reconcile()
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/collections")) 200 to """{"total":0}""" else handler(r) }
+    now = 2_000L
+
+    val result = reconcile()
+
+    assertEquals(listOf("c1"), collectionRows().map { it.id })
+    assertEquals(listOf("b1"), collectionBookIds("c1"))
+    assertEquals(1_000L, state("lib1")!!.collectionsReconciledAt)
+    assertEquals(listOf("lib1"), result.failedLibraries)
+    assertEquals(setOf("b1"), ids())
+  }
+
+  @Test
+  fun firstCollectionsPassTellsTheTabEvenWithoutCollections() {
+    server.library("lib1")
+    reconcile()
+    assertEquals(1_000L, state("lib1")!!.collectionsReconciledAt)
+    assertTrue("a tab reading the server switches to the replica", topics.contains("collections:lib1"))
+  }
+
+  @Test
+  fun collectionsFailureDoesNotStopTheItems() {
+    server.library("lib1")
+    server.book("b1")
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/collections")) 500 to "boom" else handler(r) }
+
+    reconcile()
+
+    assertEquals(setOf("b1"), ids())
+    assertEquals(1_000L, state("lib1")!!.itemsReconciledAt)
+    assertEquals(1_000L, state("lib1")!!.authorsReconciledAt)
+    assertNull(state("lib1")!!.collectionsReconciledAt)
+  }
+
+  @Test
+  fun itemsAnswerWithoutResultsDeletesNothing() {
+    server.library("lib1")
+    server.book("b1")
+    reconcile()
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/items")) 200 to """{"total":0}""" else handler(r) }
+
+    reconcile()
+
+    assertEquals("an odd answer is a failed walk, not an empty library", setOf("b1"), ids())
   }
 }

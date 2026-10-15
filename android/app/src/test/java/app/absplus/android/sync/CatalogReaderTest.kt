@@ -5,6 +5,7 @@ import app.absplus.android.db.inMemoryReplica
 import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
 import app.absplus.android.db.member
+import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.LibraryEntity
@@ -517,5 +518,156 @@ class CatalogReaderTest {
     val pages = (0..3).map { authors(limit = 5, page = it) }
     assertEquals(reference, pages.flatMap { authorIds(it) })
     pages.forEach { assertEquals(names.size, it.getInt("total")) }
+  }
+
+  private fun collections(sc: String = "srv", limit: Int = 20, page: Int = 0) = runBlocking { reader.collections(sc, CollectionsRequest("lib1", limit, page)) }
+
+  private fun collectionBooks(id: String, sc: String = "srv", limit: Int = 100, page: Int = 0) =
+          runBlocking { reader.collectionBooks(sc, CollectionBooksRequest(id, limit, page)) }
+
+  private fun collectionRow(id: String, position: Int = 0, sc: String = "srv") =
+          CollectionEntity(sc, id, "lib1", position, """{"id":"$id","libraryId":"lib1","name":"Collection $id","description":null,"lastUpdate":1,"createdAt":1}""")
+
+  private fun keys(node: JSONObject) = node.keys().asSequence().toSet()
+
+  @Test
+  fun collectionListCarriesPreviewsOnly() {
+    val order = (0 until 500).map { "li%03d".format((it * 7) % 500) }
+    runBlocking {
+      db.libraries().upsertAll(listOf(library()))
+      val book = CatalogJson.mapper.readTree(javaClass.getResource("/catalog/book-minified.json")) as com.fasterxml.jackson.databind.node.ObjectNode
+      db.items().upsertAll((0 until 500).map { CatalogJson.itemEntity("srv", book.deepCopy().put("id", "li%03d".format(it)).put("libraryId", "lib1")) })
+      db.collections().replace(collectionRow("big"), order)
+    }
+
+    val big = collections().getJSONArray("results").getJSONObject(0)
+    assertEquals(500, big.getInt("numBooks"))
+    val previews = big.getJSONArray("books")
+    assertEquals("the first books by position", order.take(4), (0 until previews.length()).map { previews.getJSONObject(it).getString("id") })
+    val preview = previews.getJSONObject(0)
+    assertEquals(setOf("id", "ino", "libraryId", "mediaType", "updatedAt", "media"), keys(preview))
+    assertEquals(setOf("coverPath", "metadata"), keys(preview.getJSONObject("media")))
+    assertEquals(setOf("title", "authorName"), keys(preview.getJSONObject("media").getJSONObject("metadata")))
+    assertEquals("John Smith", preview.getJSONObject("media").getJSONObject("metadata").getString("authorName"))
+
+    val pages = (0..5).map { collectionBooks("big", page = it) }
+    assertEquals(listOf(100, 100, 100, 100, 100, 0), pages.map { it.getJSONArray("results").length() })
+    pages.forEach {
+      assertEquals(500, it.getInt("total"))
+      assertTrue(it.getBoolean("found"))
+    }
+    assertEquals("all books in the collection's order", order, pages.flatMap { ids(it) })
+    val full = pages[0].getJSONArray("results").getJSONObject(0)
+    assertEquals("minified books, as the items list", 1, full.getJSONObject("media").getInt("numTracks"))
+
+    for (limit in listOf(21, 0)) {
+      try {
+        collections(limit = limit)
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..20", expected.message)
+      }
+    }
+    try {
+      collectionBooks("big", limit = 101)
+      fail("limit 101")
+    } catch (expected: IllegalArgumentException) {
+      assertEquals("limit must be 1..100", expected.message)
+    }
+  }
+
+  @Test
+  fun collectionWithOnlyInaccessibleBooksIsHidden() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library()))
+      db.items().upsertAll(listOf(itemEntity("srv", "b1")))
+      db.collections().replace(collectionRow("mixed", 0), listOf("b9", "b1"))
+      db.collections().replace(collectionRow("hidden", 1), listOf("b8", "b9"))
+      db.collections().replace(collectionRow("empty", 2), emptyList())
+    }
+    val list = collections()
+    assertEquals(listOf("mixed", "empty"), ids(list))
+    assertEquals(2, list.getInt("total"))
+    val mixed = list.getJSONArray("results").getJSONObject(0)
+    assertEquals("books the replica lacks are skipped", 1, mixed.getInt("numBooks"))
+    assertEquals("b1", mixed.getJSONArray("books").getJSONObject(0).getString("id"))
+    assertEquals(0, list.getJSONArray("results").getJSONObject(1).getInt("numBooks"))
+
+    assertTrue(runBlocking { reader.collection("srv", "hidden") }.isNull("collection"))
+    assertFalse(collectionBooks("hidden").getBoolean("found"))
+    assertEquals(0, collectionBooks("hidden").getInt("total"))
+    val one = runBlocking { reader.collection("srv", "mixed") }.getJSONObject("collection")
+    assertEquals(1, one.getInt("numBooks"))
+    assertFalse("no books, they come by page", one.has("books"))
+    assertEquals(listOf("b1"), ids(collectionBooks("mixed")))
+    assertEquals(1, collectionBooks("mixed").getInt("total"))
+    assertTrue(runBlocking { reader.collection("srv", "empty") }.getJSONObject("collection").has("name"))
+  }
+
+  @Test
+  fun collectionsAreInServerOrder() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library()))
+      val page = CatalogJson.mapper.readTree(javaClass.getResource("/catalog/collections-page.json"))
+      page.path("results").forEachIndexed { i, node ->
+        node.path("books").forEach { db.items().upsertAll(listOf(CatalogJson.itemEntity("srv", it))) }
+        val (row, bookIds) = CatalogJson.collectionEntity("srv", node, i + 5)
+        db.collections().replace(row, bookIds)
+      }
+      db.collections().replace(collectionRow("b-tie", 5), emptyList())
+      db.collections().replace(collectionRow("first", 1), emptyList())
+    }
+    val list = collections()
+    assertEquals("position, then id", listOf("first", "b-tie", "col-2", "col-1"), ids(list))
+    val fixture = list.getJSONArray("results").getJSONObject(2)
+    assertEquals("Перечитать", fixture.getString("name"))
+    assertEquals("Books to read again", fixture.getString("description"))
+    assertEquals(1792076700000L, fixture.getLong("lastUpdate"))
+    assertEquals(3, fixture.getInt("numBooks"))
+    val previews = fixture.getJSONArray("books")
+    assertEquals(listOf("li-3", "li-1", "li-2"), (0 until previews.length()).map { previews.getJSONObject(it).getString("id") })
+    assertEquals("/metadata/items/li-3/cover.jpg", previews.getJSONObject(0).getJSONObject("media").getString("coverPath"))
+    assertEquals(listOf("b-tie"), ids(collections(limit = 1, page = 1)))
+    assertEquals(listOf("col-2", "col-1"), ids(collections(limit = 2, page = 1)))
+    assertEquals(4, collections(limit = 1, page = 3).getInt("total"))
+    assertEquals(listOf("li-3", "li-1", "li-2"), ids(collectionBooks("col-2")))
+  }
+
+  @Test
+  fun collectionsReportCollectionsReconciledAt() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library(), LibraryEntity("srv", "pods", 1, "podcast", """{"id":"pods"}""", null, 0, 0)))
+      db.collections().replace(collectionRow("c1"), emptyList())
+    }
+    assertTrue(collections().getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", null, false, null, null, 70L, null, null)) }
+    assertTrue("read before the books: not loaded", collections().getJSONObject("replica").isNull("reconciledAt"))
+    assertTrue(runBlocking { reader.collection("srv", "c1") }.getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, null, null, 70L, null, null)) }
+    assertEquals(70L, collections().getJSONObject("replica").getLong("reconciledAt"))
+    assertTrue(collections().getJSONObject("replica").getBoolean("complete"))
+    assertEquals(70L, runBlocking { reader.collection("srv", "c1") }.getJSONObject("replica").getLong("reconciledAt"))
+    assertEquals(70L, collectionBooks("c1").getJSONObject("replica").getLong("reconciledAt"))
+    assertEquals("a podcast library has no collections to wait for", 70L,
+            runBlocking { reader.collection("srv", "nope") }.getJSONObject("replica").getLong("reconciledAt"))
+    runBlocking { db.libraries().upsertAll(listOf(library(id = "lib2"))) }
+    assertTrue("a book library whose collections were never read may have it",
+            runBlocking { reader.collection("srv", "nope") }.getJSONObject("replica").isNull("reconciledAt"))
+  }
+
+  @Test
+  fun collectionOfAnotherServerIsNull() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library("a")))
+      db.items().upsertAll(listOf(itemEntity("a", "b1")))
+      db.collections().replace(collectionRow("c1", sc = "a"), listOf("b1"))
+    }
+    assertEquals("a", runBlocking { reader.collection("a", "c1") }.getString("serverConfigId"))
+    assertEquals(1, runBlocking { reader.collection("a", "c1") }.getJSONObject("collection").getInt("numBooks"))
+    val other = runBlocking { reader.collection("b", "c1") }
+    assertEquals("b", other.getString("serverConfigId"))
+    assertTrue(other.isNull("collection"))
+    assertFalse(collectionBooks("c1", sc = "b").getBoolean("found"))
+    assertEquals(0, collections(sc = "b").getInt("total"))
   }
 }

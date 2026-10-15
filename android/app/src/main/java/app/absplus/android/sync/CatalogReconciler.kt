@@ -18,13 +18,16 @@ const val ITEMS_PAGE_SIZE = 500
 /** Small pages: a series answer carries every book of each series. */
 const val SERIES_PAGE_SIZE = 25
 const val AUTHORS_PAGE_SIZE = 100
+/** The server builds the whole collection list with every book expanded and cuts the page from it. */
+const val COLLECTIONS_PAGE_SIZE = 20
 
 data class CatalogResult(val libraries: Int, val failedLibraries: List<String>, val stoppedBy: HttpOutcome?)
 
 fun emptyLibraryState(sc: String, libraryId: String) = LibraryStateEntity(sc, libraryId, null, false, null, null, null, null, null)
 
 /**
- * One pass over the catalog of a server into replica.db: libraries with their filterdata, series, items and authors, page by
+ * One pass over the catalog of a server into replica.db: libraries with their filterdata, series, items, authors and
+ * collections, page by
  * page, a Room transaction per page. Rows missing on the server are deleted only after a walk in which the total did
  * not move; otherwise the walk is repeated once, and a second unstable walk keeps what it saw without deleting.
  * Series membership comes from the items' `seriesName`; names that cannot be read with certainty are asked from the
@@ -135,8 +138,9 @@ class CatalogReconciler(
     } else null
     reconcileItems(config, id, idsByName)
     if (book) runPointQueries(config, id)
-    // Last: a failed authors read skips the library only after its items are in
+    // Last: a failed authors or collections read skips the library only after its items are in
     if (book) reconcileAuthors(config, id)
+    if (book) reconcileCollections(config, id)
     updateState(sc, id) { it.copy(lastError = null) }
   }
 
@@ -171,11 +175,50 @@ class CatalogReconciler(
     if (changed || (firstPass && walk.consistent)) notify(listOf("authors:$libraryId"))
   }
 
+  /** Collections in the server's order, each with its books in the collection's order; the expanded books are not kept. */
+  private suspend fun reconcileCollections(config: ServerConnectionConfig, libraryId: String) {
+    val sc = config.id
+    val existing = db.collections().forLibrary(sc, libraryId).associateBy { it.id }
+    val firstPass = db.libraryState().get(sc, libraryId)?.collectionsReconciledAt == null
+    var changed = false
+    var position = 0
+    var positionsOf = 0
+    val walk = walk(config, "collections of $libraryId", { page ->
+      "/api/libraries/$libraryId/collections?limit=$COLLECTIONS_PAGE_SIZE&page=$page"
+    }) { results, attempt ->
+      // A walk started again numbers anew
+      if (attempt != positionsOf) {
+        position = 0
+        positionsOf = attempt
+      }
+      for (node in results) {
+        val (entity, bookIds) = CatalogJson.collectionEntity(sc, node, position++)
+        val row = if (entity.libraryId.isEmpty()) entity.copy(libraryId = libraryId) else entity
+        if (row.id.isEmpty()) continue
+        if (row == existing[row.id] && bookIds == db.collections().itemIds(sc, row.id)) continue
+        db.collections().replace(row, bookIds)
+        changed = true
+      }
+    }
+    if (walk.consistent) {
+      val missing = db.collections().ids(sc, libraryId).filter { it !in walk.seen }
+      if (missing.isNotEmpty()) {
+        db.collections().deleteByIds(sc, missing)
+        changed = true
+      }
+      updateState(sc, libraryId) { it.copy(collectionsReconciledAt = clock()) }
+    }
+    if (changed) onReplicaChanged()
+    // The first pass also tells a tab that read the server meanwhile to read the replica now
+    if (changed || (firstPass && walk.consistent)) notify(listOf("collections:$libraryId"))
+  }
+
   private class Walk(val consistent: Boolean, val seen: Set<String>)
 
   /**
-   * Pages until the total is reached; a moving total or a repeated id restarts once. [unpagedKey]: an answer without
-   * `results` must carry the whole list under this key (a server that does not page this list), else the walk fails.
+   * Pages until the total is reached; a moving total or a repeated id restarts once. An answer without `results` fails
+   * the walk (it would read as an empty list and delete everything), unless it carries the whole list under
+   * [unpagedKey] (a server that does not page this list).
    */
   private suspend fun walk(
           config: ServerConnectionConfig,
@@ -193,8 +236,8 @@ class CatalogReconciler(
       while (true) {
         val answer = get(config, path(page))
         val results = answer.path("results")
-        if (unpagedKey != null && !results.isArray) {
-          val all = answer.path(unpagedKey).takeIf { it.isArray } ?: throw Skip("no $what in the answer")
+        if (!results.isArray) {
+          val all = unpagedKey?.let { answer.path(it) }?.takeIf { it.isArray } ?: throw Skip("no $what in the answer")
           onPage(all, attempt)
           val ids = all.map { it.path("id").asText() }
           return Walk(ids.toSet().size == ids.size, ids.toSet())

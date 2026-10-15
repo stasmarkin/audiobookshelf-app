@@ -18,6 +18,11 @@ class FakeSeries(val id: String, val libraryId: String, var name: String, var hi
 
 class FakeAuthor(val id: String, val libraryId: String, var name: String, var numBooks: Int = 1, var updatedAt: Long = 1L, val addedAt: Long = 1L)
 
+class FakeCollection(val id: String, val libraryId: String, var name: String, var books: List<String>, var lastUpdate: Long = 1L)
+
+/** One `collections` answer before it is sent: a hook may change [results] and [total]. */
+class CollectionsPage(val libraryId: String, val page: Int, val call: Int, var results: List<FakeCollection>, var total: Int)
+
 /** One `authors` answer before it is sent: a hook may change [results] and [total]. */
 class AuthorsPage(val libraryId: String, val page: Int, val call: Int, var results: List<FakeAuthor>, var total: Int)
 
@@ -33,6 +38,8 @@ class FakeCatalogServer {
   val books = LinkedHashMap<String, FakeBook>()
   val series = LinkedHashMap<String, FakeSeries>()
   val authors = LinkedHashMap<String, FakeAuthor>()
+  val collections = LinkedHashMap<String, FakeCollection>()
+  var onCollectionsPage: (CollectionsPage) -> Unit = {}
   var onItemsPage: (ItemsPage) -> Unit = {}
   var onAuthorsPage: (AuthorsPage) -> Unit = {}
   var legacyAuthors = false
@@ -50,6 +57,18 @@ class FakeCatalogServer {
 
   fun author(id: String, name: String, libraryId: String = "lib1", numBooks: Int = 1) =
           FakeAuthor(id, libraryId, name, numBooks, addedAt = authors.size.toLong()).also { authors[id] = it }
+
+  fun collection(id: String, books: List<String>, libraryId: String = "lib1", name: String = "Collection $id") =
+          FakeCollection(id, libraryId, name, books).also { collections[id] = it }
+
+  /** `Collection.toOldJSONExpanded`: the books are expanded items (here the list's item shape). */
+  fun collectionJson(collection: FakeCollection): ObjectNode {
+    val node = mapper.createObjectNode().put("id", collection.id).put("libraryId", collection.libraryId).put("name", collection.name)
+            .putNull("description").put("lastUpdate", collection.lastUpdate).put("createdAt", 1L)
+    val books = node.putArray("books")
+    collection.books.forEach { id -> books.add(itemJson(this.books.getValue(id))) }
+    return node
+  }
 
   fun seriesName(book: FakeBook) = book.series.joinToString(", ") { (id, seq) ->
     val name = series.getValue(id).name
@@ -143,6 +162,18 @@ class FakeCatalogServer {
                   .put("lastFirst", it.name.substringAfterLast(' ') + ", " + it.name.substringBeforeLast(' '))
         }
         200 to mapper.writeValueAsString(mapper.createObjectNode().put("total", answer.total).put("limit", limit).put("page", page)
+                .set<ObjectNode>("results", results))
+      }
+      "collections" -> {
+        val limit = q["limit"]?.toInt() ?: 0
+        val page = q["page"]?.toInt() ?: 0
+        val all = collections.values.filter { it.libraryId == libraryId }
+        val call = calls.merge("$libraryId collections", 1, Int::plus)!! - 1
+        val answer = CollectionsPage(libraryId, page, call, if (limit == 0) all else all.drop(page * limit).take(limit), all.size)
+        onCollectionsPage(answer)
+        val results = mapper.createArrayNode()
+        answer.results.forEach { results.add(collectionJson(it)) }
+        200 to mapper.writeValueAsString(mapper.createObjectNode().put("total", answer.total).put("limit", limit.toString()).put("page", page.toString())
                 .set<ObjectNode>("results", results))
       }
       else -> 404 to "Not found"

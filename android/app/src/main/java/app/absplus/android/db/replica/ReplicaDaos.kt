@@ -183,11 +183,77 @@ abstract class AuthorDao {
   abstract suspend fun deleteForLibrary(sc: String, libraryId: String)
 }
 
-/** Filled from release 4d on; here only what removing a library needs. */
+/** Books of a collection, all and those the replica has (the user may read). */
+data class CollectionCounts(val collectionId: String, val total: Int, val visible: Int)
+
 @Dao
 abstract class CollectionDao {
   @Upsert
   abstract suspend fun upsertAll(list: List<CollectionEntity>)
+
+  @Query("SELECT * FROM collections WHERE serverConfigId = :sc AND libraryId = :libraryId ORDER BY position, id")
+  abstract suspend fun forLibrary(sc: String, libraryId: String): List<CollectionEntity>
+
+  @Query("SELECT * FROM collections WHERE serverConfigId = :sc AND id = :id")
+  abstract suspend fun get(sc: String, id: String): CollectionEntity?
+
+  @Query("SELECT id FROM collections WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun ids(sc: String, libraryId: String): List<String>
+
+  @Query("SELECT MAX(position) FROM collections WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun maxPosition(sc: String, libraryId: String): Int?
+
+  @Query("SELECT libraryItemId FROM collection_items WHERE serverConfigId = :sc AND collectionId = :collectionId ORDER BY position")
+  abstract suspend fun itemIds(sc: String, collectionId: String): List<String>
+
+  /** Collections without books have no row. */
+  @Query("""SELECT ci.collectionId AS collectionId, COUNT(*) AS total, COUNT(li.id) AS visible FROM collection_items ci
+            JOIN collections c ON c.serverConfigId = ci.serverConfigId AND c.id = ci.collectionId
+            LEFT JOIN library_items li ON li.serverConfigId = ci.serverConfigId AND li.id = ci.libraryItemId
+            WHERE ci.serverConfigId = :sc AND c.libraryId = :libraryId GROUP BY ci.collectionId""")
+  abstract suspend fun counts(sc: String, libraryId: String): List<CollectionCounts>
+
+  @Query("""SELECT ci.collectionId AS collectionId, COUNT(*) AS total, COUNT(li.id) AS visible FROM collection_items ci
+            LEFT JOIN library_items li ON li.serverConfigId = ci.serverConfigId AND li.id = ci.libraryItemId
+            WHERE ci.serverConfigId = :sc AND ci.collectionId = :collectionId GROUP BY ci.collectionId""")
+  abstract suspend fun countsOf(sc: String, collectionId: String): CollectionCounts?
+
+  /** Ids of the books the replica has, in the collection's order. */
+  @Query("""SELECT ci.libraryItemId FROM collection_items ci
+            JOIN library_items li ON li.serverConfigId = ci.serverConfigId AND li.id = ci.libraryItemId
+            WHERE ci.serverConfigId = :sc AND ci.collectionId = :collectionId ORDER BY ci.position LIMIT :limit OFFSET :offset""")
+  abstract suspend fun visibleItemIds(sc: String, collectionId: String, limit: Int, offset: Int): List<String>
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  abstract suspend fun insertItems(list: List<CollectionItemEntity>)
+
+  @Query("DELETE FROM collection_items WHERE serverConfigId = :sc AND collectionId = :collectionId")
+  abstract suspend fun deleteItemsOf(sc: String, collectionId: String)
+
+  /** The collection with its books, in the order of [libraryItemIds]. */
+  @Transaction
+  open suspend fun replace(collection: CollectionEntity, libraryItemIds: List<String>) {
+    upsertAll(listOf(collection))
+    deleteItemsOf(collection.serverConfigId, collection.id)
+    if (libraryItemIds.isNotEmpty()) {
+      insertItems(libraryItemIds.mapIndexed { i, id -> CollectionItemEntity(collection.serverConfigId, collection.id, i, id) })
+    }
+  }
+
+  /** The collections and their books. */
+  @Transaction
+  open suspend fun deleteByIds(sc: String, ids: List<String>) {
+    inChunks(ids) {
+      deleteItemsChunk(sc, it)
+      deleteChunk(sc, it)
+    }
+  }
+
+  @Query("DELETE FROM collections WHERE serverConfigId = :sc AND id IN (:ids)")
+  abstract suspend fun deleteChunk(sc: String, ids: List<String>)
+
+  @Query("DELETE FROM collection_items WHERE serverConfigId = :sc AND collectionId IN (:ids)")
+  abstract suspend fun deleteItemsChunk(sc: String, ids: List<String>)
 
   @Query("""DELETE FROM collection_items WHERE serverConfigId = :sc
             AND collectionId IN (SELECT id FROM collections WHERE serverConfigId = :sc AND libraryId = :libraryId)""")

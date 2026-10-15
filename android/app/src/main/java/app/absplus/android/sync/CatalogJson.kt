@@ -1,6 +1,7 @@
 package app.absplus.android.sync
 
 import app.absplus.android.db.replica.AuthorEntity
+import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryItemEntity
 import app.absplus.android.db.replica.SeriesEntity
@@ -202,6 +203,33 @@ object CatalogJson {
           updatedAt = author.path("updatedAt").asLong(0),
           numBooks = author.path("numBooks").asInt(0),
           json = mapper.writeValueAsString(author))
+
+  /**
+   * A collection of `GET /api/libraries/:id/collections` or a collection event (`toOldJSONExpanded`): the row without
+   * `books`, and the ids of its books in the collection's order. The expanded books themselves are not kept.
+   */
+  fun collectionEntity(serverConfigId: String, collection: JsonNode, position: Int): Pair<CollectionEntity, List<String>> {
+    val json = nodes.objectNode()
+    collection.fields().forEach { (key, value) -> if (key != "books") json.set<JsonNode>(key, value) }
+    val bookIds = collection.path("books").mapNotNull { book -> book.text("id")?.takeIf { it.isNotEmpty() } }
+    return CollectionEntity(serverConfigId, collection.path("id").asText(), collection.path("libraryId").asText(), position,
+            mapper.writeValueAsString(json)) to bookIds
+  }
+
+  /** What a collection cover reads of a book, cut from a minified item; fields the item lacks are left out. */
+  fun previewItem(minifiedJson: String): ObjectNode {
+    val item = mapper.readTree(minifiedJson)
+    val out = nodes.objectNode()
+    listOf("id", "ino", "libraryId", "mediaType", "updatedAt").forEach { copy(item, out, it) }
+    val media = item.path("media")
+    val metadata = media.path("metadata")
+    val outMedia = out.putObject("media")
+    copy(media, outMedia, "coverPath")
+    val outMetadata = outMedia.putObject("metadata")
+    copy(metadata, outMetadata, "title")
+    copy(metadata, outMetadata, "authorName")
+    return out
+  }
 
   /** `media.metadata.series` of an expanded item, or the single object a series-filtered list puts there. */
   fun seriesMembershipOf(serverConfigId: String, expandedItem: JsonNode): List<SeriesItemEntity> {
