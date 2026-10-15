@@ -17,13 +17,14 @@ import java.security.MessageDigest
 const val ITEMS_PAGE_SIZE = 500
 /** Small pages: a series answer carries every book of each series. */
 const val SERIES_PAGE_SIZE = 25
+const val AUTHORS_PAGE_SIZE = 100
 
 data class CatalogResult(val libraries: Int, val failedLibraries: List<String>, val stoppedBy: HttpOutcome?)
 
 fun emptyLibraryState(sc: String, libraryId: String) = LibraryStateEntity(sc, libraryId, null, false, null, null, null, null, null)
 
 /**
- * One pass over the catalog of a server into replica.db: libraries with their filterdata, series and items, page by
+ * One pass over the catalog of a server into replica.db: libraries with their filterdata, series, items and authors, page by
  * page, a Room transaction per page. Rows missing on the server are deleted only after a walk in which the total did
  * not move; otherwise the walk is repeated once, and a second unstable walk keeps what it saw without deleting.
  * Series membership comes from the items' `seriesName`; names that cannot be read with certainty are asked from the
@@ -134,7 +135,38 @@ class CatalogReconciler(
     } else null
     reconcileItems(config, id, idsByName)
     if (book) runPointQueries(config, id)
+    // Last: a failed authors read skips the library only after its items are in
+    if (book) reconcileAuthors(config, id)
     updateState(sc, id) { it.copy(lastError = null) }
+  }
+
+  private suspend fun reconcileAuthors(config: ServerConnectionConfig, libraryId: String) {
+    val sc = config.id
+    val existing = db.authors().forLibrary(sc, libraryId).associateBy { it.id }
+    val firstPass = db.libraryState().get(sc, libraryId)?.authorsReconciledAt == null
+    var changed = false
+    val walk = walk(config, "authors of $libraryId", { page ->
+      "/api/libraries/$libraryId/authors?limit=$AUTHORS_PAGE_SIZE&page=$page&sort=addedAt"
+    }) { results, _ ->
+      val rows = results.map { CatalogJson.authorEntity(sc, it) }
+              .map { if (it.libraryId.isEmpty()) it.copy(libraryId = libraryId) else it }
+              .filter { it.id.isNotEmpty() && it != existing[it.id] }
+      if (rows.isNotEmpty()) {
+        db.authors().upsertAll(rows)
+        changed = true
+      }
+    }
+    if (walk.consistent) {
+      val missing = db.authors().ids(sc, libraryId).filter { it !in walk.seen }
+      if (missing.isNotEmpty()) {
+        db.authors().deleteByIds(sc, missing)
+        changed = true
+      }
+    }
+    updateState(sc, libraryId) { it.copy(authorsReconciledAt = clock()) }
+    if (changed) onReplicaChanged()
+    // The first pass also tells a tab that read the server meanwhile to read the replica now
+    if (changed || firstPass) notify(listOf("authors:$libraryId"))
   }
 
   private class Walk(val consistent: Boolean, val seen: Set<String>)

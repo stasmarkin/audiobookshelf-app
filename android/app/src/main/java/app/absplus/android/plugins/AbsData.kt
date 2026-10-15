@@ -2,6 +2,7 @@ package app.absplus.android.plugins
 
 import android.content.Context
 import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CatalogPrefs
 import app.absplus.android.sync.CatalogReader
 import app.absplus.android.sync.ItemsRequest
@@ -57,6 +58,12 @@ internal fun itemsRequest(data: JSONObject): ItemsRequest {
 internal fun seriesRequest(data: JSONObject): SeriesRequest {
   val (libraryId, limit, page) = pageArguments(data)
   return SeriesRequest(libraryId, text(data, "sort"), flag(data, "desc"), flag(data, "sortingIgnorePrefix"), limit, page)
+}
+
+/** `getAuthors` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun authorsRequest(data: JSONObject): AuthorsRequest {
+  val (libraryId, limit, page) = pageArguments(data)
+  return AuthorsRequest(libraryId, limit, page)
 }
 
 private fun text(data: JSONObject, key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
@@ -437,6 +444,20 @@ class AbsData : Plugin() {
     val id = call.getString("id")
     if (id.isNullOrEmpty()) return call.reject("id is required")
     readCatalog(call, { JSONObject().put("series", JSONObject.NULL).put("replica", emptyReplica()) }) { reader, sc -> reader.seriesById(sc, id) }
+  }
+
+  /** A page of `GET /api/libraries/:id/authors` from the replica, ordered by name; `limit` must be 1..100. */
+  @PluginMethod
+  fun getAuthors(call: PluginCall) {
+    val request = try {
+      authorsRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.authors(sc, request) }
   }
 
   /** The library the next catalog pass reconciles first. */

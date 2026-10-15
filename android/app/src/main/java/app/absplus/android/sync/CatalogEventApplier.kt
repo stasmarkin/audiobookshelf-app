@@ -12,7 +12,9 @@ val CATALOG_EVENTS: Set<String> = setOf(
         "item_added", "item_updated", "items_added", "items_updated", "item_removed",
         "library_added", "library_updated", "library_removed",
         "series_added", "series_updated", "series_removed",
-        "rss_feed_open", "rss_feed_closed", "author_updated", "backup_applied")
+        "rss_feed_open", "rss_feed_closed",
+        "author_added", "author_updated", "author_removed", "authors_num_books_updated",
+        "backup_applied")
 
 enum class CatalogEventResult { APPLIED, IGNORED, NEEDS_RECONCILE }
 
@@ -45,7 +47,13 @@ class CatalogEventApplier(
       "series_removed" -> removeSeries(serverConfigId, payload, topics)
       "rss_feed_open" -> setFeed(serverConfigId, payload, open = true, topics)
       "rss_feed_closed" -> setFeed(serverConfigId, payload, open = false, topics)
-      "author_updated" -> renameAuthor(serverConfigId, payload, topics)
+      "author_added" -> if (upsertAuthor(serverConfigId, payload, topics) == AuthorWrite.WRITTEN) CatalogEventResult.APPLIED else CatalogEventResult.IGNORED
+      "author_updated" -> {
+        if (upsertAuthor(serverConfigId, payload, topics) != AuthorWrite.STALE) renameAuthor(serverConfigId, payload, topics)
+        if (topics.isEmpty()) CatalogEventResult.IGNORED else CatalogEventResult.APPLIED
+      }
+      "author_removed" -> removeAuthor(serverConfigId, payload, topics)
+      "authors_num_books_updated" -> updateAuthorCounts(serverConfigId, payload, topics)
       "backup_applied" -> CatalogEventResult.NEEDS_RECONCILE
       else -> CatalogEventResult.IGNORED
     }
@@ -155,10 +163,61 @@ class CatalogEventApplier(
     }
   }
 
-  /** The author filter compares names: the cached filterdata takes the new one, the books follow with their own events. */
-  private suspend fun renameAuthor(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
+  private enum class AuthorWrite { WRITTEN, SKIPPED, STALE }
+
+  /**
+   * `author_added` carries no `numBooks` and neither event a `lastFirst`: the row keeps its own (a new one has 0 and
+   * null until the next reconcile).
+   */
+  private suspend fun upsertAuthor(sc: String, payload: JsonNode, topics: MutableSet<String>): AuthorWrite {
+    val id = payload.text("id") ?: return AuthorWrite.SKIPPED
+    val libraryId = payload.text("libraryId") ?: return AuthorWrite.SKIPPED
+    return db.withTransaction {
+      if (db.libraries().get(sc, libraryId) == null) return@withTransaction AuthorWrite.SKIPPED
+      val old = db.authors().get(sc, id)
+      if (old != null && payload.path("updatedAt").asLong() < old.updatedAt) return@withTransaction AuthorWrite.STALE
+      val author = payload.deepCopy<JsonNode>() as ObjectNode
+      if (!author.path("numBooks").isNumber) author.put("numBooks", old?.numBooks ?: 0)
+      if (!author.has("lastFirst") && old?.lastFirst != null) author.put("lastFirst", old.lastFirst)
+      db.authors().upsertAll(listOf(CatalogJson.authorEntity(sc, author)))
+      topics += "authors:$libraryId"
+      AuthorWrite.WRITTEN
+    }
+  }
+
+  private suspend fun removeAuthor(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
     val id = payload.text("id") ?: return CatalogEventResult.IGNORED
-    val name = payload.text("name") ?: return CatalogEventResult.IGNORED
+    val old = db.authors().get(sc, id) ?: return CatalogEventResult.IGNORED
+    db.authors().deleteByIds(sc, listOf(id))
+    topics += "authors:${old.libraryId}"
+    return CatalogEventResult.APPLIED
+  }
+
+  /** A scan's new book counts: only `numBooks` of authors the replica has. */
+  private suspend fun updateAuthorCounts(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
+    val counts = payload.path("authors").mapNotNull { a ->
+      val id = a.text("id") ?: return@mapNotNull null
+      val numBooks = a.get("numBooks")?.takeIf { it.isNumber }?.asInt() ?: return@mapNotNull null
+      id to numBooks
+    }
+    db.withTransaction {
+      val rows = counts.mapNotNull { (id, numBooks) ->
+        val old = db.authors().get(sc, id) ?: return@mapNotNull null
+        if (old.numBooks == numBooks) return@mapNotNull null
+        val json = mapper.readTree(old.json) as ObjectNode
+        json.put("numBooks", numBooks)
+        old.copy(numBooks = numBooks, json = mapper.writeValueAsString(json))
+      }
+      if (rows.isNotEmpty()) db.authors().upsertAll(rows)
+      rows.forEach { topics += "authors:${it.libraryId}" }
+    }
+    return if (topics.isEmpty()) CatalogEventResult.IGNORED else CatalogEventResult.APPLIED
+  }
+
+  /** The author filter compares names: the cached filterdata takes the new one, the books follow with their own events. */
+  private suspend fun renameAuthor(sc: String, payload: JsonNode, topics: MutableSet<String>) {
+    val id = payload.text("id") ?: return
+    val name = payload.text("name") ?: return
     db.withTransaction {
       for (library in db.libraries().all(sc)) {
         val filterData = library.filterDataJson?.let { mapper.readTree(it) as? ObjectNode } ?: continue
@@ -176,6 +235,5 @@ class CatalogEventApplier(
         }
       }
     }
-    return if (topics.isEmpty()) CatalogEventResult.IGNORED else CatalogEventResult.APPLIED
   }
 }

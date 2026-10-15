@@ -1,5 +1,6 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.authorRow
 import app.absplus.android.db.inMemoryReplica
 import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
@@ -478,5 +479,76 @@ class CatalogReconcilerTest {
     topics.clear()
     reconcile()
     assertTrue(topics.contains("items:lib1"))
+  }
+
+  private fun authorIds(libraryId: String = "lib1") = runBlocking { db.authors().ids("srv", libraryId) }.toSet()
+
+  private fun authorRequests(libraryId: String = "lib1") = api.requests.filter { it.path == "/api/libraries/$libraryId/authors" }
+
+  @Test
+  fun authorsPassUpsertsAndDeletesLikeItems() {
+    server.library("lib1").library("pods", "podcast")
+    server.book("b1")
+    repeat(230) { server.author("a$it", "Author $it", numBooks = it) }
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "gone"))) }
+    server.onAuthorsPage = { if (it.call == 1) it.total = 231 }
+
+    reconcile()
+
+    assertEquals("pages 0, 1, then the whole walk again", listOf(0, 1, 0, 1, 2),
+            authorRequests().map { it.query!!.substringAfter("page=").substringBefore('&').toInt() })
+    authorRequests().forEach { assertTrue(it.query!!, it.query!!.matches(Regex("limit=100&page=\\d&sort=addedAt"))) }
+    assertTrue("no authors pass for a podcast library", authorRequests("pods").isEmpty())
+    assertEquals((0 until 230).map { "a$it" }.toSet(), authorIds())
+    val row = runBlocking { db.authors().get("srv", "a7") }!!
+    assertEquals(7, row.numBooks)
+    assertEquals("7, Author", row.lastFirst)
+    assertEquals(7, CatalogJson.mapper.readTree(row.json).path("numBooks").asInt())
+    assertEquals(1_000L, state("lib1")!!.authorsReconciledAt)
+    assertTrue(topics.contains("authors:lib1"))
+
+    // Unchanged rows are not written again
+    topics.clear()
+    now = 2_000L
+    server.onAuthorsPage = {}
+    reconcile()
+    assertFalse(topics.contains("authors:lib1"))
+    assertEquals(2_000L, state("lib1")!!.authorsReconciledAt)
+
+    // A total that moves twice keeps what was seen and deletes nothing
+    server.authors.remove("a0")
+    server.authors.getValue("a1").name = "Renamed"
+    server.onAuthorsPage = { if (it.page == 1) it.total = 300 + it.call }
+    reconcile()
+    assertTrue("a0" in authorIds())
+    assertEquals("Renamed", runBlocking { db.authors().get("srv", "a1") }!!.name)
+
+    server.onAuthorsPage = {}
+    reconcile()
+    assertFalse("a stable walk deletes", "a0" in authorIds())
+  }
+
+  @Test
+  fun authorsFailureDoesNotStopTheItems() {
+    server.library("lib1")
+    server.book("b1")
+    server.author("a1", "Ann Lee")
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/authors")) 500 to "boom" else handler(r) }
+
+    reconcile()
+
+    assertEquals(setOf("b1"), ids())
+    assertEquals(1_000L, state("lib1")!!.itemsReconciledAt)
+    assertNull(state("lib1")!!.authorsReconciledAt)
+    assertTrue(authorIds().isEmpty())
+  }
+
+  @Test
+  fun firstAuthorsPassTellsTheTabEvenWithoutAuthors() {
+    server.library("lib1")
+    reconcile()
+    assertEquals(1_000L, state("lib1")!!.authorsReconciledAt)
+    assertTrue("a tab reading the server switches to the replica", topics.contains("authors:lib1"))
   }
 }

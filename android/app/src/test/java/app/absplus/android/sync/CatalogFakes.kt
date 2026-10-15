@@ -16,6 +16,11 @@ class FakeBook(
 
 class FakeSeries(val id: String, val libraryId: String, var name: String, var hidden: Boolean = false, val addedAt: Long = 1L)
 
+class FakeAuthor(val id: String, val libraryId: String, var name: String, var numBooks: Int = 1, var updatedAt: Long = 1L, val addedAt: Long = 1L)
+
+/** One `authors` answer before it is sent: a hook may change [results] and [total]. */
+class AuthorsPage(val libraryId: String, val page: Int, val call: Int, var results: List<FakeAuthor>, var total: Int)
+
 /** One `items` answer before it is sent: a hook may change [results] and [total] or throw IOException. */
 class ItemsPage(val libraryId: String, val page: Int, val filter: String?, val call: Int, var results: List<FakeBook>, var total: Int)
 
@@ -27,7 +32,9 @@ class FakeCatalogServer {
   val libraries = mutableListOf<Pair<String, String>>()
   val books = LinkedHashMap<String, FakeBook>()
   val series = LinkedHashMap<String, FakeSeries>()
+  val authors = LinkedHashMap<String, FakeAuthor>()
   var onItemsPage: (ItemsPage) -> Unit = {}
+  var onAuthorsPage: (AuthorsPage) -> Unit = {}
   var notFound: Set<String> = emptySet()
   private val calls = HashMap<String, Int>()
   private val mapper = CatalogJson.mapper
@@ -39,6 +46,9 @@ class FakeCatalogServer {
 
   fun series(id: String, name: String, libraryId: String = "lib1", hidden: Boolean = false) =
           FakeSeries(id, libraryId, name, hidden, addedAt = series.size.toLong()).also { series[id] = it }
+
+  fun author(id: String, name: String, libraryId: String = "lib1", numBooks: Int = 1) =
+          FakeAuthor(id, libraryId, name, numBooks, addedAt = authors.size.toLong()).also { authors[id] = it }
 
   fun seriesName(book: FakeBook) = book.series.joinToString(", ") { (id, seq) ->
     val name = series.getValue(id).name
@@ -111,6 +121,22 @@ class FakeCatalogServer {
                   .put("addedAt", it.addedAt).put("updatedAt", it.addedAt).set<ObjectNode>("books", mapper.createArrayNode())
         }
         200 to mapper.writeValueAsString(mapper.createObjectNode().put("total", all.size).set<ObjectNode>("results", results))
+      }
+      "authors" -> {
+        val limit = q["limit"]?.toInt() ?: 0
+        val page = q["page"]?.toInt() ?: 0
+        val all = authors.values.filter { it.libraryId == libraryId }.sortedBy { it.addedAt }
+        val call = calls.merge("$libraryId authors", 1, Int::plus)!! - 1
+        val answer = AuthorsPage(libraryId, page, call, all.drop(page * limit).take(limit), all.size)
+        onAuthorsPage(answer)
+        val results = mapper.createArrayNode()
+        answer.results.forEach {
+          results.addObject().put("id", it.id).putNull("asin").put("name", it.name).putNull("description").putNull("imagePath")
+                  .put("libraryId", libraryId).put("addedAt", it.addedAt).put("updatedAt", it.updatedAt).put("numBooks", it.numBooks)
+                  .put("lastFirst", it.name.substringAfterLast(' ') + ", " + it.name.substringBeforeLast(' '))
+        }
+        200 to mapper.writeValueAsString(mapper.createObjectNode().put("total", answer.total).put("limit", limit).put("page", page)
+                .set<ObjectNode>("results", results))
       }
       else -> 404 to "Not found"
     }

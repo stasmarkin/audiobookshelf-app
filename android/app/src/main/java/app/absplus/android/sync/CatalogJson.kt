@@ -1,5 +1,6 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.replica.AuthorEntity
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryItemEntity
 import app.absplus.android.db.replica.SeriesEntity
@@ -186,6 +187,21 @@ object CatalogJson {
             updatedAt = series.path("updatedAt").asLong(0),
             json = mapper.writeValueAsString(json))
   }
+
+  /**
+   * An entry of `GET /api/libraries/:id/authors` (`toOldJSONExpanded` + `lastFirst`) or an author event payload, kept
+   * whole as [AuthorEntity.json]; a payload without `numBooks` or `lastFirst` gives 0 and null.
+   */
+  fun authorEntity(serverConfigId: String, author: JsonNode): AuthorEntity = AuthorEntity(
+          serverConfigId = serverConfigId,
+          id = author.path("id").asText(),
+          libraryId = author.path("libraryId").asText(),
+          name = author.text("name") ?: "",
+          lastFirst = author.text("lastFirst"),
+          addedAt = author.path("addedAt").asLong(0),
+          updatedAt = author.path("updatedAt").asLong(0),
+          numBooks = author.path("numBooks").asInt(0),
+          json = mapper.writeValueAsString(author))
 
   /** `media.metadata.series` of an expanded item, or the single object a series-filtered list puts there. */
   fun seriesMembershipOf(serverConfigId: String, expandedItem: JsonNode): List<SeriesItemEntity> {

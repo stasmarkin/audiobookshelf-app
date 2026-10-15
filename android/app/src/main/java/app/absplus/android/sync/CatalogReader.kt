@@ -1,5 +1,6 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.replica.AuthorEntity
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
@@ -42,6 +43,9 @@ data class SeriesRequest(
         val limit: Int,
         val page: Int
 )
+
+/** `GET /api/libraries/:id/authors`: always ordered by name. */
+data class AuthorsRequest(val libraryId: String, val limit: Int, val page: Int)
 
 /**
  * Reads the catalog replica in the shape of the server's answers. The ordered ids of the last items query are kept,
@@ -137,10 +141,16 @@ class CatalogReader(
     } else emptyMap()
     val needsSeries = query.collapseSeries || query.filter?.group == "series"
     val series = if (needsSeries) SeriesIndex.of(db.series().forLibrary(sc, libraryId), db.series().members(sc, libraryId)) else SeriesIndex.EMPTY
-    val authorNames = if (query.filter?.group == "authors" && filterDataJson != null) {
-      JSONObject(filterDataJson).optJSONArray("authors")?.let { list ->
-        (0 until list.length()).mapNotNull { list.optJSONObject(it) }.associate { it.optString("id") to it.optString("name") }
+    val authorNames = if (query.filter?.group == "authors") {
+      val cached = filterDataJson?.let { json ->
+        JSONObject(json).optJSONArray("authors")?.let { list ->
+          (0 until list.length()).mapNotNull { list.optJSONObject(it) }.associate { it.optString("id") to it.optString("name") }
+        }
       } ?: emptyMap()
+      // An author added (by an event) after the filterdata was cached is only in the authors table
+      val id = query.filter.value
+      val added = if (id != null && id !in cached) db.authors().get(sc, id)?.takeIf { it.libraryId == libraryId } else null
+      if (added != null) cached + (added.id to added.name) else cached
     } else emptyMap()
     val narratorNames = if (query.filter?.group == "narrators" && filterDataJson != null) {
       JSONObject(filterDataJson).optJSONArray("narrators")?.let { list -> (0 until list.length()).mapNotNull { list.optString(it, null) } } ?: emptyList()
@@ -197,6 +207,20 @@ class CatalogReader(
     }
     return JSONObject().put("serverConfigId", sc).put("series", series?.let { seriesJson(it) } ?: JSONObject.NULL)
             .put("replica", replica)
+  }
+
+  /** A page of the library's authors as the server lists them, ordered by name (NOCASE), then id. */
+  suspend fun authors(sc: String, req: AuthorsRequest): JSONObject {
+    require(req.limit in 1..MAX_READ_LIMIT) { "limit must be 1..$MAX_READ_LIMIT" }
+    require(req.page >= 0) { "page must not be negative" }
+    val state = db.libraryState().get(sc, req.libraryId)
+    val ordered = db.authors().forLibrary(sc, req.libraryId)
+            .sortedWith(Comparator<AuthorEntity> { a, b -> nocaseCompare(a.name, b.name) }.thenBy { it.id })
+    val results = JSONArray()
+    ordered.drop(req.page * req.limit).take(req.limit).forEach { results.put(JSONObject(it.json)) }
+    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", ordered.size).put("limit", req.limit)
+            .put("page", req.page).put("sortBy", "name").put("sortDesc", false)
+            .put("replica", replica(state?.authorsReconciledAt, state?.itemsComplete ?: false))
   }
 
   private suspend fun orderedSeries(sc: String, libraryId: String, desc: Boolean, ignorePrefix: Boolean, hideSingle: Boolean):

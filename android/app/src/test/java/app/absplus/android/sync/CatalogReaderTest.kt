@@ -1,5 +1,6 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.authorRow
 import app.absplus.android.db.inMemoryReplica
 import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
@@ -421,4 +422,84 @@ class CatalogReaderTest {
 
   @Test
   fun singleBookSubSeriesFollowsHideSetting() = assertSubSeriesCases { it.contains("Повесть") }
+
+  private fun authors(sc: String = "srv", limit: Int = 100, page: Int = 0, libraryId: String = "lib1") =
+          runBlocking { reader.authors(sc, AuthorsRequest(libraryId, limit, page)) }
+
+  private fun authorIds(answer: JSONObject) = answer.getJSONArray("results").let { list -> (0 until list.length()).map { list.getJSONObject(it).getString("id") } }
+
+  /** `KT-res/catalog/authors-page.json` is made from the server's code (2.37.1 LibraryController.getAuthors / Author.toOldJSONExpanded + lastFirst). */
+  private fun fillAuthorsFromFixture(sc: String = "srv") = runBlocking {
+    db.libraries().upsertAll(listOf(library(sc)))
+    val page = CatalogJson.mapper.readTree(javaClass.getResource("/catalog/authors-page.json"))
+    db.authors().upsertAll(page.path("results").map { CatalogJson.authorEntity(sc, it) })
+    reader.onReplicaChanged()
+  }
+
+  @Test
+  fun authorsAreOrderedByName() {
+    fillAuthorsFromFixture()
+    val answer = authors()
+    assertEquals("name without case (alice before Bob), then id for equal names",
+            listOf("au-3", "au-2", "au-1", "au-5", "au-4"), authorIds(answer))
+    assertEquals(5, answer.getInt("total"))
+    val alice = answer.getJSONArray("results").getJSONObject(0)
+    assertEquals("the server's author with its count and lastFirst", 1, alice.getInt("numBooks"))
+    assertEquals("Adams, alice", alice.getString("lastFirst"))
+    assertEquals("/metadata/authors/au-3.jpg", alice.getString("imagePath"))
+
+    // Pages of one order against a reference order
+    runBlocking {
+      db.authors().upsertAll((0 until 250).map { i ->
+        val name = "author %03d".format((i * 37) % 250).let { if (i % 2 == 0) it.uppercase() else it }
+        authorRow("big", "id%03d".format(i), name = name)
+      })
+    }
+    reader.onReplicaChanged()
+    val reference = runBlocking { db.authors().forLibrary("big", "lib1") }
+            .sortedWith(compareBy({ it.name.lowercase() }, { it.id })).map { it.id }
+    val pages = (0..3).map { authors(sc = "big", page = it) }
+    assertEquals(listOf(100, 100, 50, 0), pages.map { it.getJSONArray("results").length() })
+    pages.forEach { assertEquals(250, it.getInt("total")) }
+    assertEquals(reference, pages.flatMap { authorIds(it) })
+    assertEquals(3, pages[3].getInt("page"))
+    assertEquals(100, pages[3].getInt("limit"))
+    for (limit in listOf(101, 0)) {
+      try {
+        authors(sc = "big", limit = limit)
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..100", expected.message)
+      }
+    }
+    assertEquals("another server's authors are invisible", 0, authors(sc = "other").getInt("total"))
+  }
+
+  @Test
+  fun authorsListReportsAuthorsReconciledAt() {
+    fillAuthorsFromFixture()
+    val before = authors()
+    assertEquals("srv", before.getString("serverConfigId"))
+    assertTrue(before.getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, 65L, null, null, null, null)) }
+    assertTrue("the items pass is not the authors pass", authors().getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, 65L, 70L, null, null, null)) }
+    val replica = authors().getJSONObject("replica")
+    assertEquals(70L, replica.getLong("reconciledAt"))
+    assertTrue(replica.getBoolean("complete"))
+  }
+
+  @Test
+  fun authorFilterFindsAuthorAddedByEvent() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library().copy(filterDataJson = """{"authors":[{"id":"a1","name":"Known"}]}""")))
+      db.items().upsertAll(listOf(itemEntity("srv", "b1").copy(authorName = "New One, Known"), itemEntity("srv", "b2").copy(authorName = "Known")))
+      // Added by author_added after the filterdata was cached
+      db.authors().upsertAll(listOf(authorRow("srv", "a9", name = "New One")))
+    }
+    reader.onReplicaChanged()
+    val answer = items(req = request(filter = "authors.${FilterCodec.encode("a9")}"))
+    assertEquals(listOf("b1"), ids(answer))
+    assertEquals(listOf("b1", "b2"), ids(items(req = request(filter = "authors.${FilterCodec.encode("a1")}"))))
+  }
 }

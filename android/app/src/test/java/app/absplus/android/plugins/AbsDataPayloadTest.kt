@@ -1,5 +1,6 @@
 package app.absplus.android.plugins
 
+import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.ItemsRequest
 import app.absplus.android.sync.SeriesRequest
 import org.json.JSONArray
@@ -54,6 +55,19 @@ class AbsDataPayloadTest {
     for (limit in listOf(101, 0)) {
       try {
         seriesRequest(JSONObject().put("libraryId", "lib1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..100", expected.message)
+      }
+    }
+  }
+
+  @Test
+  fun authorsRequestRejectsMoreThan100() {
+    assertEquals(AuthorsRequest("lib1", 100, 2), authorsRequest(JSONObject().put("libraryId", "lib1").put("limit", 100).put("page", 2)))
+    for (limit in listOf(101, 0)) {
+      try {
+        authorsRequest(JSONObject().put("libraryId", "lib1").put("limit", limit))
         fail("limit $limit")
       } catch (expected: IllegalArgumentException) {
         assertEquals("limit must be 1..100", expected.message)

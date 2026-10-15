@@ -149,11 +149,27 @@ abstract class SeriesDao {
   abstract suspend fun deleteMembersChunk(sc: String, ids: List<String>)
 }
 
-/** Filled from release 4c on; here only what removing a library needs. */
 @Dao
 abstract class AuthorDao {
+  @Query("SELECT * FROM authors WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun forLibrary(sc: String, libraryId: String): List<AuthorEntity>
+
+  @Query("SELECT * FROM authors WHERE serverConfigId = :sc AND id = :id")
+  abstract suspend fun get(sc: String, id: String): AuthorEntity?
+
+  @Query("SELECT id FROM authors WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun ids(sc: String, libraryId: String): List<String>
+
   @Upsert
   abstract suspend fun upsertAll(list: List<AuthorEntity>)
+
+  @Transaction
+  open suspend fun deleteByIds(sc: String, ids: List<String>) {
+    inChunks(ids) { deleteChunk(sc, it) }
+  }
+
+  @Query("DELETE FROM authors WHERE serverConfigId = :sc AND id IN (:ids)")
+  abstract suspend fun deleteChunk(sc: String, ids: List<String>)
 
   @Query("DELETE FROM authors WHERE serverConfigId = :sc AND libraryId = :libraryId")
   abstract suspend fun deleteForLibrary(sc: String, libraryId: String)

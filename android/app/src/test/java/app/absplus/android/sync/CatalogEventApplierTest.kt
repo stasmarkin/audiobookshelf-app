@@ -1,5 +1,6 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.authorRow
 import app.absplus.android.db.inMemoryReplica
 import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
@@ -192,5 +193,88 @@ class CatalogEventApplierTest {
     runBlocking { db.series().insertMembers(listOf(member("srv", "s1", "li1", "1"))) }
     apply("item_removed", json("""{"id":"li1","libraryId":"lib1"}"""))
     assertTrue(membership("li1").isEmpty())
+  }
+
+  private fun author(id: String) = runBlocking { db.authors().get("srv", id) }
+
+  @Test
+  fun authorAddedKeepsCount() {
+    val added = json("""{"id":"a9","asin":null,"name":"New One","description":null,"imagePath":null,"libraryId":"lib1","addedAt":5,"updatedAt":5}""")
+    assertEquals(CatalogEventResult.APPLIED, apply("author_added", added))
+    assertEquals(setOf("authors:lib1"), topics.toSet())
+    assertEquals(0, author("a9")!!.numBooks)
+    assertEquals(0, json(author("a9")!!.json).path("numBooks").asInt(-1))
+    assertNull("the next reconcile brings it", author("a9")!!.lastFirst)
+
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "a1", name = "Old", numBooks = 5, updatedAt = 4).copy(lastFirst = "Old, A"))) }
+    apply("author_added", json("""{"id":"a1","name":"Old","libraryId":"lib1","addedAt":1,"updatedAt":6}"""))
+    assertEquals("an event without numBooks keeps the count", 5, author("a1")!!.numBooks)
+    assertEquals(5, json(author("a1")!!.json).path("numBooks").asInt())
+    assertEquals("Old, A", author("a1")!!.lastFirst)
+
+    topics.clear()
+    assertEquals(CatalogEventResult.IGNORED, apply("author_added", json("""{"id":"a8","name":"X","libraryId":"nowhere","updatedAt":5}""")))
+    assertNull(author("a8"))
+    assertTrue(topics.isEmpty())
+  }
+
+  @Test
+  fun authorUpdatedUpsertsTheRowAndRenamesTheFilter() {
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "a1", name = "Old", numBooks = 2, updatedAt = 10).copy(lastFirst = "Old"))) }
+    val updated = json("""{"id":"a1","name":"New Name","libraryId":"lib1","imagePath":"/x.jpg","addedAt":1,"updatedAt":11,"numBooks":3}""")
+    assertEquals(CatalogEventResult.APPLIED, apply("author_updated", updated))
+    assertEquals(setOf("authors:lib1", "library:lib1"), topics.toSet())
+    val row = author("a1")!!
+    assertEquals("New Name", row.name)
+    assertEquals(3, row.numBooks)
+    assertEquals("/x.jpg", json(row.json).path("imagePath").asText())
+    assertEquals("kept until the next reconcile", "Old", row.lastFirst)
+    assertEquals("New Name", json(runBlocking { db.libraries().get("srv", "lib1") }!!.filterDataJson!!).path("authors")[0].path("name").asText())
+
+    topics.clear()
+    val delayed = json("""{"id":"a1","name":"Older","libraryId":"lib1","addedAt":1,"updatedAt":9,"numBooks":1}""")
+    assertEquals(CatalogEventResult.IGNORED, apply("author_updated", delayed))
+    assertEquals("New Name", author("a1")!!.name)
+    assertEquals(3, author("a1")!!.numBooks)
+    assertTrue(topics.isEmpty())
+  }
+
+  @Test
+  fun numBooksEventUpdatesOnlyCounts() {
+    runBlocking {
+      db.authors().upsertAll(listOf(authorRow("srv", "a1", name = "Kept", numBooks = 2, updatedAt = 10), authorRow("srv", "a2", name = "Other", numBooks = 7)))
+    }
+    val payload = json("""{"libraryId":"lib1","authors":[{"id":"a1","numBooks":5},{"id":"unknown","numBooks":1}]}""")
+    assertEquals(CatalogEventResult.APPLIED, apply("authors_num_books_updated", payload))
+    assertEquals(setOf("authors:lib1"), topics.toSet())
+    val row = author("a1")!!
+    assertEquals(5, row.numBooks)
+    assertEquals(5, json(row.json).path("numBooks").asInt())
+    assertEquals("Kept", row.name)
+    assertEquals("Kept", json(row.json).path("name").asText())
+    assertEquals(10L, row.updatedAt)
+    assertEquals("other authors are untouched", 7, author("a2")!!.numBooks)
+    assertNull("unknown ids are skipped", author("unknown"))
+
+    topics.clear()
+    assertEquals(CatalogEventResult.IGNORED, apply("authors_num_books_updated", json("""{"libraryId":"lib1","authors":[{"id":"unknown","numBooks":1}]}""")))
+    assertTrue(topics.isEmpty())
+  }
+
+  @Test
+  fun authorRemovedDeletesRow() {
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "a1"), authorRow("srv", "a2"))) }
+    assertEquals(CatalogEventResult.APPLIED, apply("author_removed", json("""{"id":"a1","libraryId":"lib1"}""")))
+    assertNull(author("a1"))
+    assertNotNull(author("a2"))
+    assertEquals(setOf("authors:lib1"), topics.toSet())
+    topics.clear()
+    assertEquals(CatalogEventResult.IGNORED, apply("author_removed", json("""{"id":"a1","libraryId":"lib1"}""")))
+    assertTrue(topics.isEmpty())
+  }
+
+  @Test
+  fun authorEventsAreCatalogEvents() {
+    assertTrue(CATALOG_EVENTS.containsAll(listOf("author_added", "author_updated", "author_removed", "authors_num_books_updated")))
   }
 }
