@@ -78,7 +78,7 @@ Items marked **emulator-covered** already pass on an AOSP API 35 emulator (see t
 
 Needs a test server on the LAN that you can stop and start (for example its container), and a Wi-Fi connection that stays up.
 
-1. **Server stopped, Wi-Fi alive:** open Home and leave it. Stop the server. Within 15 seconds, without a restart or a tap, the app-bar indicator changes to "server unreachable" (cloud with a slash, warning color). Tapping it shows the message with Retry and Cancel.
+1. **Server stopped, Wi-Fi alive:** open Home and leave it. Stop the server. Within 15 seconds, without a restart or a tap, the app-bar indicator changes to "server unreachable" (cloud with a slash, warning color). Tapping it shows the message with Retry and Cancel; Retry checks the server at once.
 2. **Server back:** start the server again and touch nothing. Within one retry step (5, 10, 30, 60 seconds, then every 5 minutes; Retry in the indicator dialog or returning to the app checks at once) the indicator shows online again, Home and the other tabs load, and the Diagnostics log shows the local listening sessions syncing.
 3. **Cold start with the server stopped:** force-stop the app, stop the server, start the app. The indicator shows "server unreachable" (not "no network") and no sign-in screen opens. Start the server: the app signs in by itself and the library loads.
 4. **Airplane mode on a cold start:** the indicator shows "no network" (Wi-Fi with a slash), and the indicator raises no toasts. Turning airplane mode off with the server running brings the indicator back to online.

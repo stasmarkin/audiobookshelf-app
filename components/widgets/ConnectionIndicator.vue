@@ -40,7 +40,7 @@ export default {
       if (labelKey === 'LabelSignInAgain') {
         const { value } = await Dialog.confirm({ title, message, okButtonTitle: this.$strings.ButtonConnectToServer, cancelButtonTitle: this.$strings.ButtonCancel })
         if (value) this.$router.push('/connect')
-      } else if (labelKey === 'LabelServerUnreachable' || labelKey === 'MessageSocketNotConnected') {
+      } else if (labelKey === 'LabelServerUnreachable') {
         const { value } = await Dialog.confirm({ title, message, okButtonTitle: this.$strings.ButtonRetry, cancelButtonTitle: this.$strings.ButtonCancel })
         if (value) this.$absData.retryServer()
       } else {
