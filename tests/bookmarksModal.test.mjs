@@ -212,3 +212,22 @@ test('a downloaded copy played offline keeps its server id, so the player shows 
   assert.deepEqual(run(session('server-a', 'ep-server'), ['local_1', 'local_ep', 'li-page', null]), ['li-page', null], 'not mixed with the session episode')
   assert.deepEqual(run(null, ['li-stream', 'ep-stream', null, null]), ['li-stream', 'ep-stream'])
 })
+
+test('a session arriving for a copy of another server sets no server ids', async () => {
+  const container = (await readFile(new URL('../components/app/AudioPlayerContainer.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+  const sandbox = { console }
+  vm.runInNewContext(container.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component =').replace(/mixins: \[[^\]]*\],/, ''), sandbox)
+  const watcher = sandbox.component.watch.currentPlaybackSession
+  const arrive = (currentPlaybackSession) => {
+    const ctx = { currentPlaybackSession, $store: { state: { activeServerConfigId: 'server-a' } }, onPlaybackEnded() {}, serverLibraryItemId: 'li-previous', serverEpisodeId: 'ep-previous' }
+    ;(watcher.handler || watcher).call(ctx)
+    return [ctx.serverLibraryItemId, ctx.serverEpisodeId]
+  }
+  const copy = (server) => ({ libraryItemId: 'li-server', episodeId: 'ep-server', localLibraryItem: { id: 'local_1', serverConnectionConfigId: server } })
+
+  assert.deepEqual(arrive(copy('server-b')), [null, null])
+  assert.deepEqual(arrive(copy(null)), [null, null])
+  assert.deepEqual(arrive(copy('server-a')), ['li-server', 'ep-server'])
+  assert.deepEqual(arrive({ libraryItemId: 'li-stream', episodeId: null }), ['li-stream', null], 'a stream as before')
+  assert.deepEqual(arrive(null), [null, null])
+})

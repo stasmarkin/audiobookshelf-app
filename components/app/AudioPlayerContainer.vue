@@ -71,8 +71,11 @@ export default {
     currentPlaybackSession() {
       // Sessions arrive on native advancement, including after background playback.
       this.onPlaybackEnded()
-      this.serverLibraryItemId = this.currentPlaybackSession?.libraryItemId || null
-      this.serverEpisodeId = this.currentPlaybackSession?.episodeId || null
+      // A copy of another saved server: its ids mean nothing to the active server (see setServerIds)
+      const copyServer = this.currentPlaybackSession?.localLibraryItem?.serverConnectionConfigId
+      const foreignCopy = !!this.currentPlaybackSession?.localLibraryItem && copyServer !== this.$store.state.activeServerConfigId
+      this.serverLibraryItemId = foreignCopy ? null : this.currentPlaybackSession?.libraryItemId || null
+      this.serverEpisodeId = foreignCopy ? null : this.currentPlaybackSession?.episodeId || null
     }
   },
   methods: {
