@@ -260,13 +260,7 @@ class MediaProgressSyncer(
     }
     val listeningTimeToAdd = diffSinceLastSync / 1000L
 
-    // Captured now, not read live, so log lines in the async callbacks below stay correct even
-    // if the syncer moves on to the next queue item before the network response arrives.
-    // TODO(review): the server-sync branch further down (search "sendProgressSync") still reads
-    // currentSessionId live inside its async callback, including for removePlaybackSession(...) -
-    // that's not just a log cosmetics issue like this one was, it could remove the wrong session
-    // from the db if the syncer moves on before that network response arrives. Left as-is for now
-    // since it wasn't the mechanism observed causing confusion; revisit if it causes problems.
+    // Captured now, not read live: the syncer may move on to the next queue item before the network response arrives
     val syncedTitle = currentDisplayTitle
 
     val syncData = MediaProgressSyncData(listeningTimeToAdd, currentPlaybackDuration, currentTime)
@@ -334,28 +328,37 @@ class MediaProgressSyncer(
 
       val sentSessionId = currentSessionId
       noteServerSync(sentSessionId, currentTime, false)
-      apiHandler.sendProgressSync(currentSessionId, syncData) { syncSuccess, errorMsg ->
-        if (syncSuccess) {
-          noteServerSync(sentSessionId, currentTime, true)
-          AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced progress (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: ${currentSessionId}) (${DeviceManager.serverConnectionConfigName})")
-
-          failedSyncs = 0
-          playerNotificationService.alertSyncSuccess()
-          lastSyncTime = System.currentTimeMillis()
-          DeviceManager.dbManager.removePlaybackSession(currentSessionId) // Remove session from db
-        } else {
-          failedSyncs++
-          if (failedSyncs == 2) {
-            playerNotificationService.alertSyncFailing() // Show alert in client
-            failedSyncs = 0
-          }
-          AbsLogger.error("MediaProgressSyncer", "sync: Progress sync failed (count: $failedSyncs) (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $currentSessionId) (${DeviceManager.serverConnectionConfigName})")
-        }
+      apiHandler.sendProgressSync(sentSessionId, syncData) { syncSuccess, errorMsg ->
+        serverSyncAnswered(sentSessionId, syncedTitle, currentTime, syncSuccess)
         cb(SyncResult(true, syncSuccess, errorMsg))
       }
     } else {
       AbsLogger.info("MediaProgressSyncer", "sync: Not sending progress to server (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $currentSessionId) (${DeviceManager.serverConnectionConfigName}) (hasNetworkConnection: $hasNetworkConnection)")
       cb(SyncResult(false, null, null))
+    }
+  }
+
+  /**
+   * The answer to `/sync` of [sentSessionId]. Everything is about the session that was sent: by now the player may
+   * have moved on to the next queue item, and removing that one instead would leave the sent session to be sent
+   * again through `local-all`.
+   */
+  internal fun serverSyncAnswered(sentSessionId: String, syncedTitle: String, currentTime: Double, syncSuccess: Boolean) {
+    if (syncSuccess) {
+      noteServerSync(sentSessionId, currentTime, true)
+      AbsLogger.info("MediaProgressSyncer", "sync: Successfully synced progress (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $sentSessionId) (${DeviceManager.serverConnectionConfigName})")
+
+      failedSyncs = 0
+      playerNotificationService.alertSyncSuccess()
+      lastSyncTime = System.currentTimeMillis()
+      DeviceManager.dbManager.removePlaybackSession(sentSessionId) // Remove session from db
+    } else {
+      failedSyncs++
+      if (failedSyncs == 2) {
+        playerNotificationService.alertSyncFailing() // Show alert in client
+        failedSyncs = 0
+      }
+      AbsLogger.error("MediaProgressSyncer", "sync: Progress sync failed (count: $failedSyncs) (title: \"$syncedTitle\") (currentTime: $currentTime) (session id: $sentSessionId) (${DeviceManager.serverConnectionConfigName})")
     }
   }
 

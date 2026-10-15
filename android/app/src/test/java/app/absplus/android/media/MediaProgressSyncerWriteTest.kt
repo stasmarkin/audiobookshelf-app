@@ -203,4 +203,18 @@ class MediaProgressSyncerWriteTest {
     SyncEngine.write { } // the write, with any mirror of it, is over
     assertEquals("the player writes the copy's progress itself", 100.0, DeviceManager.dbManager.getLocalMediaProgress("local_li1")!!.currentTime, 0.0)
   }
+
+  @Test
+  fun aSyncAnswerRemovesTheSessionThatWasSent() {
+    val opener = session(PLAYMETHOD_DIRECTPLAY, null).also { it.id = "session-opener" }
+    val sequel = session(PLAYMETHOD_DIRECTPLAY, null).also { it.id = "session-sequel" }
+    DeviceManager.dbManager.savePlaybackSession(opener)
+    DeviceManager.dbManager.savePlaybackSession(sequel)
+    // The queue moved on to the sequel before the opener's /sync was answered
+    syncer.currentPlaybackSession = sequel
+
+    syncer.serverSyncAnswered("session-opener", "Opener", 995.0, syncSuccess = true)
+
+    assertEquals("the sequel's session stays for its own sync", listOf("session-sequel"), DeviceManager.dbManager.getPlaybackSessions().map { it.id })
+  }
 }
