@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
-const { shouldRefreshShelf, createDebouncer, decodeFilterValue } = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/catalogRefresh.js')).toString('base64')}`)
+const { shouldRefreshShelf, createDebouncer, decodeFilterValue, isReplicaIncomplete } = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/catalogRefresh.js')).toString('base64')}`)
 const encode = (text) => encodeURIComponent(Buffer.from(text).toString('base64'))
 
 const flush = async (n = 20) => {
@@ -90,12 +90,13 @@ test('a burst of catalog changes refreshes the shelf once', async () => {
 async function bookshelf({ hasActiveServer = true, user = null, currentLibraryId = 'l1', activeServerConfigId = 'a', answer = null, page = 'books', seriesId = null, settings = {} } = {}) {
   const source = await read('../components/bookshelf/LazyBookshelf.vue')
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
-  const component = new Function('bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'shouldRefreshShelf', 'createDebouncer', script)(
+  const component = new Function('bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'shouldRefreshShelf', 'createDebouncer', 'isReplicaIncomplete', script)(
     {},
     () => ({ reset() {}, succeeded() {}, failed() {} }),
     () => 1,
     shouldRefreshShelf,
-    createDebouncer
+    createDebouncer,
+    isReplicaIncomplete
   )
   const reads = []
   const emitted = []

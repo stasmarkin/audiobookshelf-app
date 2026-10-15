@@ -1,6 +1,7 @@
 <template>
   <div>
     <div id="bookshelf" class="w-full h-full p-4 overflow-y-auto">
+      <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px; margin-bottom: -24px">{{ $strings.MessageCatalogPartial }}</div>
       <div v-if="catalogNotLoaded" class="w-full py-16 px-6 text-center text-lg">
         <p class="py-4">{{ $strings.MessageCatalogNotLoaded }}</p>
       </div>
@@ -14,7 +15,7 @@
 </template>
 
 <script>
-import { shouldRefreshShelf, createDebouncer } from '@/utils/catalogRefresh'
+import { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
 
 /** Reads from the bridge are capped at 100 entities a call. */
 const PAGE_SIZE = 100
@@ -27,6 +28,7 @@ export default {
       loadedLibraryId: null,
       loadedServerConfigId: null,
       catalogNotLoaded: false,
+      replicaIncomplete: false,
       loadGeneration: 0,
       cardWidth: 200
     }
@@ -41,6 +43,9 @@ export default {
     canLoad() {
       return !!this.$store.getters.getHasActiveServer
     },
+    showCatalogPartial() {
+      return this.replicaIncomplete && this.$store.state.serverState !== 'online'
+    },
     cardHeight() {
       return this.cardWidth * 1.25
     }
@@ -53,6 +58,7 @@ export default {
       const libraryId = this.currentLibraryId
       const serverConfigId = this.activeServerConfigId
       if (!this.canLoad) {
+        this.$eventBus.$emit('bookshelf-total-entities', 0)
         this.loading = false
         return
       }
@@ -60,6 +66,7 @@ export default {
         // The saved server has no library on the device yet: its catalog was never downloaded
         this.authors = []
         this.catalogNotLoaded = true
+        this.$eventBus.$emit('bookshelf-total-entities', null)
         this.loading = false
         return
       }
@@ -76,7 +83,10 @@ export default {
           if (stale(answer)) return
           const results = answer?.results || []
           total = answer?.total || 0
-          if (page === 0) this.catalogNotLoaded = answer?.replica?.reconciledAt == null && !total && !answer?.fromServer
+          if (page === 0) {
+            this.catalogNotLoaded = answer?.replica?.reconciledAt == null && !total && !answer?.fromServer
+            this.replicaIncomplete = isReplicaIncomplete(answer)
+          }
           collected.push(...results)
           // A re-read replaces the list in place rather than emptying it first
           const ids = new Set(collected.map((author) => author.id))
@@ -84,7 +94,7 @@ export default {
           if (!results.length || collected.length >= total) break
         }
         this.authors = collected
-        this.$eventBus.$emit('bookshelf-total-entities', total)
+        this.$eventBus.$emit('bookshelf-total-entities', this.catalogNotLoaded ? null : total)
       } catch (error) {
         if (!stale()) console.error('Failed to load authors', error)
       } finally {

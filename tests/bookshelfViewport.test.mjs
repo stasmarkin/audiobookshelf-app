@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createPageRetry } from '../utils/pageRetry.js'
+import { isReplicaIncomplete } from '../utils/catalogRefresh.js'
 
 const require = createRequire(import.meta.url)
 // Vue installs its DOM patcher only when it loads in a browser-like global
@@ -132,7 +133,7 @@ const makeWorld = ({ wrapped }) => {
 const loadBookshelf = async () => {
   const sfc = parseComponent(await read('../components/bookshelf/LazyBookshelf.vue'))
   const mixin = loadDefault(await read('../mixins/bookshelfCardsHelpers.js'), ['Vue'])(Vue)
-  const component = loadDefault(sfc.script.content, ['bookshelfCardsHelpers', 'createPageRetry', 'textScale'])(mixin, createPageRetry, () => 1)
+  const component = loadDefault(sfc.script.content, ['bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'isReplicaIncomplete'])(mixin, createPageRetry, () => 1, isReplicaIncomplete)
   return { component, mixin }
 }
 

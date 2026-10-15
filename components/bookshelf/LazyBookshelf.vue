@@ -25,7 +25,7 @@
 import bookshelfCardsHelpers from '@/mixins/bookshelfCardsHelpers'
 import { createPageRetry } from '@/utils/pageRetry'
 import { textScale } from '@/utils/textScale'
-import { shouldRefreshShelf, createDebouncer } from '@/utils/catalogRefresh'
+import { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
 
 /** Reads from the bridge are capped at 100 entities a call. */
 const MAX_PAGE_SIZE = 100
@@ -223,7 +223,7 @@ export default {
           this.catalogNotLoaded = payload.replica?.reconciledAt == null && !payload.total && !payload.fromServer
           this.requiresServer = !!payload.unsupportedFilter
           this.fromServer = !!payload.fromServer
-          this.replicaIncomplete = !payload.fromServer && payload.total > 0 && (payload.replica?.reconciledAt == null || payload.replica?.complete === false)
+          this.replicaIncomplete = isReplicaIncomplete(payload)
         }
       } else {
         const entityPath = this.entityName

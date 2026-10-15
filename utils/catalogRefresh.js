@@ -15,6 +15,11 @@ export function decodeFilterValue(encoded) {
   }
 }
 
+/** A first page from a replica whose reconcile never finished (or was unstable): what it shows may be partial. */
+export function isReplicaIncomplete(answer) {
+  return !answer?.fromServer && answer?.total > 0 && (answer?.replica?.reconciledAt == null || answer?.replica?.complete === false)
+}
+
 const CATALOG_TOPICS = {
   books: ['items', 'state'],
   series: ['series', 'items', 'state'],

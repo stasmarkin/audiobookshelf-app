@@ -255,7 +255,8 @@ test('Authors re-reads its list on the catalog notice of the reconcile the retur
   const sandbox = {
     console: { ...console, log: () => {} },
     shouldRefreshShelf: ({ ids }, { libraryId }) => ids.includes(`authors:${libraryId}`),
-    createDebouncer: () => ({ schedule: (fn) => timers.push(fn), cancel: () => timers.splice(0) })
+    createDebouncer: () => ({ schedule: (fn) => timers.push(fn), cancel: () => timers.splice(0) }),
+    isReplicaIncomplete: () => false
   }
   vm.runInNewContext(page.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
   const handlers = {}

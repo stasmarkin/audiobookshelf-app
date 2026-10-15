@@ -9,7 +9,7 @@ import vm from 'node:vm'
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
 const { createDataService, catalogTopics } = await importSource('../utils/dataService.js')
-const { shouldRefreshShelf, createDebouncer } = await importSource('../utils/catalogRefresh.js')
+const { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } = await importSource('../utils/catalogRefresh.js')
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const replica = (reconciledAt = 5) => ({ reconciledAt, complete: reconciledAt != null })
 const flush = async (n = 20) => {
@@ -39,7 +39,7 @@ function authorsPage({ getAuthors, state = {}, getters = {} }) {
   const timers = []
   const fakeDebouncer = (options) => createDebouncer({ ...options, setTimer: (fn, ms) => (timers.push({ fn, ms }), timers.at(-1)), clearTimer: (t) => timers.includes(t) && timers.splice(timers.indexOf(t), 1) })
   const errors = []
-  const sandbox = { console: { ...console, log() {}, error: (...args) => errors.push(args) }, window: { innerWidth: 464 }, shouldRefreshShelf, createDebouncer: fakeDebouncer }
+  const sandbox = { console: { ...console, log() {}, error: (...args) => errors.push(args) }, window: { innerWidth: 464 }, shouldRefreshShelf, createDebouncer: fakeDebouncer, isReplicaIncomplete }
   vm.runInNewContext(authorsScript, sandbox)
   const component = sandbox.component
   const store = {
@@ -297,4 +297,47 @@ test('author photo falls back to the placeholder offline', () => {
   assert.notEqual(online.view.imgSrc, null)
 
   assert.equal(authorImage({ author: { id: 'au2', imagePath: null } }).view.imgSrc, null, 'no photo, as before')
+})
+
+test('a partly read authors list says so while offline, like the Library tab', async () => {
+  const cases = [
+    [{ total: 3, replica: { reconciledAt: null, complete: false } }, 'offline', true],
+    [{ total: 3, replica: { reconciledAt: 9, complete: false } }, 'offline', true],
+    [{ total: 3, replica: { reconciledAt: 9, complete: false } }, 'online', false],
+    [{ total: 3, replica: { reconciledAt: 9, complete: true } }, 'offline', false],
+    [{ total: 0, replica: { reconciledAt: null, complete: false } }, 'offline', false],
+    [{ total: 3, fromServer: true, replica: { reconciledAt: null, complete: false } }, 'offline', false]
+  ]
+  for (const [answer, serverState, shown] of cases) {
+    const page = authorsPage({ getAuthors: async (args) => ({ ...pageOf(authorsOf('l1', answer.total), args), ...answer }), state: { serverState } })
+    await page.view.init()
+    assert.equal(page.view.showCatalogPartial, shown, JSON.stringify([answer, serverState]))
+  }
+  const source = await read('../pages/bookshelf/authors.vue')
+  const shelf = await read('../components/bookshelf/LazyBookshelf.vue')
+  const note = (text) => text.match(/<div v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}<\/div>/)?.[0]
+  assert.ok(note(source), 'the note is there')
+  assert.equal(note(source), note(shelf), 'the same markup as the Library tab')
+  assert.match(source, /import \{[^}]*isReplicaIncomplete[^}]*\} from '@\/utils\/catalogRefresh'/, 'one rule for both')
+  assert.match(shelf, /isReplicaIncomplete\(payload\)/)
+})
+
+test('no author count over "the catalog isn\'t downloaded yet"', async () => {
+  const counts = (page) => page.emitted.filter(([name]) => name === 'bookshelf-total-entities')
+  const never = authorsPage({ getAuthors: async (args) => ({ ...pageOf([], args), replica: replica(null) }), state: { serverState: 'offline' } })
+  await never.view.init()
+  assert.equal(never.view.catalogNotLoaded, true)
+  assert.deepEqual(counts(never).at(-1), ['bookshelf-total-entities', null])
+
+  const noLibrary = authorsPage({ getAuthors: async () => assert.fail('no library to read'), state: { libraries: { currentLibraryId: null } } })
+  await noLibrary.view.init()
+  assert.deepEqual(counts(noLibrary).at(-1), ['bookshelf-total-entities', null])
+
+  const noServer = authorsPage({ getAuthors: async () => assert.fail('no server'), getters: { getHasActiveServer: false } })
+  await noServer.view.init()
+  assert.deepEqual(counts(noServer).at(-1), ['bookshelf-total-entities', 0], 'as the Library tab without an active server')
+
+  const empty = authorsPage({ getAuthors: async (args) => pageOf([], args) })
+  await empty.view.init()
+  assert.deepEqual(counts(empty).at(-1), ['bookshelf-total-entities', 0], 'a read library without authors counts 0')
 })
