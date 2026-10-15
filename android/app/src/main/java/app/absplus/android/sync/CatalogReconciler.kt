@@ -12,6 +12,7 @@ import app.absplus.android.db.replica.SeriesItemEntity
 import com.fasterxml.jackson.databind.JsonNode
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import java.security.MessageDigest
 
 const val ITEMS_PAGE_SIZE = 500
 /** Small pages: a series answer carries every book of each series. */
@@ -196,13 +197,29 @@ class CatalogReconciler(
     notify(listOf("state:$libraryId"))
   }
 
+  /** Changes whenever the known series of a library (ids and names) change. */
+  private fun seriesVersion(idsByName: Map<String, List<String>>): String {
+    val text = idsByName.entries.sortedBy { it.key }.joinToString("\n") { (name, ids) -> name + "\u0000" + ids.sorted().joinToString(",") }
+    return MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).take(8).joinToString("") { "%02x".format(it) }
+  }
+
+  /**
+   * The stored hash of a row whose series name did not parse against the known series: unchanged as long as neither
+   * the item nor the series lists change, so such a row is not rewritten (and its series not asked again) every pass.
+   */
+  private fun unparsedHash(seriesVersion: String, contentHash: String) = "unparsed:$seriesVersion:$contentHash"
+
   private suspend fun writeItemsPage(sc: String, libraryId: String, results: JsonNode, idsByName: Map<String, List<String>>?) {
+    val version = idsByName?.let { seriesVersion(it) }
     if (results.size() == 0) return
     val known = db.items().hashes(sc, results.map { it.path("id").asText() }).associateBy { it.id }
     val changed: List<LibraryItemEntity> = results.mapNotNull { node ->
       val old = known[node.path("id").asText()]
       val updatedAt = node.path("updatedAt").asLong()
-      if (old != null && old.updatedAt == updatedAt && old.contentHash == CatalogJson.contentHash(node)) null
+      val hash = CatalogJson.contentHash(node)
+      val same = old != null && old.updatedAt == updatedAt &&
+              (old.contentHash == hash || (version != null && old.contentHash == unparsedHash(version, hash)))
+      if (same) null
       else CatalogJson.itemEntity(sc, node)
     }
     if (changed.isEmpty()) return
@@ -224,8 +241,8 @@ class CatalogReconciler(
             pending += parse.candidateSeriesIds
             // The book may have left a series that is not among the candidates
             pending += db.series().membershipOfItem(sc, item.id).map { it.seriesId }
-            // A part no list knew yet (a series created after the filterdata): no hash, so the next pass reads it again
-            if (parse.unknownPart) item.copy(contentHash = "") else item
+            // A part no list knows (yet): read again once the item or the series lists change
+            if (parse.unknownPart) item.copy(contentHash = unparsedHash(version!!, item.contentHash)) else item
           }
         }
       }

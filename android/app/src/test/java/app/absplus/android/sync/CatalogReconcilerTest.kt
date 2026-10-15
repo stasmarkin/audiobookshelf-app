@@ -445,10 +445,38 @@ class CatalogReconcilerTest {
     }
     reconcile()
     assertTrue("the known part is asked from the server", pointRequests().any { it.query!!.contains("filter=series.${FilterCodec.encode("known")}") })
-    assertEquals("", runBlocking { db.items().get("srv", "b1") }!!.contentHash)
+    assertTrue(runBlocking { db.items().get("srv", "b1") }!!.contentHash.startsWith("unparsed:"))
 
     reconcile()
 
     assertEquals(setOf("known" to "1", "new" to "1"), membership("b1"))
+  }
+
+  @Test
+  fun unparsableSeriesNameIsNotRewrittenEveryPass() {
+    server.library("lib1")
+    server.series("saga", "Saga")
+    server.book("b1", series = listOf("saga" to "1"))
+    // The server's name for the book does not match the series list: "Saga #1, 2"
+    val handler = api.handler
+    api.handler = { r ->
+      val (code, body) = handler(r)
+      code to body.replace("\"seriesName\":\"Saga #1\"", "\"seriesName\":\"Saga #1, 2\"")
+    }
+    reconcile()
+    assertTrue(runBlocking { db.items().get("srv", "b1") }!!.contentHash.startsWith("unparsed:"))
+    topics.clear()
+    api.requests.clear()
+
+    reconcile()
+
+    assertFalse("the row is not rewritten", topics.contains("items:lib1"))
+    assertTrue("its series are not asked again", pointRequests().isEmpty())
+
+    // A change of the series lists reads it again
+    server.series("other", "Other")
+    topics.clear()
+    reconcile()
+    assertTrue(topics.contains("items:lib1"))
   }
 }

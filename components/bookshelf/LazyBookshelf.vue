@@ -579,8 +579,18 @@ export default {
     followsSocket() {
       return !this.readsCatalog || this.fromServer
     },
+    /**
+     * A server-read Library list follows the socket the way a catalog notice moves it: the loaded pages are read again
+     * (debounced), and a changed total rebuilds the list at the same scroll position.
+     */
+    refreshForSocket(items) {
+      if (!items.some((item) => !item?.libraryId || item.libraryId === this.currentLibraryId)) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(this.refreshLoadedPages)
+    },
     libraryItemAdded(libraryItem) {
       if (!this.followsSocket()) return
+      if (this.entityName === 'books') return this.refreshForSocket([libraryItem])
       console.log('libraryItem added', libraryItem)
       // TODO: Check if item would be on this shelf
       this.resetEntities()
@@ -602,11 +612,7 @@ export default {
     },
     libraryItemRemoved(libraryItem) {
       if (!this.followsSocket()) return
-      // The Library list is loaded page by page (a sparse array): reload it rather than filter what is there
-      if (this.entityName === 'books') {
-        this.resetEntities()
-        return
-      }
+      if (this.entityName === 'books') return this.refreshForSocket([libraryItem])
       if (this.entityName === 'series-books') {
         var indexOf = this.entities.findIndex((ent) => ent && ent.id === libraryItem.id)
         if (indexOf >= 0) {
@@ -619,6 +625,7 @@ export default {
     },
     libraryItemsAdded(libraryItems) {
       if (!this.followsSocket()) return
+      if (this.entityName === 'books') return this.refreshForSocket(libraryItems || [])
       console.log('items added', libraryItems)
       // TODO: Check if item would be on this shelf
       this.resetEntities()
