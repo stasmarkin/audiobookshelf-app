@@ -40,6 +40,12 @@ object ServerReachability : ReachabilitySink {
   private val _serverConfigId = MutableStateFlow<String?>(null)
   /** The server [state] is about; null when none is configured. */
   val serverConfigId: StateFlow<String?> = _serverConfigId.asStateFlow()
+  private val _onlineEntries = MutableStateFlow(0L)
+  /**
+   * Counts the changes into [ServerState.ONLINE]. [state] is conflated: a collector that saw ONLINE misses a quick
+   * OFFLINE and back; this count still changes.
+   */
+  val onlineEntries: StateFlow<Long> = _onlineEntries.asStateFlow()
 
   @Volatile private var machine: ReachabilityMachine? = null
   private var probe: suspend (ServerConnectionConfig) -> Boolean = ::httpPing
@@ -145,7 +151,9 @@ object ServerReachability : ReachabilitySink {
         ReachabilityEffect.CancelProbe -> cancelProbe()
         is ReachabilityEffect.Emit -> {
           DLog.i(TAG, "Server ${m.serverConfigId ?: "-"} is ${effect.state} (after $next)")
+          val was = _state.value
           _state.value = effect.state
+          if (effect.state == ServerState.ONLINE && was != ServerState.ONLINE) _onlineEntries.value++
         }
       }
     }

@@ -58,7 +58,7 @@ class MediaProgressSyncerWriteTest {
     Paper.init(context)
     for (book in listOf("localLibraryItems", "localMediaProgress", "playbackSession")) Paper.book(book).destroy()
     SyncEngine.initForTest(SyncDeps(
-            db = db, http = syncHttp(api), activeServer = { fakeServer() }, serverState = MutableStateFlow(ServerState.OFFLINE),
+            db = db, http = syncHttp(api), activeServer = { fakeServer() }, serverState = MutableStateFlow(ServerState.OFFLINE), onlineEntries = MutableStateFlow(0L),
             serverId = MutableStateFlow("srv"), isForeground = { false }, clock = { 1L }, scope = scope, log = {},
             notifyWindowMs = 10, mirror = PaperProgressMirror))
     // Not created: a tick touches neither the player nor the notification

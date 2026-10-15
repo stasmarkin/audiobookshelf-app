@@ -55,6 +55,8 @@ class SyncDeps(
         val http: SyncHttp,
         val activeServer: () -> ServerConnectionConfig?,
         val serverState: StateFlow<ServerState>,
+        /** See [ServerReachability.onlineEntries]. */
+        val onlineEntries: StateFlow<Long>,
         /** Changes when the active server is switched or cleared. */
         val serverId: StateFlow<String?>,
         val isForeground: () -> Boolean,
@@ -109,6 +111,7 @@ object SyncEngine {
             http = http,
             activeServer = ActiveServer::current,
             serverState = ServerReachability.state,
+            onlineEntries = ServerReachability.onlineEntries,
             serverId = ServerReachability.serverConfigId,
             isForeground = { SyncRuntime.isForeground },
             clock = System::currentTimeMillis,
@@ -217,7 +220,8 @@ object SyncEngine {
         }
       }
       jobs += scope.launch {
-        deps.serverState.collect { state -> if (state == ServerState.ONLINE) syncNow(SyncReason.ONLINE) }
+        // Not the state itself: a quick OFFLINE and back is conflated away there, and its push would be missed
+        deps.onlineEntries.collect { if (deps.serverState.value == ServerState.ONLINE) syncNow(SyncReason.ONLINE) }
       }
       jobs += scope.launch {
         var previous = deps.serverId.value

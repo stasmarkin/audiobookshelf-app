@@ -32,6 +32,7 @@ class SyncEngineTest {
   private val serverA = fakeServer("srv")
   private var active: ServerConnectionConfig? = serverA
   private val state = MutableStateFlow(ServerState.OFFLINE)
+  private val onlineEntries = MutableStateFlow(0L)
   private val serverId = MutableStateFlow<String?>("srv")
   @Volatile private var foreground = false
   @Volatile private var now = 100_000_000L
@@ -57,6 +58,7 @@ class SyncEngineTest {
               active
             },
             serverState = state,
+            onlineEntries = onlineEntries,
             serverId = serverId,
             isForeground = { foreground || SyncRuntime.isForeground },
             clock = { now },
@@ -74,6 +76,13 @@ class SyncEngineTest {
     SyncEngine.resetForTest()
     scope.cancel()
     db.close()
+  }
+
+  /** As ServerReachability publishes it: the state, and a count of the changes into ONLINE. */
+  private fun setState(next: ServerState) {
+    val was = state.value
+    state.value = next
+    if (next == ServerState.ONLINE && was != ServerState.ONLINE) onlineEntries.value++
   }
 
   /** Lets queued engine work start and finish. */
@@ -96,7 +105,7 @@ class SyncEngineTest {
     assertTrue("nothing is sent while the server is unreachable", api.requests.isEmpty())
     eventually("pending count 1") { SyncEngine.syncState.value.pendingCount == 1 }
 
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the queued bookmark is sent") { db.outbox().count("srv") == 0 }
     settle()
@@ -111,7 +120,7 @@ class SyncEngineTest {
     start()
     store.addBookmark("srv", "li1", 754.0, "Offline")
 
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("pull and push") { api.requests.size == 3 && db.outbox().count("srv") == 0 }
     assertEquals(listOf("GET /api/me/progress", "GET /api/me/bookmarks", "POST /api/me/item/li1/bookmark"), api.paths())
@@ -132,7 +141,7 @@ class SyncEngineTest {
       }
       if (request.method == "GET") 200 to serverBookmarks else 200 to "{}"
     }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     assertTrue(arrived.await(5, TimeUnit.SECONDS))
 
     SyncEngine.syncNow(SyncReason.MANUAL)
@@ -156,7 +165,7 @@ class SyncEngineTest {
       release.await(5, TimeUnit.SECONDS)
       200 to "{}"
     }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     assertTrue(arrived.await(5, TimeUnit.SECONDS))
 
     active = fakeServer("srvB")
@@ -180,16 +189,16 @@ class SyncEngineTest {
     store.addBookmark("srv", "li1", 754.0, "Mark")
     api.handler = { 401 to "Unauthorized" }
 
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the push stops") { SyncEngine.syncState.value.lastError == "unauthorized" }
     assertEquals(1, db.outbox().count("srv"))
     assertEquals(1, db.bookmarks().getVisible("srv").size)
 
     // ServerReachability goes UNAUTHORIZED on the rejected refresh, and ONLINE again on reportSignedIn
-    state.value = ServerState.UNAUTHORIZED
+    setState(ServerState.UNAUTHORIZED)
     settle()
     api.handler = { 200 to "{}" }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the bookmark is sent after signing in") { db.outbox().count("srv") == 0 }
     assertEquals(2, api.requests.count { it.method == "POST" })
@@ -199,7 +208,7 @@ class SyncEngineTest {
   fun localWriteOnlyPushes() = runBlocking {
     foreground = true
     start()
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the first reconcile") { gets() == 1 }
     settle()
     api.requests.clear()
@@ -216,7 +225,7 @@ class SyncEngineTest {
   fun foregroundReconcilesOnlyWhenNeeded() = runBlocking {
     foreground = true
     start()
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the first reconcile") { gets() == 1 }
     settle()
 
@@ -253,7 +262,7 @@ class SyncEngineTest {
   @Test
   fun backgroundOnlinePushesWithoutReconcile() = runBlocking {
     start()
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     settle()
     for (reason in listOf(SyncReason.APP_START, SyncReason.ONLINE, SyncReason.SOCKET_INIT, SyncReason.MANUAL)) {
       foreground = false
@@ -287,7 +296,7 @@ class SyncEngineTest {
   fun reconnectSignalsTogetherReconcileOnce() = runBlocking {
     foreground = true
     start()
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the reconnect reconcile") { gets() == 1 }
     SyncEngine.syncNow(SyncReason.SOCKET_INIT)
     settle()
@@ -307,7 +316,7 @@ class SyncEngineTest {
   fun activityResumeRunsTheForegroundSync() = runBlocking {
     // MainActivity.onResume calls SyncRuntime.setForeground(true)
     SyncRuntime.resetForTest()
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     start()
     try {
       settle()
@@ -336,7 +345,7 @@ class SyncEngineTest {
   fun staleUserObjectAfterPushKeepsTheSentBookmark() = runBlocking {
     start()
     store.addBookmark("srv", "li1", 754.0, "Offline")
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the push") { db.outbox().count("srv") == 0 }
 
     // The authorize answer was requested before the POST and arrives after it
@@ -350,7 +359,7 @@ class SyncEngineTest {
     start()
     store.addBookmark("srv", "li1", 754.0, "Mark")
     failNextRun = true
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the failure is reported") { SyncEngine.syncState.value.lastError == "database is full" }
     assertTrue(errors.any { it.contains("database is full") })
     assertEquals(1, db.outbox().count("srv"))
@@ -366,7 +375,7 @@ class SyncEngineTest {
     store.addBookmark("srv", "li1", 754.0, "Mark")
     // A 401 whose refresh fails transiently: no answer to use, while reachability still says online
     api.handler = { 401 to "Unauthorized" }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the push stops") { SyncEngine.syncState.value.lastError == "unreachable" }
     api.handler = { 200 to "{}" }
 
@@ -378,15 +387,15 @@ class SyncEngineTest {
     foreground = true
     start()
     api.handler = { request -> if (request.method == "GET") 500 to "" else 200 to "{}" }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the failed reconcile") { gets() == 1 && SyncEngine.syncState.value.lastError != null }
     settle()
     api.handler = { request -> if (request.method == "GET") 200 to serverBookmarks else 200 to "{}" }
 
     // The server blinked: it comes back within RECONCILE_MIN_INTERVAL_MS of the failed attempt
-    state.value = ServerState.OFFLINE
+    setState(ServerState.OFFLINE)
     settle()
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the next automatic trigger reconciles") { gets() == 2 }
     eventually("and its bookmarks arrive") { db.bookmarks().getVisible("srv").size == 2 }
@@ -399,7 +408,7 @@ class SyncEngineTest {
     store.addBookmark("srv", "li1", 754.0, "Offline")
     // Another device deletes the bookmark right after it reaches the server: every list from the server is empty
     api.handler = { request -> if (request.method == "GET") 200 to """{"mediaProgress":[],"bookmarks":[]}""" else 200 to "{}" }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("pull and push") { gets() == 1 && db.outbox().count("srv") == 0 }
 
     SyncEngine.applyEvent("user_updated", """{"bookmarks":[]}""", "srv")
@@ -414,7 +423,7 @@ class SyncEngineTest {
     start(recentlySettledMs = 100L)
     store.addBookmark("srv", "li1", 754.0, "Offline")
     api.handler = { request -> if (request.method == "GET") 200 to """{"mediaProgress":[],"bookmarks":[]}""" else 200 to "{}" }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("push") { db.outbox().count("srv") == 0 }
 
     SyncEngine.applyEvent("user_updated", """{"bookmarks":[]}""", "srv")
@@ -437,7 +446,7 @@ class SyncEngineTest {
     assertTrue("nothing is sent while the server is unreachable", api.requests.isEmpty())
     eventually("pending count 1") { SyncEngine.syncState.value.pendingCount == 1 }
 
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the queued action is sent") { db.outbox().count("srv") == 0 }
     settle()
@@ -456,7 +465,7 @@ class SyncEngineTest {
     start()
     store.markFinished("srv", "li1", null, true)
 
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("pull and push") { db.outbox().count("srv") == 0 && api.requests.size == 3 }
     assertEquals(listOf("GET /api/me/progress", "GET /api/me/bookmarks", "PATCH /api/me/progress/li1"), api.paths())
@@ -484,5 +493,20 @@ class SyncEngineTest {
 
     eventually("both writes ran") { order.size == 2 }
     assertEquals(listOf("earlier", "later"), order)
+  }
+
+  @Test
+  fun quickReconnectStillPushes() = runBlocking {
+    start()
+    setState(ServerState.ONLINE)
+    settle()
+    // Queued without a push of its own, as by a write whose push found the server gone
+    store.addBookmark("srv", "li1", 754.0, "During the blip")
+    // Down and back before the engine looked: the state alone reads ONLINE as it did before
+    setState(ServerState.OFFLINE)
+    setState(ServerState.ONLINE)
+
+    eventually("the bookmark is pushed") { db.outbox().count("srv") == 0 }
+    assertEquals(listOf("POST /api/me/item/li1/bookmark"), api.paths())
   }
 }

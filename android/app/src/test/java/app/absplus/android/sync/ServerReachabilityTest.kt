@@ -83,6 +83,17 @@ class ServerReachabilityTest {
   }
 
   @Test
+  fun everyChangeIntoOnlineIsCounted() {
+    online()
+    val entries = ServerReachability.onlineEntries.value
+    ServerReachability.reportResponse("$base/api/me", 200)
+    assertEquals("staying online is not a new entry", entries, ServerReachability.onlineEntries.value)
+    ServerReachability.reportUnreachable(base)
+    ServerReachability.reportResponse("$base/ping", 200)
+    assertEquals(entries + 1, ServerReachability.onlineEntries.value)
+  }
+
+  @Test
   fun serverErrorKeepsStateAndAnyOtherStatusMeansOnline() {
     online()
     ServerReachability.reportUnreachable("$base/api/me")
