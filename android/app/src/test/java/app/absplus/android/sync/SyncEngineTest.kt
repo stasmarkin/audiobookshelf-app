@@ -50,7 +50,7 @@ class SyncEngineTest {
             activeServer = { active },
             serverState = state,
             serverId = serverId,
-            isForeground = { foreground },
+            isForeground = { foreground || SyncRuntime.isForeground },
             clock = { now },
             scope = scope,
             log = {},
@@ -261,12 +261,51 @@ class SyncEngineTest {
       assertEquals(1, gets())
 
       api.requests.clear()
+      now += RECONCILE_MIN_INTERVAL_MS
       SyncEngine.syncNow(reason)
       settle()
       assertEquals("$reason in the foreground reconciles", 1, gets())
       store.removeBookmark("srv", "li1", 754.0)
       SyncEngine.syncNow(SyncReason.LOCAL_WRITE)
       eventually("cleanup") { db.outbox().count("srv") == 0 }
+    }
+  }
+
+  @Test
+  fun reconnectSignalsTogetherReconcileOnce() = runBlocking {
+    foreground = true
+    start()
+    state.value = ServerState.ONLINE
+    eventually("the reconnect reconcile") { gets() == 1 }
+    SyncEngine.syncNow(SyncReason.SOCKET_INIT)
+    settle()
+    assertEquals("the socket init right after ONLINE is covered", 1, gets())
+
+    SyncEngine.syncNow(SyncReason.MANUAL)
+    settle()
+    assertEquals("Sync now always reconciles", 2, gets())
+
+    now += RECONCILE_MIN_INTERVAL_MS
+    SyncEngine.syncNow(SyncReason.SOCKET_INIT)
+    settle()
+    assertEquals(3, gets())
+  }
+
+  @Test
+  fun activityResumeRunsTheForegroundSync() = runBlocking {
+    // MainActivity.onResume calls SyncRuntime.setForeground(true)
+    SyncRuntime.resetForTest()
+    state.value = ServerState.ONLINE
+    start()
+    try {
+      settle()
+      assertEquals("started in the background: reconcile deferred", 0, gets())
+
+      SyncRuntime.setForeground(true)
+
+      eventually("the deferred reconcile") { gets() == 1 }
+    } finally {
+      SyncRuntime.resetForTest()
     }
   }
 

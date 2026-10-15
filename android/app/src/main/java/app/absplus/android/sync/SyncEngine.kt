@@ -35,6 +35,12 @@ data class DataChange(val scope: String, val ids: List<String>)
 /** A foreground return reconciles after a socket drop in the background only when the last reconcile is older. */
 const val FOREGROUND_RECONCILE_AFTER_MS = 15 * 60_000L
 
+/**
+ * Automatic reconcile requests within this time of the last reconcile start are covered by it: a reconnect brings
+ * ONLINE and the socket's init together. A manual sync always reconciles.
+ */
+const val RECONCILE_MIN_INTERVAL_MS = 30_000L
+
 class SyncDeps(
         val db: UserDataDatabase,
         val http: SyncHttp,
@@ -154,6 +160,7 @@ object SyncEngine {
     private var reconcileDeferred = false
     private var socketLostInBackground = false
     private var lastReconcileAt: Long? = null
+    private var lastReconcileStartAt: Long? = null
     private var backoffJob: Job? = null
     private val jobs = mutableListOf<Job>()
 
@@ -191,7 +198,11 @@ object SyncEngine {
             if (reconcileDeferred || (socketLostInBackground && stale)) wantReconcile = true
             socketLostInBackground = false
           }
-          else -> wantReconcile = true
+          reason == SyncReason.MANUAL -> wantReconcile = true
+          else -> {
+            val recent = lastReconcileStartAt?.let { deps.clock() - it < RECONCILE_MIN_INTERVAL_MS } ?: false
+            if (!recent) wantReconcile = true
+          }
         }
         wantPush = true
         if (runner != null) return
@@ -255,7 +266,10 @@ object SyncEngine {
       var error: String? = null
       try {
         if (reconcile) {
-          synchronized(lock) { reconcileDeferred = false }
+          synchronized(lock) {
+            reconcileDeferred = false
+            lastReconcileStartAt = deps.clock()
+          }
           deps.log("Reconcile ${config.id}")
           reconciler.reconcileBookmarks(config).onSuccess { lastReconcileAt = deps.clock() }.onFailure { failure ->
             error = failure.message
@@ -292,6 +306,7 @@ object SyncEngine {
         wantPush = false
         wantReconcile = false
         lastReconcileAt = null
+        lastReconcileStartAt = null
       }
       backoffJob?.cancel()
       refreshPendingCount()
