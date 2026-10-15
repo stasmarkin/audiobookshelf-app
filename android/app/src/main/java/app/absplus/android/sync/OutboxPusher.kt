@@ -140,12 +140,15 @@ class OutboxPusher(
     var sendFields = fields
     var serverAhead: ServerAhead? = null
     val conditional = OutboxPayload.conditionalFields(row.payload).filter { it in fields }
-    if (conditional.isNotEmpty()) {
+    // The user's own finished mark (also a reset) decides the state: the session's older position is not sent with it,
+    // and the row, which the mark set, is not compared with the server's
+    if (conditional.isNotEmpty() && "isFinished" in fields) sendFields = fields - conditional.toSet()
+    else if (conditional.isNotEmpty()) {
       when (val outcome = http.send(config, "GET", path)) {
         is HttpOutcome.Ok -> parseServerProgress(readTree(outcome.body))?.let { server ->
           if (server.isFinished || server.currentTime >= progress.currentTime) {
             sendFields = fields - conditional.toSet()
-            serverAhead = ServerAhead(server, progress.lastUpdate, sendFields)
+            serverAhead = ServerAhead(server, progress.lastUpdate, conditional, sendFields)
           }
         } // An unreadable record is no reason to hold the queue: sent as before the check
         is HttpOutcome.HttpError -> when (outcome.code) {

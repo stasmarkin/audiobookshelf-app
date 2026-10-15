@@ -394,19 +394,24 @@ class UserDataStore(
 
   /**
    * The server's values of the fields it kept, written as they are: our PATCH of the other fields gave its record our
-   * lastUpdate, so the merge rule would keep the device's older position for good. Not over a write made since the
-   * PATCH was built (it is sent next). Must run inside a transaction.
+   * lastUpdate, so the merge rule would keep the device's older position for good. A sent field keeps the device's
+   * value. Not over a write made since the PATCH was built (it is sent next). Must run inside a transaction.
    */
   private suspend fun takeServerPosition(row: OutboxEntity, ahead: ServerAhead): MediaProgressEntity? {
     val (libraryItemId, episodeId) = progressKeyParts(row.itemKey)
     val local = progress.get(row.serverConfigId, libraryItemId, episodeId) ?: return null
     if (local.lastUpdate > ahead.builtFromLastUpdate) return null
     val server = ahead.server
+    fun take(field: String) = field in ahead.keptFields && field !in ahead.sentFields
     val takeFinished = server.isFinished && "isFinished" !in ahead.sentFields
-    val updated = local.copy(duration = if (server.duration > 0) server.duration else local.duration,
-            progress = server.progress, currentTime = server.currentTime,
+    val updated = local.copy(
+            duration = if (take("duration") && server.duration > 0) server.duration else local.duration,
+            progress = if (take("progress")) server.progress else local.progress,
+            currentTime = if (take("currentTime")) server.currentTime else local.currentTime,
             isFinished = if (takeFinished) true else local.isFinished,
-            finishedAt = if (takeFinished) server.finishedAt else local.finishedAt)
+            finishedAt = if (takeFinished) server.finishedAt else local.finishedAt,
+            // Nothing sent: the server's record keeps its own time, which an older snapshot must not beat
+            lastUpdate = if (ahead.sentFields.isEmpty()) maxOf(local.lastUpdate, server.lastUpdate) else local.lastUpdate)
     progress.upsert(updated)
     return updated
   }

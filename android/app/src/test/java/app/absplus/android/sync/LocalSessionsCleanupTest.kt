@@ -206,27 +206,57 @@ class LocalSessionsCleanupTest {
   }
 
   @Test
-  fun aFinishedMarkFoldedInIsSentAndThePositionStaysConditional() = runBlocking {
-    skippedProgressQueued(700.0)
-    SyncEngine.store!!.markFinished("srv", "li1", null, true)
-    serverAnswers(serverJson(900.0, lastUpdate = 300L))
-    push()
-    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
-    val ahead = JSONObject(api.requests.last().body!!)
-    assertTrue(ahead.getBoolean("isFinished"))
-    assertFalse("the server's further position stays", ahead.has("currentTime") || ahead.has("progress"))
+  fun aFinishedMarkFoldedInIsSentWithoutTheSessionsPosition() = runBlocking {
+    for (finished in listOf(true, false)) {
+      api.requests.clear()
+      skippedProgressQueued(700.0)
+      SyncEngine.store!!.markFinished("srv", "li1", null, finished)
+      val marked = db.mediaProgress().get("srv", "li1", "")!!
+      serverAnswers(serverJson(900.0, lastUpdate = 300L))
+      push()
+      assertEquals("the mark decides, no check: $finished", listOf("PATCH /api/me/progress/li1"), api.paths())
+      val body = JSONObject(api.requests.single().body!!)
+      assertEquals(finished, body.getBoolean("isFinished"))
+      assertFalse(body.has("currentTime") || body.has("progress"))
+      assertEquals("the row is as the mark left it", marked.copy(pending = false), db.mediaProgress().get("srv", "li1", "")!!)
+    }
   }
 
   @Test
-  fun aFinishedMarkAndThePositionAreSentWhenTheServerIsBehind() = runBlocking {
+  fun aSentFieldKeepsTheDevicesValue() = runBlocking {
     skippedProgressQueued(700.0)
-    // "Not finished" keeps the position (marking finished moves it to the start, which no server is behind)
-    SyncEngine.store!!.markFinished("srv", "li1", null, false)
-    serverAnswers(serverJson(300.0, lastUpdate = 300L))
+    // An explicit position folded into the conditional one
+    SyncEngine.store!!.queueProgressPatch("srv", "li1", null, listOf("currentTime"))
+    serverAnswers(serverJson(900.0, lastUpdate = 300L))
     push()
-    val behind = JSONObject(api.requests.last().body!!)
-    assertFalse(behind.getBoolean("isFinished"))
-    assertEquals(700.0, behind.getDouble("currentTime"), 0.0)
+    assertEquals(listOf("GET /api/me/progress/li1", "PATCH /api/me/progress/li1"), api.paths())
+    assertEquals(700.0, JSONObject(api.requests.last().body!!).getDouble("currentTime"), 0.0)
+    val row = db.mediaProgress().get("srv", "li1", "")!!
+    assertEquals("sent, so not the server's", 700.0, row.currentTime, 0.0)
+    assertEquals("kept back, so the server's", 0.9, row.progress, 0.0)
+  }
+
+  @Test
+  fun aResetFoldedInIsSentAsZeros() = runBlocking {
+    db.mediaProgress().upsert(progressRow(700.0, lastUpdate = 200L, pending = false).copy(serverProgressId = null))
+    settle(saved(session("a")), true, listOf(ok("a", progressSynced = false)))
+    SyncEngine.store!!.resetProgress("srv", "li1", null)
+    serverAnswers(serverJson(900.0, lastUpdate = 300L))
+    push()
+    assertEquals(listOf("PATCH /api/me/progress/li1"), api.paths())
+    assertEquals(0.0, JSONObject(api.requests.single().body!!).getDouble("currentTime"), 0.0)
+    assertEquals(0.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)
+  }
+
+  @Test
+  fun takingTheServersRecordTakesItsTime() = runBlocking {
+    skippedProgressQueued(700.0, rowLastUpdate = 200L)
+    serverAnswers(serverJson(900.0, lastUpdate = 300L))
+    push()
+    assertEquals(300L, db.mediaProgress().get("srv", "li1", "")!!.lastUpdate)
+    // A snapshot taken before that record is older than the row now
+    SyncEngine.store!!.applyServerProgress("srv", listOf(serverAt(800.0, lastUpdate = 250L)))
+    assertEquals(900.0, db.mediaProgress().get("srv", "li1", "")!!.currentTime, 0.0)
   }
 
   @Test
