@@ -1,7 +1,10 @@
 <template>
   <div>
     <div id="bookshelf" class="w-full h-full p-4 overflow-y-auto">
-      <div class="flex flex-wrap justify-center">
+      <div v-if="catalogNotLoaded" class="w-full py-16 px-6 text-center text-lg">
+        <p class="py-4">{{ $strings.MessageCatalogNotLoaded }}</p>
+      </div>
+      <div v-else class="flex flex-wrap justify-center">
         <template v-for="author in authors">
           <cards-author-card :key="author.id" :author="author" :width="cardWidth" :height="cardHeight" class="p-2" />
         </template>
@@ -11,12 +14,20 @@
 </template>
 
 <script>
+import { shouldRefreshShelf, createDebouncer } from '@/utils/catalogRefresh'
+
+/** Reads from the bridge are capped at 100 entities a call. */
+const PAGE_SIZE = 100
+
 export default {
   data() {
     return {
       loading: true,
       authors: [],
       loadedLibraryId: null,
+      loadedServerConfigId: null,
+      catalogNotLoaded: false,
+      loadGeneration: 0,
       cardWidth: 200
     }
   },
@@ -24,45 +35,67 @@ export default {
     currentLibraryId() {
       return this.$store.state.libraries.currentLibraryId
     },
+    activeServerConfigId() {
+      return this.$store.state.activeServerConfigId
+    },
+    canLoad() {
+      return !!this.$store.getters.getHasActiveServer
+    },
     cardHeight() {
       return this.cardWidth * 1.25
     }
   },
   methods: {
+    /** Reads every page of the library's authors, showing each as it comes; a newer load drops this one. */
     async init() {
       this.cardWidth = (window.innerWidth - 64) / 2
-      if (!this.currentLibraryId) {
+      const generation = ++this.loadGeneration
+      const libraryId = this.currentLibraryId
+      const serverConfigId = this.activeServerConfigId
+      if (!this.canLoad) {
+        this.loading = false
         return
       }
-      this.loadedLibraryId = this.currentLibraryId
-      this.authors = await this.$nativeHttp
-        .get(`/api/libraries/${this.currentLibraryId}/authors`)
-        .then((response) => response.authors)
-        .catch((error) => {
-          console.error('Failed to load authors', error)
-          return []
-        })
-      console.log('Loaded authors', this.authors)
-      this.$eventBus.$emit('bookshelf-total-entities', this.authors.length)
-      this.loading = false
-    },
-    authorAdded(author) {
-      if (!this.authors.some((au) => au.id === author.id)) {
-        this.authors.push(author)
-        this.$eventBus.$emit('bookshelf-total-entities', this.authors.length)
+      if (!libraryId) {
+        // The saved server has no library on the device yet: its catalog was never downloaded
+        this.authors = []
+        this.catalogNotLoaded = true
+        this.loading = false
+        return
+      }
+      if (libraryId !== this.loadedLibraryId || serverConfigId !== this.loadedServerConfigId) this.authors = []
+      this.loadedLibraryId = libraryId
+      this.loadedServerConfigId = serverConfigId
+      const stale = (answer) => generation !== this.loadGeneration || libraryId !== this.currentLibraryId || (!!answer && (answer.serverConfigId ?? null) !== (this.activeServerConfigId ?? null))
+
+      const collected = []
+      let total = 0
+      try {
+        for (let page = 0; ; page++) {
+          const answer = await this.$absData.getAuthors({ libraryId, limit: PAGE_SIZE, page })
+          if (stale(answer)) return
+          const results = answer?.results || []
+          total = answer?.total || 0
+          if (page === 0) this.catalogNotLoaded = answer?.replica?.reconciledAt == null && !total && !answer?.fromServer
+          collected.push(...results)
+          // A re-read replaces the list in place rather than emptying it first
+          const ids = new Set(collected.map((author) => author.id))
+          this.authors = collected.concat(this.authors.slice(collected.length).filter((author) => !ids.has(author.id)))
+          if (!results.length || collected.length >= total) break
+        }
+        this.authors = collected
+        this.$eventBus.$emit('bookshelf-total-entities', total)
+      } catch (error) {
+        if (!stale()) console.error('Failed to load authors', error)
+      } finally {
+        if (generation === this.loadGeneration) this.loading = false
       }
     },
-    authorUpdated(author) {
-      this.authors = this.authors.map((au) => {
-        if (au.id === author.id) {
-          return author
-        }
-        return au
-      })
-    },
-    authorRemoved(author) {
-      this.authors = this.authors.filter((au) => au.id !== author.id)
-      this.$eventBus.$emit('bookshelf-total-entities', this.authors.length)
+    /** Native's catalog notice for this library's authors: read them again. */
+    dataChanged(change) {
+      if (!shouldRefreshShelf(change, { entity: 'authors', libraryId: this.currentLibraryId })) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(this.init)
     },
     libraryChanged(libraryId) {
       if (libraryId !== this.loadedLibraryId) {
@@ -76,18 +109,15 @@ export default {
   },
   mounted() {
     this.init()
-    this.$socket.$on('author_added', this.authorAdded)
-    this.$socket.$on('author_updated', this.authorUpdated)
-    this.$socket.$on('author_removed', this.authorRemoved)
     this.$eventBus.$on('library-changed', this.libraryChanged)
-    this.$eventBus.$on('server-reachable', this.init)
+    this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },
   beforeDestroy() {
-    this.$socket.$off('author_added', this.authorAdded)
-    this.$socket.$off('author_updated', this.authorUpdated)
-    this.$socket.$off('author_removed', this.authorRemoved)
     this.$eventBus.$off('library-changed', this.libraryChanged)
-    this.$eventBus.$off('server-reachable', this.init)
+    if (this.stopDataChanged) this.stopDataChanged()
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
+    // Answers still on the way are dropped
+    this.loadGeneration++
   }
 }
 </script>

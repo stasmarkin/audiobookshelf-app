@@ -249,21 +249,33 @@ test('the server answering before Android reports the network still connects, in
   assert.deepEqual(signedIn.calls, [], 'a signed-in user waits for the server, not the network')
 })
 
-test('Authors re-reads its list when the server is reachable again', async () => {
+test('Authors re-reads its list on the catalog notice of the reconcile the return starts', async () => {
   const page = (await readFile(new URL('../pages/bookshelf/authors.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
-  const sandbox = { console: { ...console, log: () => {} } }
+  const timers = []
+  const sandbox = {
+    console: { ...console, log: () => {} },
+    shouldRefreshShelf: ({ ids }, { libraryId }) => ids.includes(`authors:${libraryId}`),
+    createDebouncer: () => ({ schedule: (fn) => timers.push(fn), cancel: () => timers.splice(0) })
+  }
   vm.runInNewContext(page.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
   const handlers = {}
+  const dataListeners = new Set()
   let inits = 0
-  const view = { $eventBus: { $on: (name, fn) => (handlers[name] = fn), $off: (name) => delete handlers[name] }, $socket: { $on() {}, $off() {} } }
+  const view = {
+    $eventBus: { $on: (name, fn) => (handlers[name] = fn), $off: (name) => delete handlers[name] },
+    $absData: { onDataChanged: (cb) => (dataListeners.add(cb), () => dataListeners.delete(cb)) },
+    currentLibraryId: 'lib-1'
+  }
   for (const [name, fn] of Object.entries(sandbox.component.methods)) view[name] = fn.bind(view)
   view.init = () => inits++
   sandbox.component.mounted.call(view)
   assert.equal(inits, 1)
-  handlers['server-reachable']()
+  assert.equal(handlers['server-reachable'], undefined, 'the server coming back alone reads nothing')
+  dataListeners.forEach((cb) => cb({ scope: 'catalog', ids: ['authors:lib-1'] }))
+  timers.shift()()
   assert.equal(inits, 2)
   sandbox.component.beforeDestroy.call(view)
-  assert.equal(handlers['server-reachable'], undefined)
+  assert.equal(dataListeners.size, 0)
 })
 
 // The libraries follow the catalog notices of native ($absData dataChanged), not the server coming back
