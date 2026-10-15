@@ -171,6 +171,16 @@ class PlaybackSourceResolverTest {
     assertEquals(0.0, chooseStartTime(row(30.0, 4000L), ProgressPoint(990.0, 5000L, true)))
   }
 
+  // A copy found by ino (requested B, the copy is A) also starts from B's progress when that is the newest
+  @Test fun inoCopyStartsFromTheRequestedItemsProgress() {
+    val requested = row(1800.0, 5000L).copy(libraryItemId = "liB")
+    assertEquals(1800.0, chooseLocalStartTime(null, requested, null))
+    assertEquals(1800.0, chooseLocalStartTime(row(30.0, 4000L), requested, ProgressPoint(40.0, 3000L, false)))
+    assertEquals(40.0, chooseLocalStartTime(row(30.0, 4000L), requested, ProgressPoint(40.0, 6000L, false)))
+    assertEquals(30.0, chooseLocalStartTime(row(30.0, 6000L), requested, null))
+    assertNull(chooseLocalStartTime(null, null, null))
+  }
+
   @Test fun noRowKeepsOther() {
     assertEquals(77.0, chooseStartTime(null, ProgressPoint(77.0, 1L, false)))
     assertEquals(12.0, chooseStartTime(row(12.0, 1L), null))

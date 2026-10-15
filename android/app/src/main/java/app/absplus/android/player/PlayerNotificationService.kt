@@ -1162,7 +1162,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       is PlaybackSource.NotFound -> onResult(StartResult.Failed(plan.message))
       is PlaybackSource.LocalBroken -> onResult(StartResult.Failed(NO_AUDIO_FILES_MESSAGE))
       is PlaybackSource.Local -> {
-        val startTime = request.startTime ?: localStartTime(plan.item, plan.episode)
+        val startTime = request.startTime ?: localStartTime(plan.item, plan.episode, request.libraryItemId)
         if (replaced()) return@launch
         val session = plan.item.getPlaybackSession(plan.episode, getDeviceInfo(), startTime)
         // Concise on purpose: the serialized item contains file paths, SAF URIs and the server connection id
@@ -1231,11 +1231,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
   }
 
-  private suspend fun localStartTime(item: LocalLibraryItem, episode: PodcastEpisode?): Double? {
+  /** [requestedId]: the server id the start asked for, which may be another item than the copy's (found by ino). */
+  private suspend fun localStartTime(item: LocalLibraryItem, episode: PodcastEpisode?, requestedId: String? = null): Double? {
     val row = progressRow(item.serverConnectionConfigId, item.libraryItemId, episode?.serverEpisodeId)
+    val requestedRow = requestedId?.takeIf { !it.startsWith("local") && it != item.libraryItemId }
+            ?.let { progressRow(item.serverConnectionConfigId, it, episode?.serverEpisodeId) }
     val paper = DeviceManager.dbManager.getLocalMediaProgress(item.localMediaProgressId(episode))
             ?.let { ProgressPoint(it.currentTime, it.lastUpdate, it.isFinished) }
-    return chooseStartTime(row, paper)
+    return chooseLocalStartTime(row, requestedRow, paper)
   }
 
   /**
@@ -1314,7 +1317,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           if (wakeLock.isHeld) wakeLock.release()
         }
         is PlaybackSource.Local -> {
-          val startTime = localStartTime(plan.item, plan.episode)
+          val startTime = localStartTime(plan.item, plan.episode, nextItem.libraryItemId)
           if (startGate.admit(ticket) == null) {
             if (wakeLock.isHeld) wakeLock.release()
             return@launch

@@ -136,3 +136,12 @@ fun chooseStartTime(row: MediaProgressEntity?, other: ProgressPoint?): Double? {
   } ?: return null
   return if (winner.isFinished) 0.0 else winner.currentTime
 }
+
+/**
+ * The start of a downloaded copy: the newest of its own row, its Paper progress and, for a copy the resolver found by
+ * `ino` for another server item, that requested item's row ([requestedRow]; listened to under that id).
+ */
+fun chooseLocalStartTime(copyRow: MediaProgressEntity?, requestedRow: MediaProgressEntity?, paper: ProgressPoint?): Double? {
+  val row = if (requestedRow != null && (copyRow == null || requestedRow.lastUpdate > copyRow.lastUpdate)) requestedRow else copyRow
+  return chooseStartTime(row, paper)
+}
