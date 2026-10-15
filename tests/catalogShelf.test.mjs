@@ -549,3 +549,8 @@ test('the series tab and a series page show the partial note and no count like t
     assert.deepEqual(never.emitted.filter(([name]) => name === 'bookshelf-total-entities').at(-1), ['bookshelf-total-entities', null], page)
   }
 })
+
+test('a series page whose catalog is not loaded shows its name without a count', async () => {
+  const toolbar = (await read('../components/home/BookshelfToolbar.vue')).match(/<template>([\s\S]*)<\/template>/)[1]
+  assert.match(toolbar, /\{\{ selectedSeriesName \}\}<template v-if="totalEntities !== null"> \(\{\{ \$formatNumber\(totalEntities\) \}\}\)<\/template>/)
+})
