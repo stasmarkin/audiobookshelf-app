@@ -31,29 +31,23 @@ export default {
   },
   watch: {
     networkConnected: {
+      handler(newVal) {
+        // Reconnecting follows the server (serverState), not the network: a live network says nothing about the server
+        if (!newVal) {
+          console.log(`[default] lost network connection`)
+          this.disconnectTime = Date.now()
+        }
+      }
+    },
+    serverState: {
       handler(newVal, oldVal) {
         if (!this.hasMounted) {
           // watcher runs before mount, handling libraries/connection should be handled in mount
           return
         }
-        if (newVal) {
-          console.log(`[default] network connected changed ${oldVal} -> ${newVal}`)
-          if (!this.user) {
-            this.attemptConnection()
-          } else if (!this.currentLibraryId) {
-            this.initLibraries()
-          } else {
-            var timeSinceDisconnect = Date.now() - this.disconnectTime
-            if (timeSinceDisconnect > 5000) {
-              console.log('[default] Time since disconnect was', timeSinceDisconnect, 'sync with server')
-              setTimeout(() => {
-                this.syncLocalSessions(false)
-              }, 4000)
-            }
-          }
-        } else {
-          console.log(`[default] lost network connection`)
-          this.disconnectTime = Date.now()
+        if (newVal === 'online' && oldVal !== 'online') {
+          console.log(`[default] server reachable again (${oldVal} -> ${newVal})`)
+          this.serverCameOnline()
         }
       }
     },
@@ -89,6 +83,9 @@ export default {
     },
     networkConnected() {
       return this.$store.state.networkConnected
+    },
+    serverState() {
+      return this.$store.state.serverState
     },
     socketConnected() {
       return this.$store.state.socketConnected
@@ -212,6 +209,17 @@ export default {
       AbsLogger.info({ tag: 'default', message: `attemptConnection: Successful connection to last saved server config (${serverConnectionConfig.name})` })
       await this.initLibraries()
       this.attemptingConnection = false
+    },
+    serverCameOnline() {
+      if (!this.user) {
+        if (!this.attemptingConnection) this.attemptConnection()
+        return
+      }
+      // Re-read the library so the shelves (library-changed) show what changed while the server was away
+      this.initLibraries()
+      setTimeout(() => {
+        this.syncLocalSessions(false)
+      }, 4000)
     },
     itemRemoved(libraryItem) {
       if (this.$route.name.startsWith('item')) {
@@ -368,9 +376,14 @@ export default {
 
       await this.$store.dispatch('setupNetworkListener')
 
+      // Native may already know the server is down; then the serverState watcher connects once it answers again
+      await this.$absData.getServerState().catch((error) => console.error('[default] Could not read the server state', error))
+
       if (this.$store.state.user.serverConnectionConfig) {
         AbsLogger.info({ tag: 'default', message: `mounted: Server connected, init libraries (${this.$store.getters['user/getServerConfigName']})` })
         await this.initLibraries()
+      } else if (this.serverState === 'offline') {
+        AbsLogger.info({ tag: 'default', message: 'mounted: Server unreachable, waiting for it before connecting' })
       } else {
         AbsLogger.info({ tag: 'default', message: `mounted: Server not connected, attempt connection` })
         await this.attemptConnection()
