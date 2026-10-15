@@ -15,6 +15,7 @@ import app.absplus.android.models.User
 import app.absplus.android.BuildConfig
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.managers.SecureStorage
+import app.absplus.android.sync.LocalSessionsCleanup
 import app.absplus.android.sync.ServerReachability
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.core.json.JsonReadFeature
@@ -79,6 +80,7 @@ class ApiHandler(var ctx:Context) {
 
   @JsonIgnoreProperties(ignoreUnknown = true)
   data class LocalSessionSyncResult(val id:String, val success:Boolean, val progressSynced:Boolean?, val error:String?)
+  @JsonIgnoreProperties(ignoreUnknown = true)
   data class LocalSessionsSyncResponsePayload(val results:List<LocalSessionSyncResult>)
 
   private fun getRequest(endpoint:String, httpClient:OkHttpClient?, config:ServerConnectionConfig?, cb: (JSObject) -> Unit) {
@@ -777,7 +779,8 @@ class ApiHandler(var ctx:Context) {
     }
   }
 
-  fun sendSyncLocalSessions(playbackSessions:List<PlaybackSession>, cb: (Boolean, String?) -> Unit) {
+  /** [cb] gets the per-session results only when the server answered the whole request. */
+  fun sendSyncLocalSessions(playbackSessions:List<PlaybackSession>, cb: (Boolean, String?, List<LocalSessionSyncResult>) -> Unit) {
     @SuppressLint("HardwareIds")
     val deviceId = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID)
     val deviceInfo = DeviceInfo(deviceId, Build.MANUFACTURER, Build.MODEL, Build.VERSION.SDK_INT, BuildConfig.VERSION_NAME)
@@ -790,9 +793,14 @@ class ApiHandler(var ctx:Context) {
     postRequest("/api/session/local-all", JSObject(json.toString()), null) {
       if (!it.getString("error").isNullOrEmpty()) {
         AbsLogger.error("ApiHandler", "sendSyncLocalSessions: Failed to sync local sessions. (${it.getString("error")})")
-        cb(false, it.getString("error"))
+        cb(false, it.getString("error"), emptyList())
       } else {
-        val response = jacksonMapper.readValue<LocalSessionsSyncResponsePayload>(it.toString())
+        val response = try {
+          jacksonMapper.readValue<LocalSessionsSyncResponsePayload>(it.toString())
+        } catch (e: Exception) {
+          AbsLogger.error("ApiHandler", "sendSyncLocalSessions: Unreadable response (${e.message})")
+          return@postRequest cb(false, "Invalid response body", emptyList())
+        }
         response.results.forEach { localSessionSyncResult ->
           Log.d(tag, "Synced session result ${localSessionSyncResult.id}|${localSessionSyncResult.progressSynced}|${localSessionSyncResult.success}")
 
@@ -802,14 +810,16 @@ class ApiHandler(var ctx:Context) {
               MediaEventManager.saveEvent(session, syncResult)
 
               AbsLogger.info("ApiHandler", "sendSyncLocalSessions: Synced session \"${session.displayTitle}\" with server, server progress was updated for item ${session.mediaItemId}")
+            } else if (!localSessionSyncResult.success && LocalSessionsCleanup.isItemGone(localSessionSyncResult.error)) {
+              AbsLogger.error("ApiHandler", "sendSyncLocalSessions: Dropped session \"${session.displayTitle}\", the server will never take it. Error: ${localSessionSyncResult.error}")
             } else if (!localSessionSyncResult.success) {
-              AbsLogger.error("ApiHandler", "sendSyncLocalSessions: Failed to sync session \"${session.displayTitle}\" with server. Error: ${localSessionSyncResult.error}")
+              AbsLogger.error("ApiHandler", "sendSyncLocalSessions: Failed to sync session \"${session.displayTitle}\" with server, kept for the next time. Error: ${localSessionSyncResult.error}")
             } else {
-              AbsLogger.info("ApiHandler", "sendSyncLocalSessions: Synced session \"${session.displayTitle}\" with server. Server progress was up-to-date for item ${session.mediaItemId}")
+              AbsLogger.info("ApiHandler", "sendSyncLocalSessions: Synced session \"${session.displayTitle}\" with server. Server progress was newer or up-to-date for item ${session.mediaItemId}")
             }
           }
         }
-        cb(true, null)
+        cb(true, null, response.results)
       }
     }
   }

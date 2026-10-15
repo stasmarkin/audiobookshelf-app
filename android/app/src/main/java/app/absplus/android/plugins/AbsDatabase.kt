@@ -9,6 +9,7 @@ import app.absplus.android.device.DeviceManager
 import app.absplus.android.media.MediaEventManager
 import app.absplus.android.server.ApiHandler
 import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.LocalSessionsCleanup
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.server.RefreshResult
 import app.absplus.android.managers.SecureStorage
@@ -351,16 +352,12 @@ class AbsDatabase : Plugin() {
     val savedSessions = DeviceManager.dbManager.getPlaybackSessions().filter { it.serverConnectionConfigId == DeviceManager.serverConnectionConfigId }
 
     if (savedSessions.isNotEmpty()) {
-      apiHandler.sendSyncLocalSessions(savedSessions) { success, errorMsg ->
+      apiHandler.sendSyncLocalSessions(savedSessions) { success, errorMsg, results ->
         if (!success) {
-          call.resolve(JSObject("{\"error\":\"$errorMsg\"}"))
+          call.resolve(JSObject().apply { put("error", errorMsg) })
         } else {
-          AbsLogger.info("AbsDatabase", "syncLocalSessionsWithServer: Finished sending local playback sessions to server. Removing ${savedSessions.size} saved sessions.")
-          // Remove all local sessions
-          savedSessions.forEach {
-            DeviceManager.dbManager.removePlaybackSession(it.id)
-          }
-          call.resolve()
+          AbsLogger.info("AbsDatabase", "syncLocalSessionsWithServer: Finished sending ${savedSessions.size} local playback sessions to server.")
+          LocalSessionsCleanup.settle(savedSessions, true, results) { call.resolve() }
         }
       }
     } else {
