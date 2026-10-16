@@ -69,14 +69,41 @@ abstract class LibraryItemDao {
   @Upsert
   abstract suspend fun upsertAll(list: List<LibraryItemEntity>)
 
-  /** The items and their series membership. */
+  /** The items, their series membership and a podcast's episodes. */
   @Transaction
   open suspend fun deleteByIds(sc: String, ids: List<String>) {
     inChunks(ids) {
       deleteMembershipChunk(sc, it)
+      deleteEpisodesChunk(sc, it)
       deleteChunk(sc, it)
     }
   }
+
+  suspend fun expandedOf(sc: String, ids: List<String>): List<IdExpanded> = inChunks(ids) { expandedChunk(sc, it) }.flatten()
+
+  @Query("SELECT id, updatedAt, detailLevel, expandedJson FROM library_items WHERE serverConfigId = :sc AND id IN (:ids)")
+  abstract suspend fun expandedChunk(sc: String, ids: List<String>): List<IdExpanded>
+
+  /** Only onto the version it was read from: an expanded copy of an older version never lands on a newer row. */
+  @Query("""UPDATE library_items SET detailLevel = :detailLevel, expandedJson = :expandedJson
+            WHERE serverConfigId = :sc AND id = :id AND updatedAt = :updatedAt""")
+  abstract suspend fun setExpanded(sc: String, id: String, updatedAt: Long, detailLevel: String, expandedJson: String?): Int
+
+  @Query("""SELECT id FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId AND mediaType = 'podcast'
+            AND detailLevel != 'expanded'""")
+  abstract suspend fun podcastsWithoutEpisodes(sc: String, libraryId: String): List<String>
+
+  /** [pattern] comes from `searchPattern`, anchored on the key's version prefix. */
+  @Query("""SELECT id, searchKey, json FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId
+            AND searchKey LIKE :pattern ESCAPE '\' ORDER BY addedAt, id LIMIT :limit""")
+  abstract suspend fun searchCandidates(sc: String, libraryId: String, pattern: String, limit: Int): List<IdSearchJson>
+
+  @Query("""SELECT id, searchKey, json FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId
+            AND searchKey NOT LIKE :prefix || '%'""")
+  abstract suspend fun staleSearchKeys(sc: String, libraryId: String, prefix: String): List<IdSearchJson>
+
+  @Query("UPDATE library_items SET searchKey = :key WHERE serverConfigId = :sc AND id = :id")
+  abstract suspend fun setSearchKey(sc: String, id: String, key: String)
 
   @Query("SELECT id, json, rssFeedJson FROM library_items WHERE serverConfigId = :sc AND id IN (:ids)")
   abstract suspend fun jsonChunk(sc: String, ids: List<String>): List<IdJson>
@@ -89,6 +116,56 @@ abstract class LibraryItemDao {
 
   @Query("DELETE FROM series_items WHERE serverConfigId = :sc AND libraryItemId IN (:ids)")
   abstract suspend fun deleteMembershipChunk(sc: String, ids: List<String>)
+
+  @Query("DELETE FROM podcast_episodes WHERE serverConfigId = :sc AND libraryItemId IN (:ids)")
+  abstract suspend fun deleteEpisodesChunk(sc: String, ids: List<String>)
+}
+
+@Dao
+abstract class EpisodeDao {
+  @Query("SELECT * FROM podcast_episodes WHERE serverConfigId = :sc AND libraryItemId = :libraryItemId ORDER BY addedAt, id")
+  abstract suspend fun forPodcast(sc: String, libraryItemId: String): List<EpisodeEntity>
+
+  suspend fun byIds(sc: String, ids: List<String>): List<EpisodeEntity> = inChunks(ids) { byIdsChunk(sc, it) }.flatten()
+
+  @Query("SELECT * FROM podcast_episodes WHERE serverConfigId = :sc AND id IN (:ids)")
+  abstract suspend fun byIdsChunk(sc: String, ids: List<String>): List<EpisodeEntity>
+
+  @Query("SELECT id, libraryItemId, publishedAt, addedAt FROM podcast_episodes WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun keys(sc: String, libraryId: String): List<EpisodeKey>
+
+  /** [pattern] comes from `searchPattern`; the JSON of the matches is read with [byIds]. */
+  @Query("""SELECT id, libraryItemId, publishedAt, addedAt FROM podcast_episodes WHERE serverConfigId = :sc
+            AND libraryId = :libraryId AND searchKey LIKE :pattern ESCAPE '\' ORDER BY addedAt, id LIMIT :limit""")
+  abstract suspend fun searchByTitle(sc: String, libraryId: String, pattern: String, limit: Int): List<EpisodeKey>
+
+  @Query("""SELECT * FROM podcast_episodes WHERE serverConfigId = :sc AND libraryId = :libraryId
+            AND searchKey NOT LIKE :prefix || '%'""")
+  abstract suspend fun staleKeys(sc: String, libraryId: String, prefix: String): List<EpisodeEntity>
+
+  @Query("UPDATE podcast_episodes SET searchKey = :key WHERE serverConfigId = :sc AND id = :id")
+  abstract suspend fun setSearchKey(sc: String, id: String, key: String)
+
+  @Query("DELETE FROM podcast_episodes WHERE serverConfigId = :sc AND libraryItemId = :libraryItemId")
+  abstract suspend fun deleteForPodcast(sc: String, libraryItemId: String)
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  abstract suspend fun insertAll(list: List<EpisodeEntity>)
+
+  /** The podcast's episodes become exactly [list]. */
+  @Transaction
+  open suspend fun replaceForPodcast(sc: String, libraryItemId: String, list: List<EpisodeEntity>) {
+    deleteForPodcast(sc, libraryItemId)
+    if (list.isNotEmpty()) insertAll(list)
+  }
+
+  @Transaction
+  open suspend fun deleteForPodcasts(sc: String, ids: List<String>) {
+    inChunks(ids) { deleteForPodcastsChunk(sc, it) }
+  }
+
+  @Query("DELETE FROM podcast_episodes WHERE serverConfigId = :sc AND libraryItemId IN (:ids)")
+  abstract suspend fun deleteForPodcastsChunk(sc: String, ids: List<String>)
 }
 
 @Dao
@@ -366,6 +443,9 @@ abstract class CascadeDao {
 
   @Query("DELETE FROM series WHERE serverConfigId = :sc AND libraryId = :libraryId")
   abstract suspend fun deleteSeries(sc: String, libraryId: String)
+
+  @Query("DELETE FROM podcast_episodes WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun deleteEpisodes(sc: String, libraryId: String)
 
   @Query("DELETE FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId")
   abstract suspend fun deleteItems(sc: String, libraryId: String)

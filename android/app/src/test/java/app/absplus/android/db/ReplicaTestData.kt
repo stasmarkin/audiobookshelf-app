@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.db.replica.AuthorEntity
+import app.absplus.android.db.replica.EpisodeEntity
 import app.absplus.android.db.replica.ItemRow
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryItemEntity
@@ -65,3 +66,7 @@ fun member(sc: String, seriesId: String, itemId: String, sequence: String? = nul
 fun authorRow(sc: String, id: String, libraryId: String = "lib1", name: String = "Author $id", numBooks: Int = 1, updatedAt: Long = 1L) =
         AuthorEntity(sc, id, libraryId, name, null, 1L, updatedAt, numBooks,
                 """{"id":"$id","name":"$name","libraryId":"$libraryId","updatedAt":$updatedAt,"numBooks":$numBooks}""")
+
+fun episodeRow(sc: String, id: String, podcastId: String, libraryId: String = "lib1", title: String = "Episode $id", addedAt: Long = 1L,
+               searchKey: String = "") =
+        EpisodeEntity(sc, id, podcastId, libraryId, title, searchKey, null, addedAt, null, """{"id":"$id","title":"$title"}""")

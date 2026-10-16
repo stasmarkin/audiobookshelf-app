@@ -32,8 +32,20 @@ data class LibraryStateEntity(
         val playlistsReconciledAt: Long?,
         val lastError: String?,
         /** JSON array of series ids whose membership still has to be read from the server. */
-        val pendingSeriesQueries: String = "[]"
+        val pendingSeriesQueries: String = "[]",
+        /** When a pass last gave every podcast of the library a try at its episodes; null until then. */
+        val episodesReconciledAt: Long? = null
 )
+
+/** [LibraryItemEntity.detailLevel]. */
+object DetailLevel {
+  /** Only the minified item is known. */
+  const val MINIFIED = "minified"
+  /** [LibraryItemEntity.expandedJson] (and a podcast's episodes) belong to the row's `updatedAt`. */
+  const val EXPANDED = "expanded"
+  /** The row changed since [LibraryItemEntity.expandedJson] was taken; it is kept until it is read again. */
+  const val STALE = "stale"
+}
 
 /** A library item in the server's minified shape ([json]) with the columns the catalog sorts and filters on. */
 @Entity(
@@ -77,9 +89,32 @@ data class LibraryItemEntity(
         val rssFeedJson: String?,
         /** The minified item without `rssFeed`. */
         val json: String,
+        /** See `searchKey` in CatalogJson; "" or another version prefix is recomputed on search. */
         val searchKey: String = "",
-        val detailLevel: String = "minified",
+        val detailLevel: String = DetailLevel.MINIFIED,
+        /** The expanded item without user, feed and list extras; a podcast's without `media.episodes`. */
         val expandedJson: String? = null
+)
+
+/** An episode of a podcast in [LibraryItemEntity]; [libraryId] is the podcast's. */
+@Entity(
+        tableName = "podcast_episodes",
+        primaryKeys = ["serverConfigId", "id"],
+        indices = [Index("serverConfigId", "libraryItemId"), Index("serverConfigId", "libraryId", "addedAt")]
+)
+data class EpisodeEntity(
+        val serverConfigId: String,
+        val id: String,
+        val libraryItemId: String,
+        val libraryId: String,
+        val title: String,
+        val searchKey: String,
+        val publishedAt: Long?,
+        /** The episode's `addedAt` (its createdAt). */
+        val addedAt: Long,
+        val index: Int?,
+        /** The episode's `toOldJSONExpanded`. */
+        val json: String
 )
 
 @Entity(tableName = "series", primaryKeys = ["serverConfigId", "id"], indices = [Index("serverConfigId", "libraryId")])
@@ -198,3 +233,9 @@ data class ItemRow(
 data class IdJson(val id: String, val json: String, val rssFeedJson: String?)
 
 data class IdHash(val id: String, val updatedAt: Long, val contentHash: String)
+
+data class EpisodeKey(val id: String, val libraryItemId: String, val publishedAt: Long?, val addedAt: Long)
+
+data class IdExpanded(val id: String, val updatedAt: Long, val detailLevel: String, val expandedJson: String?)
+
+data class IdSearchJson(val id: String, val searchKey: String, val json: String)

@@ -1,15 +1,17 @@
 package app.absplus.android.db.replica
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.withTransaction
 
 /**
- * replica.db: the catalog of each saved server as last reconciled. Everything here can be read again from the server,
- * so any schema change (upgrade or downgrade) drops it instead of migrating; the catalog is then empty until the next
- * reconcile. Every row carries its serverConfigId.
+ * replica.db: the catalog of each saved server as last reconciled. Every row carries its serverConfigId.
+ * An upgrade migrates additively (v1 -> v2: `podcast_episodes`, `library_state.episodesReconciledAt`) and keeps the
+ * catalog. Everything here can be read again from the server, so a downgrade, or an upgrade without a migration, drops
+ * the file instead; the catalog is then empty until the next reconcile.
  */
 @Database(
         entities = [
@@ -22,10 +24,12 @@ import androidx.room.withTransaction
           CollectionEntity::class,
           CollectionItemEntity::class,
           PlaylistEntity::class,
-          PlaylistItemEntity::class
+          PlaylistItemEntity::class,
+          EpisodeEntity::class
         ],
-        version = 1,
-        exportSchema = true
+        version = 2,
+        exportSchema = true,
+        autoMigrations = [AutoMigration(from = 1, to = 2)]
 )
 abstract class ReplicaDatabase : RoomDatabase() {
   abstract fun libraries(): LibraryDao
@@ -36,6 +40,7 @@ abstract class ReplicaDatabase : RoomDatabase() {
   abstract fun collections(): CollectionDao
   abstract fun playlists(): PlaylistDao
   abstract fun cascade(): CascadeDao
+  abstract fun episodes(): EpisodeDao
 
   /** A library with everything in it, including its reconcile state. */
   suspend fun deleteLibraryCascade(sc: String, libraryId: String) = withTransaction {
@@ -43,6 +48,7 @@ abstract class ReplicaDatabase : RoomDatabase() {
     cascade.deleteSeriesMembers(sc, libraryId)
     cascade.deleteItemMembership(sc, libraryId)
     cascade.deleteSeries(sc, libraryId)
+    cascade.deleteEpisodes(sc, libraryId)
     cascade.deleteItems(sc, libraryId)
     authors().deleteForLibrary(sc, libraryId)
     collections().deleteItemsForLibrary(sc, libraryId)
