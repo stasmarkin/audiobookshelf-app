@@ -612,6 +612,7 @@
   "ToastBookmarkCreateFailed": "Failed to create bookmark",
   "ToastBookmarkRemoveFailed": "Failed to remove bookmark",
   "ToastBookmarkUpdateFailed": "Failed to update bookmark",
+  "ToastCollectionLoadFailed": "Could not open the collection",
   "ToastDiagnosticLogCleared": "Diagnostic log cleared",
   "ToastDiagnosticLogSaveFailed": "Could not save the diagnostic log: {0}",
   "ToastDiagnosticLogSaved": "Diagnostic log saved as {0}",

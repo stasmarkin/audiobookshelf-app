@@ -97,8 +97,9 @@ export default {
     authors() {
       return this.mediaMetadata.authors || []
     },
+    /** A minified book (the catalog replica) has only `authorName`; a podcast has `author`. */
     author() {
-      return this.authors.map((au) => au.name).join(', ')
+      return this.authors.map((au) => au.name).join(', ') || this.mediaMetadata.authorName || this.mediaMetadata.author || ''
     },
     authorCleaned() {
       if (this.author.length > 30) {

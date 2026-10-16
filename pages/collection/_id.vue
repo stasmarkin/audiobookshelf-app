@@ -36,39 +36,48 @@
 <script>
 import { downloadMissingItems } from '@/utils/bulkDownload'
 import { buildQueueSourceItems } from '@/utils/playbackQueue'
-export default {
-  async asyncData({ store, params, app, redirect, route }) {
-    if (!store.state.user.user) {
-      return redirect(`/connect?redirect=${route.path}`)
-    }
+import { trackCount, fetchCollectionBooks } from '@/utils/catalogItem'
+import { createDebouncer } from '@/utils/catalogRefresh'
 
-    var collection = await app.$nativeHttp.get(`/api/collections/${params.id}`).catch((error) => {
-      console.error('Failed', error)
-      return false
+/**
+ * The collection with all its books ($absData: the replica, also offline), each with its downloaded copy of the active
+ * server (replicas of two accounts on one server share item ids); null when it is gone.
+ */
+async function readCollection({ $absData, $db }, id, activeServerConfigId) {
+  const answer = await $absData.getCollection({ id })
+  if (!answer?.collection) return null
+  const books = await fetchCollectionBooks($absData, id, { serverConfigId: answer.serverConfigId })
+  if (!books) return null
+  const localLibraryItems = books.length ? (await $db.getLocalLibraryItems('book')) || [] : []
+  books.forEach((book) => {
+    const copy = localLibraryItems.find((lli) => {
+      if (activeServerConfigId && lli.serverConnectionConfigId !== activeServerConfigId) return false
+      return lli.libraryItemId === book.id || (book.ino && lli.ino && lli.ino === book.ino)
     })
+    if (copy) book.localLibraryItem = copy
+  })
+  return { ...answer.collection, books }
+}
 
+export default {
+  async asyncData({ store, params, app, redirect }) {
+    let collection
+    try {
+      collection = await readCollection(app, params.id, store.state.activeServerConfigId)
+    } catch (error) {
+      console.error('Failed to read the collection', error)
+      return redirect('/bookshelf/collections?error=collection')
+    }
     if (!collection) {
-      return redirect('/bookshelf')
+      return redirect('/bookshelf/collections')
     }
-
-    // Lookup matching local items and attach to collection items
-    if (collection.books.length) {
-      const localLibraryItems = (await app.$db.getLocalLibraryItems('book')) || []
-      if (localLibraryItems.length) {
-        collection.books.forEach((collectionItem) => {
-          const matchingLocalLibraryItem = localLibraryItems.find((lli) => lli.libraryItemId === collectionItem.id || (collectionItem.ino && lli.ino && lli.ino === collectionItem.ino))
-          if (!matchingLocalLibraryItem) return
-          collectionItem.localLibraryItem = matchingLocalLibraryItem
-        })
-      }
-    }
-
     return {
       collection
     }
   },
   data() {
     return {
+      readGeneration: 0,
       mediaIdStartingPlayback: null,
       processingRemove: false,
       showDownloadOrStreamModal: false,
@@ -91,7 +100,7 @@ export default {
     },
     playableItems() {
       return this.bookItems.filter((book) => {
-        return !book.isMissing && !book.isInvalid && book.media.tracks.length
+        return !book.isMissing && !book.isInvalid && trackCount(book) > 0
       })
     },
     playerIsPlaying() {
@@ -186,6 +195,32 @@ export default {
       await this.$hapticsImpact()
       this.$eventBus.$emit('add-queue-source-to-queue', { sourceType: 'collection', sourceId: this.collection.id, books: this.bookItems })
     },
+    /** Native changed this library's collections or books: read the collection again (debounced). */
+    dataChanged(change) {
+      const libraryId = this.collection.libraryId
+      if (change?.scope !== 'catalog' || !libraryId) return
+      if (!(change.ids || []).some((topic) => topic === `collections:${libraryId}` || topic === `items:${libraryId}`)) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(this.reload)
+    },
+    /** Only the latest read of this collection lands; a collection that went away leaves for the tab. */
+    async reload() {
+      const generation = ++this.readGeneration
+      const id = this.collection.id
+      let collection
+      try {
+        collection = await readCollection(this, id, this.$store.state.activeServerConfigId)
+      } catch (error) {
+        console.error('Failed to read the collection again', error)
+        return
+      }
+      if (this.isDestroyed || generation !== this.readGeneration || this.collection.id !== id) return
+      if (!collection) {
+        this.$router.replace('/bookshelf/collections')
+        return
+      }
+      this.collection = collection
+    },
     libraryChanged(libraryId) {
       // A collection belongs to a single library, so leave this page when a different library is
       // selected rather than showing a collection that is not in the current library
@@ -196,9 +231,14 @@ export default {
   },
   mounted() {
     this.$eventBus.$on('library-changed', this.libraryChanged)
+    this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },
   beforeDestroy() {
+    this.isDestroyed = true
     this.$eventBus.$off('library-changed', this.libraryChanged)
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
   }
 }
 </script>

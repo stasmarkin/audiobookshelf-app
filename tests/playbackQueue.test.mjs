@@ -6,7 +6,7 @@ import vm from 'node:vm'
 const helperSource = await readFile(new URL('../utils/playbackQueue.js', import.meta.url), 'utf8')
 const helpers = await import(`data:text/javascript;base64,${Buffer.from(helperSource).toString('base64')}`)
 const queueItemPayloadOf = helpers.queueItemPayload
-const { downloadedBookItems, fetchSeriesBooks, nativeQueueItems, queueItemDisplay, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } = helpers
+const { buildQueueSourceItems, downloadedBookItems, fetchSeriesBooks, nativeQueueItems, queueItemDisplay, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } = helpers
 
 const book = (id) => ({ id, mediaType: 'book', media: { numTracks: 1 } })
 // Queue entry as the Play controls build it: server identity plus the local copy when one is complete.
@@ -133,6 +133,21 @@ test('series queue offline recognizes downloaded copies', async () => {
   )
   assert.equal(result.payload.libraryItemId, 'local_device_1')
   assert.equal(result.payload.startTime, undefined, 'native picks where a book starts')
+})
+
+test('collection play builds the queue from replica books', async () => {
+  // Offline: no signed-in connection, the books are minified replica items (numTracks, no tracks)
+  const ctx = context([local('1', { serverConnectionConfigId: 'a', media: { tracks: [{}, {}] } })])
+  ctx.$store.state.activeServerConfigId = 'a'
+  ctx.$store.getters['user/getServerConnectionConfigId'] = null
+  const books = ['1', '2'].map((id) => ({ id, mediaType: 'book', media: { numTracks: 2, metadata: { title: id } } }))
+  const items = await buildQueueSourceItems(ctx, { sourceType: 'collection', sourceId: 'c', books })
+  assert.equal(items[0].localLibraryItem?.id, 'local_device_1', 'the downloaded copy of the active server plays')
+  assert.deepEqual(
+    { localLibraryItem: items[1].localLibraryItem, libraryItem: items[1].libraryItem?.id, expectedTracks: items[1].expectedTracks },
+    { localLibraryItem: null, libraryItem: '2', expectedTracks: 2 },
+    'the book that is not downloaded streams'
+  )
 })
 
 test('Play All starts at the first unfinished book, local progress taking precedence over server progress', async () => {

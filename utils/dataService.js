@@ -17,6 +17,9 @@ export const CATALOG_EVENTS = [
   'author_updated',
   'author_removed',
   'authors_num_books_updated',
+  'collection_added',
+  'collection_updated',
+  'collection_removed',
   'backup_applied'
 ]
 
@@ -69,7 +72,7 @@ export function catalogTopics(event, payload, currentLibraryId) {
  *   Paper progress of downloaded copies. Writes ("finished", reset, e-book position) go to native and work offline.
  * - Another saved server becoming active clears the user's data in the store and reads that server's; an answer that
  *   was asked for the previous server is dropped.
- * - The catalog (libraries, items, series, authors) is read from native replica.db, at most 100 entities a call. While a library was
+ * - The catalog (libraries, items, series, authors, collections) is read from native replica.db, at most 100 entities a call. While a library was
  *   never reconciled (or the filter needs data the replica lacks) and the server is online, the same request goes to
  *   the server instead. `onDataChanged {scope:'catalog'}` keeps the libraries in the store current.
  * - In the browser (`platform: 'web'`, development only) there is no native side: everything goes straight to the
@@ -402,6 +405,55 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     return withServerFallback(answer, path, seriesShape, () => getSeriesById({ id }), !answer?.series)
   }
 
+  /** As native lists collections: the first books only, for the cover, with the count of all. */
+  const collectionsPage = (data) => ({
+    ...(data || {}),
+    results: (data?.results || []).map((c) => ({ ...c, numBooks: c.books?.length || 0, books: (c.books || []).slice(0, 4) }))
+  })
+
+  const getCollections = async (args) => {
+    const { libraryId, limit, page = 0 } = args
+    const path = `/api/libraries/${encodeURIComponent(libraryId)}/collections?limit=${limit}&page=${page}`
+    if (isWeb) return { ...collectionsPage(await $axios.$get(path)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getCollections({ libraryId, limit, page }))
+    return withServerFallback(answer, path, collectionsPage, () => getCollections(args))
+  }
+
+  const collectionPath = (id) => `/api/collections/${encodeURIComponent(id)}`
+  /** `GET /api/collections/:id` in the browser; null for a collection the server does not have. */
+  const webCollection = async (id) => {
+    try {
+      return await $axios.$get(collectionPath(id))
+    } catch (error) {
+      if (error?.response?.status !== 404) throw error
+      return null
+    }
+  }
+  const collectionShape = (data) => {
+    if (!data) return { collection: null }
+    const { books = [], ...collection } = data
+    return { collection: { ...collection, numBooks: books.length } }
+  }
+  /** One request a page: the server sends the collection with all its books. */
+  const collectionBooksShape = (limit, page) => (data) => {
+    const books = data?.books || []
+    return { results: books.slice(page * limit, page * limit + limit), total: books.length, limit, page, found: !!data }
+  }
+
+  const getCollection = async ({ id }) => {
+    if (isWeb) return { ...collectionShape(await webCollection(id)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getCollection({ id }))
+    // A collection made on the server since the last sync is not in the replica yet; a 404 there leaves native's answer
+    return withServerFallback(answer, collectionPath(id), collectionShape, () => getCollection({ id }), !answer?.collection)
+  }
+
+  const getCollectionBooks = async (args) => {
+    const { id, limit, page = 0 } = args
+    if (isWeb) return { ...collectionBooksShape(limit, page)(await webCollection(id)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getCollectionBooks({ id, limit, page }))
+    return withServerFallback(answer, collectionPath(id), collectionBooksShape(limit, page), () => getCollectionBooks(args), answer?.found === false)
+  }
+
   // Without this the indicator stays hidden until something else asks
   getServerState().catch((error) => console.error('[data] Could not read the server state', error))
   if (!isWeb && plugin.getSyncState) {
@@ -519,6 +571,15 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     getSeriesById,
     /** A page of a library's authors by name, in the server's shape plus `replica`; `limit` at most 100. */
     getAuthors,
+    /**
+     * A page of a library's collections in the server's order plus `replica`; each has `numBooks` and only its first 4
+     * books (for the cover). `limit` at most 20.
+     */
+    getCollections,
+    /** `{ serverConfigId, collection, replica }`: the collection without books, with `numBooks`; null when nobody has it. */
+    getCollection,
+    /** A page of a collection's books in its order: `{ results, total, limit, page, found, replica }`; `limit` at most 100. */
+    getCollectionBooks,
     /** The library native reconciles first. */
     async setCurrentLibrary({ libraryId }) {
       if (isWeb || !plugin.setCurrentLibrary) return

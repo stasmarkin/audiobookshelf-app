@@ -21,6 +21,8 @@
 </template>
 
 <script>
+import { trackCount } from '@/utils/catalogItem'
+
 export default {
   props: {
     collectionId: String,
@@ -49,9 +51,6 @@ export default {
     mediaMetadata() {
       return this.media.metadata || {}
     },
-    tracks() {
-      return this.media.tracks || []
-    },
     bookTitle() {
       return this.mediaMetadata.title || ''
     },
@@ -75,7 +74,7 @@ export default {
       return this.book.isInvalid
     },
     showPlayBtn() {
-      return !this.isMissing && !this.isInvalid && this.tracks.length
+      return !this.isMissing && !this.isInvalid && trackCount(this.book) > 0
     },
     playerIsStartingPlayback() {
       // Play has been pressed and waiting for native play response
