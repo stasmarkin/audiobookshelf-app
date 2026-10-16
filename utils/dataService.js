@@ -20,6 +20,9 @@ export const CATALOG_EVENTS = [
   'collection_added',
   'collection_updated',
   'collection_removed',
+  'playlist_added',
+  'playlist_updated',
+  'playlist_removed',
   'backup_applied'
 ]
 
@@ -72,7 +75,7 @@ export function catalogTopics(event, payload, currentLibraryId) {
  *   Paper progress of downloaded copies. Writes ("finished", reset, e-book position) go to native and work offline.
  * - Another saved server becoming active clears the user's data in the store and reads that server's; an answer that
  *   was asked for the previous server is dropped.
- * - The catalog (libraries, items, series, authors, collections) is read from native replica.db, at most 100 entities a call. While a library was
+ * - The catalog (libraries, items, series, authors, collections, the user's playlists) is read from native replica.db, at most 100 entities a call. While a library was
  *   never reconciled (or the filter needs data the replica lacks) and the server is online, the same request goes to
  *   the server instead. `onDataChanged {scope:'catalog'}` keeps the libraries in the store current.
  * - In the browser (`platform: 'web'`, development only) there is no native side: everything goes straight to the
@@ -454,6 +457,60 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     return withServerFallback(answer, collectionPath(id), collectionBooksShape(limit, page), () => getCollectionBooks(args), answer?.found === false)
   }
 
+  /** A playlist item as native gives it: a book has `episodeId` and `episode` null. */
+  const playlistItem = (item) => ({ ...item, episodeId: item.episodeId || null, episode: item.episode || null })
+  /** As native lists playlists: the first items only, for the cover, with the count and the ids of all. */
+  const playlistsPage = (data) => ({
+    ...(data || {}),
+    results: (data?.results || []).map((p) => {
+      const items = p.items || []
+      return { ...p, numItems: items.length, items: items.slice(0, 4).map(playlistItem), itemKeys: items.map((i) => ({ libraryItemId: i.libraryItemId, episodeId: i.episodeId || null })) }
+    })
+  })
+
+  const getPlaylists = async (args) => {
+    const { libraryId, limit, page = 0 } = args
+    const path = `/api/libraries/${encodeURIComponent(libraryId)}/playlists?limit=${limit}&page=${page}`
+    if (isWeb) return { ...playlistsPage(await $axios.$get(path)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getPlaylists({ libraryId, limit, page }))
+    return withServerFallback(answer, path, playlistsPage, () => getPlaylists(args))
+  }
+
+  const playlistPath = (id) => `/api/playlists/${encodeURIComponent(id)}`
+  /** `GET /api/playlists/:id` in the browser; null for a playlist the server does not have. */
+  const webPlaylist = async (id) => {
+    try {
+      return await $axios.$get(playlistPath(id))
+    } catch (error) {
+      if (error?.response?.status !== 404) throw error
+      return null
+    }
+  }
+  const playlistShape = (data) => {
+    if (!data) return { playlist: null }
+    const { items = [], ...playlist } = data
+    return { playlist: { ...playlist, numItems: items.length } }
+  }
+  /** One request a page: the server sends the playlist with all its items. */
+  const playlistItemsShape = (limit, page) => (data) => {
+    const items = data?.items || []
+    return { results: items.slice(page * limit, page * limit + limit).map(playlistItem), total: items.length, limit, page, found: !!data }
+  }
+
+  const getPlaylist = async ({ id }) => {
+    if (isWeb) return { ...playlistShape(await webPlaylist(id)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getPlaylist({ id }))
+    // A playlist made on the server since the last sync is not in the replica yet; a 404 there leaves native's answer
+    return withServerFallback(answer, playlistPath(id), playlistShape, () => getPlaylist({ id }), !answer?.playlist)
+  }
+
+  const getPlaylistItems = async (args) => {
+    const { id, limit, page = 0 } = args
+    if (isWeb) return { ...playlistItemsShape(limit, page)(await webPlaylist(id)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getPlaylistItems({ id, limit, page }))
+    return withServerFallback(answer, playlistPath(id), playlistItemsShape(limit, page), () => getPlaylistItems(args), answer?.found === false)
+  }
+
   // Without this the indicator stays hidden until something else asks
   getServerState().catch((error) => console.error('[data] Could not read the server state', error))
   if (!isWeb && plugin.getSyncState) {
@@ -580,6 +637,18 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     getCollection,
     /** A page of a collection's books in its order: `{ results, total, limit, page, found, replica }`; `limit` at most 100. */
     getCollectionBooks,
+    /**
+     * A page of the user's playlists of a library in the server's order plus `replica`; each has `numItems`, its first 4
+     * items (for the cover) and `itemKeys` (every item, ids only). `limit` at most 20.
+     */
+    getPlaylists,
+    /** `{ serverConfigId, playlist, replica }`: the playlist without items, with `numItems`; null when nobody has it. */
+    getPlaylist,
+    /**
+     * A page of a playlist's items in its order, `{ libraryItemId, episodeId, libraryItem, episode }` each:
+     * `{ results, total, limit, page, found, replica }`; `limit` at most 100.
+     */
+    getPlaylistItems,
     /** The library native reconciles first. */
     async setCurrentLibrary({ libraryId }) {
       if (isWeb || !plugin.setCurrentLibrary) return

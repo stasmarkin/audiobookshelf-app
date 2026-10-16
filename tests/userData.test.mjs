@@ -286,7 +286,7 @@ async function component(path, sandboxExtra, ctxExtra) {
     .match(/<script>([\s\S]*?)<\/script>/)[1]
     .replace(/^import .*$/gm, '')
     .replace('export default', 'globalThis.component =')
-  const sandbox = { progressTarget, isCopyOfActiveServer, Dialog: { confirm: async () => ({ value: true }) }, AbsFileSystem: {}, AbsDownloader: {}, console: { ...console, log() {} }, ...sandboxExtra }
+  const sandbox = { progressTarget, isCopyOfActiveServer, requiresServer: {}, Dialog: { confirm: async () => ({ value: true }) }, AbsFileSystem: {}, AbsDownloader: {}, console: { ...console, log() {} }, ...sandboxExtra }
   vm.runInNewContext(script, sandbox)
   const def = sandbox.component
   const calls = []

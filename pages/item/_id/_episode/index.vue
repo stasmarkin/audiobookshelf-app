@@ -57,6 +57,7 @@ import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
+import requiresServer from '@/mixins/requiresServer'
 import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
 
 export default {
@@ -117,7 +118,7 @@ export default {
       startingDownload: false
     }
   },
-  mixins: [cellularPermissionHelpers],
+  mixins: [cellularPermissionHelpers, requiresServer],
   computed: {
     transformedDescription() {
       return this.parseDescription(this.description)
@@ -288,10 +289,12 @@ export default {
       }
 
       if (!this.isLocal) {
+        // Adding writes to the server: offline the item stays visible, disabled and labeled
         items.push({
           text: this.$strings.LabelAddToPlaylist,
           value: 'playlist',
-          icon: 'playlist_add'
+          icon: 'playlist_add',
+          ...(this.isServerOnline ? {} : { disabled: true, subtext: this.requiresServerLabel() })
         })
       }
 
@@ -501,7 +504,7 @@ export default {
         this.toggleFinished()
       } else if (action === 'discardProgress') {
         this.discardProgress()
-      } else if (action === 'playlist' && !this.isLocal) {
+      } else if (action === 'playlist' && !this.isLocal && this.isServerOnline) {
         this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode: this.episode }])
         this.$store.commit('globals/setShowPlaylistsAddCreateModal', true)
       } else if (action === 'remove_from_server' && this.serverEpisodeId && this.isAdminOrUp) {

@@ -20,8 +20,9 @@
 
         <ui-text-input-with-label v-model="newPlaylistName" :label="$strings.LabelName" />
         <div class="flex justify-end mt-6">
-          <ui-btn color="success" :loading="processing" class="w-full" @click.stop="submitCreatePlaylist">{{ $strings.ButtonCreate }}</ui-btn>
+          <ui-btn color="success" :loading="processing" :disabled="!isServerOnline" class="w-full" @click.stop="submitCreatePlaylist">{{ $strings.ButtonCreate }}</ui-btn>
         </div>
+        <p v-if="!isServerOnline" class="requires-server-label text-sm text-fg-muted text-center mt-2">{{ requiresServerLabel() }}</p>
       </div>
     </div>
 
@@ -29,7 +30,7 @@
     <div v-if="!showPlaylistNameInput" class="w-full overflow-y-auto overflow-x-hidden h-full max-h-[calc(100vh-176px)]">
       <div class="w-full h-full" v-show="!showPlaylistNameInput">
         <template v-for="playlist in sortedPlaylists">
-          <modals-playlists-playlist-row :key="playlist.id" :in-playlist="playlist.isItemIncluded" :playlist="playlist" @click="clickPlaylist" @close="show = false" />
+          <modals-playlists-playlist-row :key="playlist.id" :in-playlist="playlist.isItemIncluded" :playlist="playlist" :disabled="!isServerOnline" @click="clickPlaylist" @close="show = false" />
         </template>
         <div v-if="!playlists.length" class="flex h-full items-center justify-center">
           <p class="text-xl">{{ loading ? $strings.MessageLoading : $strings.MessageNoUserPlaylists }}</p>
@@ -38,16 +39,24 @@
     </div>
 
     <!-- create playlist btn -->
-    <div v-if="!showPlaylistNameInput" class="flex items-start justify-between h-20 pt-2 absolute bottom-0 left-0 w-full">
-      <ui-btn :loading="processing" color="success" class="w-full h-14 flex items-center justify-center" @click.stop="createPlaylist">
+    <div v-if="!showPlaylistNameInput" class="flex flex-col items-stretch h-20 pt-2 absolute bottom-0 left-0 w-full">
+      <ui-btn :loading="processing" :disabled="!isServerOnline" color="success" class="w-full h-14 flex items-center justify-center" @click.stop="createPlaylist">
         <p class="text-base">{{ $strings.ButtonCreateNewPlaylist }}</p>
+        <p v-if="!isServerOnline" class="requires-server-label text-xs">{{ requiresServerLabel() }}</p>
       </ui-btn>
     </div>
   </modals-fullscreen-modal>
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
+/** `$absData` lists at most 20 playlists a call (each carries its cover items). */
+const PLAYLISTS_PAGE = 20
+
+/** Adding, removing and creating write to the server: offline the list shows, the writes are disabled and labeled. */
 export default {
+  mixins: [requiresServer],
   props: {
     libraryItemId: String
   },
@@ -57,7 +66,8 @@ export default {
       newPlaylistName: '',
       playlists: [],
       processing: false,
-      loading: false
+      loading: false,
+      loadGeneration: 0
     }
   },
   watch: {
@@ -101,28 +111,39 @@ export default {
     }
   },
   methods: {
+    /** By `itemKeys`: every item of the playlist, while `items` holds only the first few for the cover. */
     checkIsItemInPlaylist(playlist, item) {
+      const keys = playlist.itemKeys || playlist.items || []
       if (item.episode) {
-        return playlist.items.some((i) => i.libraryItemId === item.libraryItem.id && i.episodeId === item.episode.id)
+        return keys.some((i) => i.libraryItemId === item.libraryItem.id && i.episodeId === item.episode.id)
       }
-      return playlist.items.some((i) => i.libraryItemId === item.libraryItem.id)
+      return keys.some((i) => i.libraryItemId === item.libraryItem.id)
     },
-    loadPlaylists() {
+    /** Every playlist of the library, a page at a time; only the latest read lands. */
+    async loadPlaylists() {
+      const generation = ++this.loadGeneration
+      const libraryId = this.currentLibraryId
       this.loading = true
-      this.$nativeHttp
-        .get(`/api/libraries/${this.currentLibraryId}/playlists`)
-        .then((data) => {
-          this.playlists = data.results || []
-        })
-        .catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error('Failed to load playlists')
-        })
-        .finally(() => {
-          this.loading = false
-        })
+      const collected = new Map()
+      try {
+        for (let page = 0; ; page++) {
+          const answer = await this.$absData.getPlaylists({ libraryId, limit: PLAYLISTS_PAGE, page })
+          if (generation !== this.loadGeneration) return
+          const results = answer?.results || []
+          results.forEach((playlist) => collected.set(playlist.id, playlist))
+          if (!results.length || (page + 1) * PLAYLISTS_PAGE >= (answer?.total || 0)) break
+        }
+        this.playlists = [...collected.values()]
+      } catch (error) {
+        if (generation !== this.loadGeneration) return
+        console.error('Failed', error)
+        this.$toast.error('Failed to load playlists')
+      } finally {
+        if (generation === this.loadGeneration) this.loading = false
+      }
     },
     async clickPlaylist(playlist) {
+      if (!this.isServerOnline) return
       await this.$hapticsImpact()
       if (playlist.isItemIncluded) {
         this.removeFromPlaylist(playlist)
@@ -131,7 +152,7 @@ export default {
       }
     },
     removeFromPlaylist(playlist) {
-      if (!this.selectedPlaylistItems.length) return
+      if (!this.isServerOnline || !this.selectedPlaylistItems.length) return
       this.processing = true
 
       const itemObjects = this.selectedPlaylistItems.map((pi) => ({ libraryItemId: pi.libraryItem.id, episodeId: pi.episode ? pi.episode.id : null }))
@@ -149,7 +170,7 @@ export default {
         })
     },
     addToPlaylist(playlist) {
-      if (!this.selectedPlaylistItems.length) return
+      if (!this.isServerOnline || !this.selectedPlaylistItems.length) return
       this.processing = true
 
       const itemObjects = this.selectedPlaylistItems.map((pi) => ({ libraryItemId: pi.libraryItem.id, episodeId: pi.episode ? pi.episode.id : null }))
@@ -167,10 +188,12 @@ export default {
         })
     },
     createPlaylist() {
+      if (!this.isServerOnline) return
       this.newPlaylistName = ''
       this.showPlaylistNameInput = true
     },
     async submitCreatePlaylist() {
+      if (!this.isServerOnline) return
       await this.$hapticsImpact()
       if (!this.newPlaylistName || !this.selectedPlaylistItems.length) {
         return
@@ -199,33 +222,23 @@ export default {
           this.processing = false
         })
     },
-    playlistAdded(playlist) {
-      if (!this.playlists.some((p) => p.id === playlist.id)) {
-        this.playlists.push(playlist)
-      }
-    },
-    playlistUpdated(playlist) {
-      const index = this.playlists.findIndex((p) => p.id === playlist.id)
-      if (index >= 0) {
-        this.playlists.splice(index, 1, playlist)
-      } else {
-        this.playlists.push(playlist)
-      }
-    },
-    playlistRemoved(playlist) {
-      this.playlists = this.playlists.filter((p) => p.id !== playlist.id)
+    /** Native changed this library's playlists (an add, a remove, a new one): read the list again while open. */
+    dataChanged(change) {
+      if (change?.scope !== 'catalog' || !(change.ids || []).includes(`playlists:${this.currentLibraryId}`)) return
+      this.loadPlaylists()
     },
     setListeners() {
-      this.$socket.$on('playlist_added', this.playlistAdded)
-      this.$socket.$on('playlist_updated', this.playlistUpdated)
-      this.$socket.$on('playlist_removed', this.playlistRemoved)
+      if (!this.stopDataChanged) this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
     },
     unsetListeners() {
-      this.$socket.$off('playlist_added', this.playlistAdded)
-      this.$socket.$off('playlist_updated', this.playlistUpdated)
-      this.$socket.$off('playlist_removed', this.playlistRemoved)
+      if (this.stopDataChanged) this.stopDataChanged()
+      this.stopDataChanged = null
+      // A read still running lands nowhere
+      this.loadGeneration++
     }
   },
-  mounted() {}
+  beforeDestroy() {
+    this.unsetListeners()
+  }
 }
 </script>

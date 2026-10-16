@@ -29,10 +29,10 @@ import { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } from '@/util
 
 /** Reads from the bridge are capped at 100 entities a call. */
 const MAX_PAGE_SIZE = 100
-/** Each collection brings up to 4 books for its cover: 20 collections stay within 100 items. */
-const MAX_COLLECTIONS_PAGE_SIZE = 20
+/** Each collection or playlist brings up to 4 items for its cover: 20 of them stay within 100 items. */
+const MAX_COVER_LIST_PAGE_SIZE = 20
 /** Tabs read from the catalog replica through $absData; the others still ask the server. */
-const CATALOG_ENTITIES = ['books', 'series', 'series-books', 'collections']
+const CATALOG_ENTITIES = ['books', 'series', 'series-books', 'collections', 'playlists']
 
 export default {
   props: {
@@ -285,6 +285,7 @@ export default {
       const request = { libraryId: this.currentLibraryId, sort: params.get('sort'), desc: params.get('desc') === '1', limit: this.booksPerFetch, page, sortingIgnorePrefix: !!this.sortingIgnorePrefix }
       if (this.entityName === 'series') return this.$absData.getSeries(request)
       if (this.entityName === 'collections') return this.$absData.getCollections({ libraryId: this.currentLibraryId, limit: this.booksPerFetch, page })
+      if (this.entityName === 'playlists') return this.$absData.getPlaylists({ libraryId: this.currentLibraryId, limit: this.booksPerFetch, page })
       return this.$absData.getLibraryItems({ ...request, filter: params.get('filter'), collapseseries: params.get('collapseseries') === '1' })
     },
     /** The downloaded copy of a server item; replicas of two accounts on one server share item ids. */
@@ -449,7 +450,7 @@ export default {
       this.bookshelfMarginLeft = (this.bookshelfWidth - this.entitiesPerShelf * this.totalEntityCardWidth) / 2
 
       const entitiesPerPage = this.shelvesPerPage * this.entitiesPerShelf
-      const maxPageSize = this.entityName === 'collections' ? MAX_COLLECTIONS_PAGE_SIZE : MAX_PAGE_SIZE
+      const maxPageSize = this.entityName === 'collections' || this.entityName === 'playlists' ? MAX_COVER_LIST_PAGE_SIZE : MAX_PAGE_SIZE
       this.booksPerFetch = Math.min(maxPageSize, Math.ceil(entitiesPerPage / 20) * 20) // Round up to the nearest 20
 
       if (this.totalEntities) {

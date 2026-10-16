@@ -73,6 +73,18 @@ class AbsDataWeb extends WebPlugin {
     return { serverConfigId: null, results: [], total: 0, limit, page, found: false, replica: { reconciledAt: null, complete: false } }
   }
 
+  async getPlaylists({ limit, page }) {
+    return { serverConfigId: null, results: [], total: 0, limit, page, replica: { reconciledAt: null, complete: false } }
+  }
+
+  async getPlaylist() {
+    return { serverConfigId: null, playlist: null, replica: { reconciledAt: null, complete: false } }
+  }
+
+  async getPlaylistItems({ limit, page }) {
+    return { serverConfigId: null, results: [], total: 0, limit, page, found: false, replica: { reconciledAt: null, complete: false } }
+  }
+
   async setCurrentLibrary() {}
 }
 

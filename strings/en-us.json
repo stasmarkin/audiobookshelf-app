@@ -621,6 +621,7 @@
   "ToastItemMarkedAsFinishedFailed": "Failed to mark as Finished",
   "ToastItemMarkedAsNotFinishedFailed": "Failed to mark as Not Finished",
   "ToastPlaylistCreateFailed": "Failed to create playlist",
+  "ToastPlaylistLoadFailed": "Could not open the playlist",
   "ToastPodcastCreateFailed": "Failed to create podcast",
   "ToastPodcastCreateSuccess": "Podcast created successfully",
   "ToastRSSFeedCloseFailed": "Failed to close RSS feed",

@@ -32,6 +32,7 @@
 </template>
 
 <script>
+import { trackCount } from '@/utils/catalogItem'
 
 export default {
   props: {
@@ -51,6 +52,8 @@ export default {
   computed: {
     itemUrl() {
       if (this.episodeId) return `/item/${this.libraryItem.id}/${this.episodeId}`
+      // Offline on a cold start the server item page has nothing to read; the downloaded copy has
+      if (this.localLibraryItem) return `/item/${this.libraryItem.id}?localLibraryItemId=${this.localLibraryItem.id}`
       return `/item/${this.libraryItem.id}`
     },
     libraryItem() {
@@ -80,10 +83,6 @@ export default {
     isPodcast() {
       return this.mediaType === 'podcast'
     },
-    tracks() {
-      if (this.episode) return []
-      return this.media.tracks || []
-    },
     itemTitle() {
       if (this.episode) return this.episode.title
       return this.mediaMetadata.title || ''
@@ -92,8 +91,9 @@ export default {
       if (this.episode) return []
       return this.mediaMetadata.authors || []
     },
+    /** A minified book (the catalog replica) has only `authorName`. */
     bookAuthorName() {
-      return this.bookAuthors.map((au) => au.name).join(', ')
+      return this.bookAuthors.map((au) => au.name).join(', ') || this.mediaMetadata.authorName || ''
     },
     authorName() {
       if (this.episode) return this.mediaMetadata.author
@@ -116,7 +116,7 @@ export default {
       return 50
     },
     showPlayBtn() {
-      return !this.isMissing && !this.isInvalid && (this.tracks.length || this.episode)
+      return !this.isMissing && !this.isInvalid && (!!this.episode || trackCount(this.libraryItem) > 0)
     },
     isOpenInPlayer() {
       if (this.localLibraryItem && this.localEpisode && this.$store.getters['getIsMediaStreaming'](this.localLibraryItem.id, this.localEpisode.id)) return true

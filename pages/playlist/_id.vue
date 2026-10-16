@@ -36,48 +36,58 @@
 <script>
 import { queueItemPayload, resolveItemProgress } from '@/utils/playbackQueue'
 import { downloadMissingItems } from '@/utils/bulkDownload'
+import { trackCount, fetchPlaylistItems } from '@/utils/catalogItem'
+import { createDebouncer } from '@/utils/catalogRefresh'
+
+/**
+ * The playlist with all its items ($absData: the replica, also offline), each with its downloaded copy of the active
+ * server (replicas of two accounts on one server share item ids); null when it is gone.
+ */
+async function readPlaylist({ $absData, $db }, id, activeServerConfigId) {
+  const answer = await $absData.getPlaylist({ id })
+  if (!answer?.playlist) return null
+  const items = await fetchPlaylistItems($absData, id, { serverConfigId: answer.serverConfigId })
+  if (!items) return null
+  const mediaTypes = [...new Set(items.map((item) => item.libraryItem?.mediaType).filter(Boolean))]
+  const localLibraryItems = (await Promise.all(mediaTypes.map((mediaType) => $db.getLocalLibraryItems(mediaType)))).flatMap((list) => list || [])
+  items.forEach((item) => {
+    const ino = item.libraryItem?.ino
+    const copy = localLibraryItems.find((lli) => {
+      if (activeServerConfigId && lli.serverConnectionConfigId !== activeServerConfigId) return false
+      return lli.libraryItemId === item.libraryItemId || (ino && lli.ino && lli.ino === ino)
+    })
+    if (!copy) return
+    if (item.episodeId) {
+      const localEpisode = copy.media?.episodes?.find((lep) => lep.serverEpisodeId === item.episodeId)
+      if (!localEpisode) return
+      item.localLibraryItem = copy
+      item.localEpisode = localEpisode
+    } else {
+      item.localLibraryItem = copy
+    }
+  })
+  return { ...answer.playlist, items }
+}
 
 export default {
-  async asyncData({ store, params, app, redirect, route }) {
-    if (!store.state.user.user) {
-      return redirect(`/connect?redirect=${route.path}`)
+  async asyncData({ store, params, app, redirect }) {
+    let playlist
+    try {
+      playlist = await readPlaylist(app, params.id, store.state.activeServerConfigId)
+    } catch (error) {
+      console.error('Failed to read the playlist', error)
+      return redirect('/bookshelf/playlists?error=playlist')
     }
-
-    const playlist = await app.$nativeHttp.get(`/api/playlists/${params.id}`).catch((error) => {
-      console.error('Failed', error)
-      return false
-    })
-
     if (!playlist) {
       return redirect('/bookshelf/playlists')
     }
-
-    // Lookup matching local items & episodes and attach to playlist items
-    if (playlist.items.length) {
-      const localLibraryItems = (await app.$db.getLocalLibraryItems(playlist.items[0].libraryItem.mediaType)) || []
-      if (localLibraryItems.length) {
-        playlist.items.forEach((playlistItem) => {
-          const matchingLocalLibraryItem = localLibraryItems.find((lli) => lli.libraryItemId === playlistItem.libraryItemId || (playlistItem.libraryItem?.ino && lli.ino && lli.ino === playlistItem.libraryItem.ino))
-          if (!matchingLocalLibraryItem) return
-          if (playlistItem.episode) {
-            const matchingLocalEpisode = matchingLocalLibraryItem.media.episodes?.find((lep) => lep.serverEpisodeId === playlistItem.episodeId)
-            if (matchingLocalEpisode) {
-              playlistItem.localLibraryItem = matchingLocalLibraryItem
-              playlistItem.localEpisode = matchingLocalEpisode
-            }
-          } else {
-            playlistItem.localLibraryItem = matchingLocalLibraryItem
-          }
-        })
-      }
-    }
-
     return {
       playlist
     }
   },
   data() {
     return {
+      readGeneration: 0,
       showMoreMenu: false,
       processing: false,
       selectedLibraryItem: null,
@@ -104,9 +114,9 @@ export default {
     playableItems() {
       return this.playlistItems.filter((item) => {
         const libraryItem = item.libraryItem
-        if (libraryItem.isMissing || libraryItem.isInvalid) return false
-        if (item.episode) return item.episode.audioFile
-        return libraryItem.media.tracks.length
+        if (!libraryItem || libraryItem.isMissing || libraryItem.isInvalid) return false
+        if (item.episodeId) return !!item.episode?.audioFile
+        return trackCount(libraryItem) > 0
       })
     },
     playerIsPlaying() {
@@ -183,14 +193,31 @@ export default {
       await this.$hapticsImpact()
       this.$eventBus.$emit('add-queue-source-to-queue', { sourceType: 'playlist', sourceId: this.playlist.id, items: this.playableItems })
     },
-    playlistUpdated(playlist) {
-      if (this.playlist.id !== playlist.id) return
-      this.playlist = playlist
+    /** Native changed this library's playlists or items: read the playlist again (debounced). */
+    dataChanged(change) {
+      const libraryId = this.playlist.libraryId
+      if (change?.scope !== 'catalog' || !libraryId) return
+      if (!(change.ids || []).some((topic) => topic === `playlists:${libraryId}` || topic === `items:${libraryId}`)) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(this.reload)
     },
-    playlistRemoved(playlist) {
-      if (this.playlist.id === playlist.id) {
-        this.$router.replace('/bookshelf/playlists')
+    /** Only the latest read of this playlist lands; a playlist that went away leaves for the tab. */
+    async reload() {
+      const generation = ++this.readGeneration
+      const id = this.playlist.id
+      let playlist
+      try {
+        playlist = await readPlaylist(this, id, this.$store.state.activeServerConfigId)
+      } catch (error) {
+        console.error('Failed to read the playlist again', error)
+        return
       }
+      if (this.isDestroyed || generation !== this.readGeneration || this.playlist.id !== id) return
+      if (!playlist) {
+        this.$router.replace('/bookshelf/playlists')
+        return
+      }
+      this.playlist = playlist
     },
     libraryChanged() {
       // Playlist contents are shown in the context of the selected library, so leave this page
@@ -200,13 +227,14 @@ export default {
   },
   mounted() {
     this.$eventBus.$on('library-changed', this.libraryChanged)
-    this.$socket.$on('playlist_updated', this.playlistUpdated)
-    this.$socket.$on('playlist_removed', this.playlistRemoved)
+    this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },
   beforeDestroy() {
+    this.isDestroyed = true
     this.$eventBus.$off('library-changed', this.libraryChanged)
-    this.$socket.$off('playlist_updated', this.playlistUpdated)
-    this.$socket.$off('playlist_removed', this.playlistRemoved)
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
   }
 }
 </script>

@@ -10,8 +10,10 @@
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem } from '@/plugins/capacitor'
 import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     value: Boolean,
     processing: Boolean,
@@ -50,6 +52,10 @@ export default {
     },
     userIsAdminOrUp() {
       return this.$store.getters['user/getIsAdminOrUp']
+    },
+    /** Playlist edits write to the server: offline the item stays visible, disabled and labeled. */
+    serverOnlyItem() {
+      return this.isServerOnline ? {} : { disabled: true, subtext: this.requiresServerLabel() }
     },
     moreMenuItems() {
       const items = []
@@ -93,7 +99,8 @@ export default {
         items.push({
           text: this.$strings.LabelAddToPlaylist,
           value: 'playlist',
-          icon: 'playlist_add'
+          icon: 'playlist_add',
+          ...this.serverOnlyItem
         })
 
         if (this.ereaderDeviceItems.length) {
@@ -110,7 +117,8 @@ export default {
         items.push({
           text: this.$strings.LabelRemoveFromPlaylist,
           value: 'removeFromPlaylist',
-          icon: 'playlist_remove'
+          icon: 'playlist_remove',
+          ...this.serverOnlyItem
         })
       }
 
@@ -291,6 +299,8 @@ export default {
           displayTitle: this.episode?.title || this.title,
           displayAuthor: this.mediaMetadata.authorName
         })
+      } else if ((action === 'playlist' || action === 'removeFromPlaylist') && !this.isServerOnline) {
+        return
       } else if (action === 'playlist') {
         this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode: this.episode }])
         this.$store.commit('globals/setShowPlaylistsAddCreateModal', true)

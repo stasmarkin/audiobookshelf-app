@@ -58,7 +58,6 @@ class ServerSocket extends EventEmitter {
     this.socket.on('auth_failed', this.onAuthFailed.bind(this))
     this.socket.on('user_updated', this.onUserUpdated.bind(this))
     this.socket.on('user_item_progress_updated', this.onUserItemProgressUpdated.bind(this))
-    this.socket.on('playlist_added', this.onPlaylistAdded.bind(this))
     CATALOG_EVENTS.forEach((event) => this.socket.on(event, (payload) => this.onCatalogEvent(event, payload)))
     this.socket.io.on('reconnect_attempt', this.onReconnectAttempt.bind(this))
     this.socket.io.on('reconnect_error', this.onReconnectError.bind(this))
@@ -154,13 +153,6 @@ class ServerSocket extends EventEmitter {
       await this.app.$absData.applyServerEvent({ event, payload: payload ?? {}, serverConfigId })
     } catch (error) {
       console.error(`[SOCKET] Could not apply ${event}`, error)
-    }
-  }
-
-  onPlaylistAdded() {
-    // Currently numUserPlaylists is only used for showing the playlist tab or not. Precise number is not necessary
-    if (!this.$store.state.libraries.numUserPlaylists) {
-      this.$store.commit('libraries/setNumUserPlaylists', 1)
     }
   }
 }

@@ -187,13 +187,13 @@ test('library tab reads books through $absData and is not gated by the live user
   assert.match(fetch, /if \(this\.readsCatalog\) \{/, 'books never take the server path')
   assert.match(shelf, /canLoad\(\) \{\n\s*return this\.readsCatalog \? !!this\.\$store\.getters\.getHasActiveServer : !!this\.user/)
   assert.match(shelf, /readsCatalog\(\) \{\n\s*return CATALOG_ENTITIES\.includes\(this\.entityName\)/)
-  assert.match(shelf, /const CATALOG_ENTITIES = \['books', 'series', 'series-books', 'collections'\]/)
+  assert.match(shelf, /const CATALOG_ENTITIES = \['books', 'series', 'series-books', 'collections', 'playlists'\]/)
   for (const gate of ['async init()', 'async retryPage(page)', 'scroll(e)', 'async resetEntities()']) {
     const body = shelf.slice(shelf.indexOf(gate), shelf.indexOf('\n    },', shelf.indexOf(gate)))
     assert.match(body, /this\.canLoad/, `${gate} is gated by canLoad`)
     assert.doesNotMatch(body, /this\.user\b/, `${gate} no longer needs the live user`)
   }
-  assert.match(shelf, /const maxPageSize = this\.entityName === 'collections' \? MAX_COLLECTIONS_PAGE_SIZE : MAX_PAGE_SIZE\n\s*this\.booksPerFetch = Math\.min\(maxPageSize,/)
+  assert.match(shelf, /const maxPageSize = this\.entityName === 'collections' \|\| this\.entityName === 'playlists' \? MAX_COVER_LIST_PAGE_SIZE : MAX_PAGE_SIZE\n\s*this\.booksPerFetch = Math\.min\(maxPageSize,/)
   assert.match(shelf, /const MAX_PAGE_SIZE = 100/)
 })
 
