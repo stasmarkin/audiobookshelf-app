@@ -270,8 +270,7 @@ export default {
         // An empty replica before the first sign-in has no library to read yet
         if (this.currentLibraryId) await this.$store.dispatch('libraries/fetch', notify ? this.currentLibraryId : { libraryId: this.currentLibraryId, onlyIfCurrent: true })
         // load switches away from a library that was removed or became inaccessible; pages must follow it
-        // With the library's id: a page of that library stays (a sign-in or reconnect is no library switch)
-        if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed', this.currentLibraryId)
+        if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
       })()
       this.initLibrariesRun = run
       try {

@@ -39,7 +39,7 @@
     </div>
 
     <!-- create playlist btn -->
-    <div v-if="!showPlaylistNameInput" class="flex flex-col items-stretch h-20 pt-2 absolute bottom-0 left-0 w-full">
+    <div v-if="!showPlaylistNameInput" class="flex flex-col items-stretch min-h-20 pt-2 pb-2 absolute bottom-0 left-0 w-full">
       <ui-btn :loading="processing" :disabled="!isServerOnline" color="success" class="w-full h-14 flex items-center justify-center" @click.stop="createPlaylist">
         <p class="text-base">{{ $strings.ButtonCreateNewPlaylist }}</p>
       </ui-btn>
