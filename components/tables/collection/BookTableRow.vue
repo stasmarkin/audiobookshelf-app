@@ -1,6 +1,6 @@
 <template>
   <div class="group-row w-full px-2 py-2 overflow-hidden relative">
-    <nuxt-link v-if="book" :to="`/item/${book.id}`" class="flex items-center w-full">
+    <nuxt-link v-if="book" :to="itemLink" class="flex items-center w-full">
       <div class="card-artwork h-full relative" :style="{ width: bookWidth + 'px' }">
         <covers-book-cover :library-item="book" :width="bookWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
       </div>
@@ -44,6 +44,11 @@ export default {
     },
     localLibraryItem() {
       return this.book.localLibraryItem
+    },
+    /** As the library cards: a downloaded book opens with its copy, which the item page reads without the server. */
+    itemLink() {
+      if (this.localLibraryItem) return `/item/${this.libraryItemId}?localLibraryItemId=${this.localLibraryItem.id}`
+      return `/item/${this.libraryItemId}`
     },
     media() {
       return this.book.media || {}

@@ -433,6 +433,21 @@ test('book cover placeholder shows the author of a minified book', () => {
   assert.equal(coverAuthor({}), '')
 })
 
+test('a downloaded book in a collection opens its downloaded copy', async () => {
+  const source = await read('../components/tables/collection/BookTableRow.vue')
+  assert.match(source, /<nuxt-link v-if="book" :to="itemLink"/)
+  const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
+  const component = new Function('trackCount', script)(trackCount)
+  const linkOf = (book) => {
+    const view = { book }
+    for (const [name, get] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: get.bind(view) })
+    return view.itemLink
+  }
+  // Offline on a cold start the server item page has nothing to read and leaves for the home page
+  assert.equal(linkOf({ id: 'li1', localLibraryItem: { id: 'local_li1' } }), '/item/li1?localLibraryItemId=local_li1')
+  assert.equal(linkOf({ id: 'li2' }), '/item/li2')
+})
+
 test('collection screens offer no server-only edits', async () => {
   const files = ['../pages/collection/_id.vue', '../components/tables/collection/CollectionBooksTable.vue', '../components/tables/collection/BookTableRow.vue', '../components/cards/LazyCollectionCard.vue']
   const writes = /\$nativeHttp\.(post|patch|put|delete)\b|\$axios\.\$?(post|patch|put|delete)\b/
