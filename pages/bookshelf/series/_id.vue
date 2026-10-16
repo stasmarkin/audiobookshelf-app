@@ -11,6 +11,7 @@ import { AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { buildQueueSourceItems } from '@/utils/playbackQueue'
 import { downloadMissingItems } from '@/utils/bulkDownload'
+import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 
 export default {
   async asyncData({ params, app, store, redirect }) {
@@ -145,22 +146,9 @@ export default {
       // Get the local folder to download to
       let localFolder = selectedLocalFolder
       if (!this.isIos && !localFolder) {
-        const localFolders = (await this.$db.getLocalFolders()) || []
-        console.log('Local folders loaded', localFolders.length)
-        const foldersWithMediaType = localFolders.filter((lf) => {
-          console.log('Checking local folder', lf.mediaType)
-          return lf.mediaType == this.mediaType
-        })
-        console.log('Folders with media type', this.mediaType, foldersWithMediaType.length)
-        const internalStorageFolder = foldersWithMediaType.find((f) => f.id === `internal-${this.mediaType}`)
-        if (!foldersWithMediaType.length) {
-          localFolder = {
-            id: `internal-${this.mediaType}`,
-            name: this.$strings.LabelInternalAppStorage,
-            mediaType: this.mediaType
-          }
-        } else if (foldersWithMediaType.length === 1 && internalStorageFolder) {
-          localFolder = internalStorageFolder
+        const saf = safFoldersFor((await this.$db.getLocalFolders()) || [], this.mediaType)
+        if (!saf.length) {
+          localFolder = await appStorageFolderFor(this, this.mediaType)
         } else {
           this.$store.commit('globals/showSelectLocalFolderModal', {
             mediaType: this.mediaType,

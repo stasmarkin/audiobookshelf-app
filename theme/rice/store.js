@@ -39,7 +39,7 @@ function parseHead(text) {
 }
 
 /** Validated legacy built-in id (the pre-RICE Preferences `theme` value), else 'dark'. */
-const legacyBuiltin = (value) => (S.BASE_IDS.includes(value) ? value : 'dark')
+const legacyBuiltin = (value) => (S.BUILTIN_IDS.includes(value) ? value : 'dark')
 
 /** The in-memory starting envelope before anything is persisted (revision 0 = not yet saved). */
 function initialEnvelope(lastBuiltin) {

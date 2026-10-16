@@ -3,7 +3,7 @@
  *
  * Thresholds follow WCAG 2.2: readable text 4.5:1, essential non-text (control boundaries, indicators, progress)
  * 3:1. A high-contrast request raises text to 7:1 and essential controls to 4.5:1. Ratios are never rounded before
- * comparison. Only RICE snapshots are evaluated; the four built-in themes are never "corrected".
+ * comparison. Only RICE snapshots are evaluated; the built-in themes are never "corrected".
  */
 const { contrast, blend } = require('./color')
 

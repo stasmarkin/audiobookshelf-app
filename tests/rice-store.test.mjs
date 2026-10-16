@@ -4,6 +4,7 @@
 // disk is outside what a unit test (or the store) can prove.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
@@ -53,6 +54,8 @@ test('fresh install: nothing persisted, RICE off, the legacy built-in is the sel
   assert.deepEqual(prefs.writes, [])
   const odd = await new PresetStore(fakePrefs({ theme: '<script>' })).load()
   assert.equal(odd.envelope.lastBuiltin, 'dark', 'unknown legacy values resolve to Dark')
+  const eink = await new PresetStore(fakePrefs({ theme: 'eink' })).load()
+  assert.deepEqual(eink.envelope.selection, { kind: 'builtin', id: 'eink' }, 'every built-in is a valid legacy value')
 })
 
 test('commit writes the inactive slot, verifies it, then the head; slots alternate and the legacy mirror follows', async () => {
@@ -190,4 +193,11 @@ test('presets hold appearance data only: no credentials, server or playback fiel
     assert.equal(S.validatePreset({ ...p, [key]: 'x' }).ok, false, key)
     assert.equal(S.validatePreset({ ...p, source: { ...p.source, [key]: 'x' } }).ok, false, key)
   }
+})
+
+test('the native store reader accepts exactly the built-ins the app can save', async () => {
+  const kt = await readFile(new URL('../android/app/src/main/java/app/absplus/android/appearance/AppearanceSnapshotReader.kt', import.meta.url), 'utf8')
+  const list = kt.match(/BUILTIN_IDS = setOf\(([^)]*)\)/)
+  assert.ok(list, 'AppearanceSnapshotReader.BUILTIN_IDS')
+  assert.deepEqual([...list[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]).sort(), [...S.BUILTIN_IDS].sort())
 })

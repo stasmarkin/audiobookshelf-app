@@ -36,12 +36,16 @@ import app.absplus.android.R
 import app.absplus.android.data.*
 import app.absplus.android.data.DeviceInfo
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.device.AndroidVolumeProbe
 import app.absplus.android.managers.DbManager
 import app.absplus.android.sync.SyncRuntime
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.LocalCopyReady
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
+import app.absplus.android.managers.LocalItemLocks
+import app.absplus.android.managers.LibraryItemDownloadStarter
+import app.absplus.android.device.AppStorage
 import app.absplus.android.managers.PlaybackRestoreStore
 import app.absplus.android.managers.PlaybackRestoreStore.LOG_TAG as RESTORE_TAG
 import app.absplus.android.managers.SleepTimerManager
@@ -53,6 +57,7 @@ import app.absplus.android.media.getUriToAbsIconDrawable
 import app.absplus.android.media.getUriToDrawable
 import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.services.StorageMoveService
 import com.google.android.exoplayer2.*
 import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
@@ -100,6 +105,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   private val tag = "PlayerNotificationServ"
+  private var keepPlaybackPin = false
 
   interface ClientEventEmitter {
     fun onPlaybackSession(playbackSession: PlaybackSession)
@@ -384,6 +390,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaProgressSyncer.reset()
     metadataScope.cancel()
     startScope.cancel()
+    // The player is released without closePlayback
+    LocalItemLocks.clearPlaybackPin()
 
     super.onDestroy()
   }
@@ -504,6 +512,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     transportControls = mediaController.transportControls
 
     mediaSessionConnector = MediaSessionConnector(mediaSession)
+    mediaManager.onPlaybackError = { msg -> Handler(Looper.getMainLooper()).post { mediaSessionConnector.setCustomErrorMessage(msg) } }
     // Without this, the connector's default metadata provider rebuilds metadata from the
     // player's own state on media item transitions/timeline changes, dropping the cover art
     // bitmap that PlaybackSession.resolveCoverBitmapAsync resolves separately.
@@ -515,7 +524,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               override fun getSupportedQueueNavigatorActions(player: Player): Long {
                 return PlaybackStateCompat.ACTION_PLAY_PAUSE or
                         PlaybackStateCompat.ACTION_PLAY or
-                        PlaybackStateCompat.ACTION_PAUSE
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
               }
 
               override fun getMediaDescription(
@@ -649,7 +660,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     registerReceiver(audioNoisyReceiver, noisyFilter)
 
     // attach player to playerNotificationManager
-    playerNotificationManager.setPlayer(mPlayer)
+    playerNotificationManager.setPlayer(notificationControls(mPlayer))
 
     mediaSessionConnector.setPlayer(mPlayer)
   }
@@ -664,6 +675,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   ) {
     // A resume hands out its action (and ends the wait) before it prepares; anything else replaces what waited
     if (awaiting.isAwaiting) stopAwaiting(CancelReason.OTHER_ITEM_STARTED)
+    mediaSessionConnector.setCustomErrorMessage(null)
     // Native playback entry points (for example Android Auto) can bypass the JS queue setup.
     val queuedItem = playlistQueue.getOrNull(playlistQueueIndex)
     if (queuedItem != null && !queuedItem.matches(playbackSession)) {
@@ -705,14 +717,20 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (playbackSession.mediaPlayer == PLAYER_CAST && playbackSession.isLocal) {
       DLog.w(tag, "Cannot cast local media item - switching player")
       currentPlaybackSession = null
-      switchToPlayer(false)
+      // The nested preparePlayer may replay an older session; the pin belongs to this local item
+      keepPlaybackPin = true
+      try {
+        switchToPlayer(false)
+      } finally {
+        keepPlaybackPin = false
+      }
       playbackSession.mediaPlayer = getMediaPlayer()
     }
 
     if (playbackSession.mediaPlayer == PLAYER_CAST) {
       // If cast-player is the first player to be used
       mediaSessionConnector.setPlayer(castPlayer)
-      playerNotificationManager.setPlayer(castPlayer)
+      playerNotificationManager.setPlayer(castPlayer?.let(::notificationControls))
     }
 
     currentPlaybackSession = playbackSession
@@ -737,7 +755,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (mediaItems.isEmpty()) {
       DLog.e(tag, "Invalid playback session no media items to play")
       currentPlaybackSession = null
+      if (!keepPlaybackPin) LocalItemLocks.clearPlaybackPin()
       return
+    }
+    if (playbackSession.localLibraryItem == null && !keepPlaybackPin && LocalItemLocks.clearPlaybackPin()) {
+      StorageMoveService.requestReconcile(this)
     }
 
     PlaybackRestoreStore.setResumable(this, true)
@@ -833,14 +855,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   private fun setMediaSessionConnectorCustomActions(playbackSession: PlaybackSession) {
-    val mediaItems = playbackSession.getMediaItems(ctx)
     val customActionProviders =
             mutableListOf(
                     JumpBackwardCustomActionProvider(),
                     JumpForwardCustomActionProvider(),
                     ChangePlaybackSpeedCustomActionProvider() // Will be pushed to far left
             )
-    if (playbackSession.mediaPlayer != PLAYER_CAST && mediaItems.size > 1) {
+    if (playbackSession.mediaPlayer != PLAYER_CAST) {
       customActionProviders.addAll(
               listOf(
                       SkipBackwardCustomActionProvider(),
@@ -1113,7 +1134,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     object Replaced : StartResult
   }
 
-  fun sourceResolver() = PlaybackSourceResolver({ DeviceManager.dbManager.getLocalLibraryItems() }, { DeviceManager.dbManager.getLocalLibraryItem(it) }) { item, episode ->
+  fun sourceResolver() = PlaybackSourceResolver({ DeviceManager.dbManager.getLocalLibraryItems() }, { DeviceManager.dbManager.getLocalLibraryItem(it) },
+          { !AppStorage.isAppStorage(it.folderId) || AppStorage.isAvailable(it.folderId, AndroidVolumeProbe(ctx)) }) { item, episode ->
     item.hasTracks(ctx, episode)
   }
 
@@ -1125,6 +1147,28 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val effective = if (getMediaPlayer() == PLAYER_CAST) request.copy(forceStream = true) else request
     val active = ActiveServer.current()?.id
     return withContext(Dispatchers.IO) { planStart(effective, active, sourceResolver()) }
+  }
+
+  /** [planFor] for a start: a copy is re-read under its item lock and pinned, so a storage move cannot commit under it. */
+  private suspend fun planToPlay(request: StartRequest): PlaybackSource =
+          planFor(request).let { if (it is PlaybackSource.Local) pinForPlayback(it) else it }
+
+  private suspend fun pinForPlayback(plan: PlaybackSource.Local): PlaybackSource = withContext(Dispatchers.IO) {
+    var source: PlaybackSource = PlaybackSource.NotFound("Local library item not found")
+    LocalItemLocks.readForPlayback(plan.item.id, { DeviceManager.dbManager.getLocalLibraryItem(plan.item.id) }) { item ->
+      val episode = plan.episode?.let { wanted -> (item.media as? Podcast)?.episodes?.find { it.id == wanted.id } }
+      source = if (plan.episode != null && episode == null) {
+        PlaybackSource.NotFound("Podcast episode not found")
+      } else {
+        when (LocalPlaybackAvailability.check(item, AndroidVolumeProbe(ctx)) { !item.isInvalid && item.hasTracks(ctx, episode) }) {
+          LocalAvailability.OK -> PlaybackSource.Local(item, episode)
+          LocalAvailability.STORAGE_UNAVAILABLE -> PlaybackSource.StorageUnavailable(item)
+          LocalAvailability.NO_FILES -> PlaybackSource.LocalBroken(item)
+        }
+      }
+      source is PlaybackSource.Local
+    }
+    source
   }
 
   /** [planFor] for a caller without a coroutine; [onSource] runs on main. */
@@ -1156,11 +1200,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       onResult(StartResult.Replaced)
       return true
     }
-    val plan = planFor(request)
+    val plan = planToPlay(request)
     if (replaced()) return@launch
     when (plan) {
       is PlaybackSource.NotFound -> onResult(StartResult.Failed(plan.message))
       is PlaybackSource.LocalBroken -> onResult(StartResult.Failed(NO_AUDIO_FILES_MESSAGE))
+      is PlaybackSource.StorageUnavailable -> onResult(StartResult.Failed(LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE))
       is PlaybackSource.Local -> {
         val startTime = request.startTime ?: localStartTime(plan.item, plan.episode, request.libraryItemId)
         if (replaced()) return@launch
@@ -1217,7 +1262,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   /** Android Auto's browse-tree item (server item or device copy) through [startItem]. */
   fun startWrapper(wrapper: LibraryItemWrapper, episode: PodcastEpisode?, playWhenReady: Boolean, playbackRate: Float?) {
     startItem(StartRequest.forWrapper(wrapper, episode, playWhenReady, playbackRate)) {
-      if (it is StartResult.Failed) DLog.e(tag, "Failed to play library item ${wrapper.id}: ${it.message}")
+      if (it !is StartResult.Failed) return@startItem
+      DLog.e(tag, "Failed to play library item ${wrapper.id}: ${it.message}")
+      if (it.message == LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE) mediaManager.onPlaybackError?.invoke(it.message)
     }
   }
 
@@ -1300,14 +1347,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val ticket = startGate.begin(playWhenReady)
 
     startScope.launch {
-      val plan = planFor(StartRequest.forQueueItem(nextItem, playWhenReady, playbackRate))
+      val plan = planToPlay(StartRequest.forQueueItem(nextItem, playWhenReady, playbackRate))
       // A newer start, Close or a server switch came first: leave everything to it
       if (startGate.admit(ticket) == null) {
         if (wakeLock.isHeld) wakeLock.release()
         return@launch
       }
       when (plan) {
-        is PlaybackSource.NotFound, is PlaybackSource.LocalBroken -> {
+        is PlaybackSource.NotFound, is PlaybackSource.LocalBroken, is PlaybackSource.StorageUnavailable -> {
           // Downloads can be removed after queue setup. Never fall back to streaming.
           DLog.e(tag, "advancePlaylistQueue: ${nextItem.libraryItemId} has no playable download ($plan)")
           if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
@@ -1494,13 +1541,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             if (useCastPlayer) {
               DLog.d(tag, "switchToPlayer: Using Cast Player " + castPlayer?.deviceInfo)
               mediaSessionConnector.setPlayer(castPlayer)
-              playerNotificationManager.setPlayer(castPlayer)
+              playerNotificationManager.setPlayer(castPlayer?.let(::notificationControls))
               setMediaSessionToCastVolume()
               castPlayer as CastPlayer
             } else {
               DLog.d(tag, "switchToPlayer: Using ExoPlayer")
               mediaSessionConnector.setPlayer(mPlayer)
-              playerNotificationManager.setPlayer(mPlayer)
+              playerNotificationManager.setPlayer(notificationControls(mPlayer))
               setMediaSessionToLocalVolume()
               mPlayer
             }
@@ -1779,9 +1826,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
     // A stream downloaded since plays the copy; a copy that is gone is not streamed instead. Read off the main thread
     startScope.launch {
-      when (val source = withContext(Dispatchers.IO) { sourceResolver().restoreSource(saved) }) {
+      val resolved = withContext(Dispatchers.IO) { sourceResolver().restoreSource(saved) }
+      when (val source = if (resolved is PlaybackSource.Local) pinForPlayback(resolved) else resolved) {
         is PlaybackSource.NotFound -> failRestore("downloaded item no longer exists (${source.message})", permanent = true)
         is PlaybackSource.LocalBroken -> failRestore("downloaded item has no playable files", permanent = true)
+        is PlaybackSource.StorageUnavailable -> failRestore("sd card not available", permanent = false)
         is PlaybackSource.Local -> {
           val session = source.item.getPlaybackSession(source.episode, getDeviceInfo(), localStartTime(source.item, source.episode))
           finishRestore(session, playWhenReady, playbackRate)
@@ -1907,19 +1956,39 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   fun skipToPrevious() {
-    currentPlayer.seekToPrevious()
+    navigateExternal(false)
   }
 
   fun skipToNext() {
-    currentPlayer.seekToNext()
+    navigateExternal(true)
+  }
+
+  private fun navigateExternal(forward: Boolean, mode: String? = deviceSettings.externalMediaNavigation) {
+    val session = currentPlaybackSession ?: return
+    if (!this::currentPlayer.isInitialized || currentPlayer.mediaItemCount == 0) return
+    val target = ExternalNavigation.target(mode, forward, session, getCurrentTime(),
+      currentPlayer.currentMediaItemIndex, currentPlayer.mediaItemCount,
+      deviceSettings.jumpForwardTimeMs, deviceSettings.jumpBackwardsTimeMs) ?: return
+    DLog.d(tag, "External navigation mode=${ExternalNavigation.normalize(mode)} forward=$forward target=$target")
+    // Use the established absolute-time seek, including its multi-file mapping and progress callbacks.
+    // Never use seekToNext(): at the end it can leave the current book/episode.
+    seekPlayer(target)
   }
 
   fun jumpForward() {
-    seekForward(deviceSettings.jumpForwardTimeMs)
+    navigateExternal(true, "time")
   }
 
   fun jumpBackward() {
-    seekBackward(deviceSettings.jumpBackwardsTimeMs)
+    navigateExternal(false, "time")
+  }
+
+  /** Notification FF/RW must use current settings, rather than the increments captured at player creation. */
+  internal fun notificationControls(player: Player): Player = object : ForwardingPlayer(player) {
+    override fun seekForward() = jumpForward()
+    override fun seekBack() = jumpBackward()
+    override fun getSeekForwardIncrement(): Long = deviceSettings.jumpForwardTimeMs
+    override fun getSeekBackIncrement(): Long = deviceSettings.jumpBackwardsTimeMs
   }
 
   fun seekForward(amount: Long) {
@@ -1943,6 +2012,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     startGate.invalidate()
     playlistQueue = emptyList()
     playlistQueueIndex = -1
+    if (LocalItemLocks.clearPlaybackPin()) StorageMoveService.requestReconcile(this)
     DLog.d(tag, "closePlayback")
     val config = DeviceManager.serverConnectionConfig
 
@@ -2085,6 +2155,49 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     browseTreeInitListeners.clear()
   }
 
+  /**
+   * The Android Auto root before the server load has finished: only entries whose children can be served without
+   * it. That is Downloads (local, allowed before firstLoadDone); Continue, Recent and Libraries are refused until
+   * the first load is done, so they appear with the refreshed root.
+   */
+  internal fun provisionalAutoRootItems(): MutableList<MediaBrowserCompat.MediaItem> =
+    BrowseTree(this, emptyList(), emptyList(), false)[AUTO_MEDIA_ROOT].orEmpty().map { item ->
+      MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
+    }.toMutableList()
+
+  /** Called by [autoRootLoader] on the load's thread once the server checks and libraries have finished. */
+  private fun onAndroidAutoItemsLoaded() {
+    AbsLogger.info(tag, "onLoadChildren: Loaded Android Auto data, initializing browseTree")
+    browseTree =
+            BrowseTree(
+                    this,
+                    mediaManager.serverItemsInProgress,
+                    mediaManager.serverLibraries,
+                    mediaManager.allLibraryPersonalizationsDone
+            )
+    onBrowseTreeInitialized()
+    firstLoadDone = true
+    if (mediaManager.serverLibraries.isNotEmpty()) {
+      AbsLogger.info(tag, "onLoadChildren: Android Auto fetching personalized data for all libraries")
+      mediaManager.populatePersonalizedDataForAllLibraries {
+        AbsLogger.info(tag, "onLoadChildren: Android Auto loaded personalized data for all libraries")
+        notifyChildrenChanged("/")
+      }
+
+      AbsLogger.info(tag, "onLoadChildren: Android Auto fetching in progress items")
+      mediaManager.initializeInProgressItems {
+        AbsLogger.info(tag, "onLoadChildren: Android Auto loaded in progress items")
+        notifyChildrenChanged("/")
+      }
+    }
+  }
+
+  private val autoRootLoader = AutoRootLoader(
+    load = { onDone -> mediaManager.loadAndroidAutoItems(onDone) },
+    onLoaded = { onAndroidAutoItemsLoaded() },
+    notifyRootChanged = { notifyChildrenChanged(AUTO_MEDIA_ROOT) }
+  )
+
   // Only allowing android auto or similar to access media browser service
   //  normal loading of audiobooks is handled in webview (not natively)
   private fun isValid(packageName: String, uid: Int): Boolean {
@@ -2140,8 +2253,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
     result.detach()
 
-    // Prevent crashing if app is restarted while browsing
-    if ((parentMediaId != DOWNLOADS_ROOT && parentMediaId != AUTO_MEDIA_ROOT) && !firstLoadDone) {
+    // Prevent crashing if app is restarted while browsing (nodes that need no server data are always served)
+    if (!servableBeforeFirstLoad(parentMediaId) && !firstLoadDone) {
       result.sendResult(null)
       return
     }
@@ -2243,45 +2356,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       result.sendResult(localBrowseItems)
     } else if (parentMediaId == AUTO_MEDIA_ROOT) {
       DLog.d(tag, "Trying to initialize browseTree.")
-      if (!this::browseTree.isInitialized || forceReloadingAndroidAuto) {
+      if (!this::browseTree.isInitialized || forceReloadingAndroidAuto || autoRootLoader.isLoading) {
         forceReloadingAndroidAuto = false
-        AbsLogger.info(tag, "onLoadChildren: Loading Android Auto items")
-        mediaManager.loadAndroidAutoItems {
-          AbsLogger.info(tag, "onLoadChildren: Loaded Android Auto data, initializing browseTree")
-
-          browseTree =
-                  BrowseTree(
-                          this,
-                          mediaManager.serverItemsInProgress,
-                          mediaManager.serverLibraries,
-                          mediaManager.allLibraryPersonalizationsDone
-                  )
-          onBrowseTreeInitialized()
-          val children =
-                  browseTree[parentMediaId]?.map { item ->
-                    DLog.d(tag, "Found top menu item: ${item.description.title}")
-                    MediaBrowserCompat.MediaItem(
-                            item.description,
-                            MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
-                    )
-                  }
-
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
-          firstLoadDone = true
-          if (mediaManager.serverLibraries.isNotEmpty()) {
-            AbsLogger.info(tag, "onLoadChildren: Android Auto fetching personalized data for all libraries")
-            mediaManager.populatePersonalizedDataForAllLibraries {
-              AbsLogger.info(tag, "onLoadChildren: Android Auto loaded personalized data for all libraries")
-              notifyChildrenChanged("/")
-            }
-
-            AbsLogger.info(tag, "onLoadChildren: Android Auto fetching in progress items")
-            mediaManager.initializeInProgressItems {
-              AbsLogger.info(tag, "onLoadChildren: Android Auto loaded in progress items")
-              notifyChildrenChanged("/")
-            }
-          }
-        }
+        // Answer at once with what needs no server (Downloads), instead of waiting for the server checks, which
+        // can take 3 s per unreachable server or about 30 s for a stalled one (Discussion #30). The full root
+        // follows through notifyChildrenChanged("/") when the load finishes; a load already running is reused.
+        AbsLogger.info(tag, "onLoadChildren: Loading Android Auto items (provisional root sent)")
+        result.sendResult(provisionalAutoRootItems())
+        autoRootLoader.reload()
       } else {
         DLog.d(tag, "Starting browseTree refresh")
         browseTree =

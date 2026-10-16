@@ -48,6 +48,7 @@
 import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem } from '@/plugins/capacitor'
+import { isAppStorageFolderId } from '@/utils/appStorage'
 
 export default {
   asyncData({ params, query }) {
@@ -74,8 +75,8 @@ export default {
     mediaType() {
       return this.folder?.mediaType
     },
-    isInternalStorage() {
-      return this.folder?.id.startsWith('internal-')
+    isAppStorage() {
+      return isAppStorageFolderId(this.folder?.id)
     },
     isScanning() {
       return this.scan?.phase === 'loading' || this.scan?.phase === 'checking'
@@ -92,7 +93,7 @@ export default {
       return this.$getString('LabelRescanComplete', [scan.found])
     },
     dialogItems() {
-      if (this.isInternalStorage) return []
+      if (this.isAppStorage) return []
       const items = []
       // Rescan matches book folders only, one scan per folder at a time
       if (this.mediaType === 'book' && !this.isScanning) {

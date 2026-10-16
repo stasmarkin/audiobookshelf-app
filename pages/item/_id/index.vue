@@ -81,7 +81,7 @@
         <div v-if="downloadItem" class="py-3">
           <!-- A stopped download says so and leads to its controls (Retry, Choose folder, Clear) -->
           <div v-if="downloadStopped" class="text-center">
-            <p class="text-lg">{{ downloadItemState === 'folderAccess' ? $strings.LabelDownloadFolderAccessLost : $strings.LabelDownloadFailed }}</p>
+            <p class="text-lg">{{ downloadItemState === 'folderAccess' ? $strings.LabelDownloadFolderAccessLost : downloadItemState === 'storageUnavailable' ? $strings.LabelDownloadStorageUnavailable : $strings.LabelDownloadFailed }}</p>
             <nuxt-link to="/downloading" class="underline text-sm">{{ $strings.ButtonOpenDownloads }}</nuxt-link>
           </div>
           <p v-else-if="downloadItem.itemProgress == 1" class="text-center text-lg">{{ $strings.MessageDownloadCompleteProcessing }}</p>
@@ -182,6 +182,7 @@ import { podcastSortOverrideKey, resolvePodcastEpisodeSort, sortPodcastEpisodes 
 import coverPresentation from '@/theme/coverPresentation'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { downloadState, DownloadState } from '@/utils/downloadState'
+import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 
 export default {
   async asyncData({ store, params, redirect, app, query }) {
@@ -220,6 +221,7 @@ export default {
   data() {
     return {
       processing: false,
+      itemMovedListener: null,
       showSelectLocalFolder: false,
       showMoreMenu: false,
       showFullscreenCover: false,
@@ -485,7 +487,7 @@ export default {
       return this.downloadItem ? downloadState(this.downloadItem) : null
     },
     downloadStopped() {
-      return this.downloadItemState === DownloadState.FAILED || this.downloadItemState === DownloadState.FOLDER_ACCESS
+      return this.downloadItemState === DownloadState.FAILED || this.downloadItemState === DownloadState.FOLDER_ACCESS || this.downloadItemState === DownloadState.STORAGE_UNAVAILABLE
     },
     episodes() {
       return this.media.episodes || []
@@ -682,22 +684,9 @@ export default {
       // Get the local folder to download to
       let localFolder = selectedLocalFolder
       if (!localFolder) {
-        const localFolders = (await this.$db.getLocalFolders()) || []
-        console.log('Local folders loaded', localFolders.length)
-        const foldersWithMediaType = localFolders.filter((lf) => {
-          console.log('Checking local folder', lf.mediaType)
-          return lf.mediaType == this.mediaType
-        })
-        console.log('Folders with media type', this.mediaType, foldersWithMediaType.length)
-        const internalStorageFolder = foldersWithMediaType.find((f) => f.id === `internal-${this.mediaType}`)
-        if (!foldersWithMediaType.length) {
-          localFolder = {
-            id: `internal-${this.mediaType}`,
-            name: this.$strings.LabelInternalAppStorage,
-            mediaType: this.mediaType
-          }
-        } else if (foldersWithMediaType.length === 1 && internalStorageFolder) {
-          localFolder = internalStorageFolder
+        const saf = safFoldersFor((await this.$db.getLocalFolders()) || [], this.mediaType)
+        if (!saf.length) {
+          localFolder = await appStorageFolderFor(this, this.mediaType)
         } else {
           this.$store.commit('globals/showSelectLocalFolderModal', {
             mediaType: this.mediaType,
@@ -709,7 +698,6 @@ export default {
         }
       }
 
-      console.log('Local folder', JSON.stringify(localFolder))
       let startDownloadMessage = `Start download for "${this.title}" with ${this.numTracks} audio track${this.numTracks == 1 ? '' : 's'} to folder ${localFolder.name}?`
       if (!this.isIos && this.showRead) {
         if (this.numTracks > 0) {
@@ -744,6 +732,14 @@ export default {
     newLocalLibraryItem(item) {
       if (item.libraryItemId == this.libraryItemId) {
         console.log('New local library item', item.id)
+        this.$set(this.libraryItem, 'localLibraryItem', item)
+      }
+    },
+    onLocalLibraryItemMoved(item) {
+      if (!this.libraryItem) return
+      if (this.isLocal && item.id === this.libraryItem.id) {
+        this.libraryItem = item
+      } else if (this.libraryItem.localLibraryItem?.id === item.id) {
         this.$set(this.libraryItem, 'localLibraryItem', item)
       }
     },
@@ -833,8 +829,16 @@ export default {
       await this.loadServerLibraryItem()
     }
     this.init()
+    const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
+    // Left the page before the listener was registered
+    if (this._isDestroyed) {
+      listener?.remove()
+      return
+    }
+    this.itemMovedListener = listener
   },
   beforeDestroy() {
+    this.itemMovedListener?.remove()
     window.removeEventListener('resize', this.windowResized)
     this.$eventBus.$off('library-changed', this.libraryChanged)
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
