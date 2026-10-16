@@ -814,3 +814,48 @@ test('a downloaded episode in a playlist opens its copy', async () => {
   assert.equal(row({ ...entry(podcast, 'ep1'), localLibraryItem: { id: 'local_pod' }, localEpisode: { id: 'local_ep1' } }).itemUrl, '/item/local_pod/local_ep1')
   assert.equal(row(entry(podcast, 'ep1')).itemUrl, '/item/pod1/ep1')
 })
+
+test('a write in the add-to-playlist list is not undone by an older list read', async () => {
+  const held = []
+  const modal = addCreateModal({
+    getPlaylists: (args) => new Promise((resolve) => held.push(() => resolve(playlistsAnswer(args)))),
+    answer: () => expanded('p49', ['other0', 'li9'])
+  })
+  const load = modal.view.loadPlaylists()
+  await flush()
+  assert.equal(modal.view.loading, true)
+  await modal.view.addToPlaylist({ id: 'p49' })
+  await flush()
+  assert.equal(modal.view.loading, false)
+  held.shift()()
+  await load
+  await flush()
+  const p49 = modal.view.sortedPlaylists.find((p) => p.id === 'p49')
+  assert.equal(p49.isItemIncluded, true, 'the write stays')
+  assert.equal(modal.view.loading, false)
+})
+
+test('a removed item is not brought back by a read of the replica that has not caught up', async () => {
+  let items = [entry(book('li0')), entry(book('li1'))]
+  const pending = []
+  let hold = false
+  const absData = {
+    getPlaylist: async ({ id }) => ({ serverConfigId: 'a', playlist: { id, libraryId: 'l1', name: 'Мой', numItems: items.length }, replica: replica() }),
+    getPlaylistItems: async ({ limit, page }) => {
+      const answer = { serverConfigId: 'a', results: items.slice(page * limit, page * limit + limit), total: items.length, limit, page, found: true, replica: replica() }
+      return hold ? new Promise((resolve) => pending.push(() => resolve(answer))) : answer
+    }
+  }
+  const page = playlistPage({ absData })
+  const view = await page.mount()
+  hold = true
+  const running = view.reload()
+  await flush()
+  page.send({ scope: 'catalog', ids: ['items:l1'] })
+  assert.equal(page.timers.length, 1)
+  view.itemRemoved({ libraryItemId: 'li0', episodeId: null })
+  assert.equal(page.timers.length, 0, 'a due re-read is dropped')
+  pending.shift()()
+  await running
+  assert.deepEqual(view.playlist.items.map((i) => i.libraryItemId), ['li1'], 'the running read lands nowhere')
+})

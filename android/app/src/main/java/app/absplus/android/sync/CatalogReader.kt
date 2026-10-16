@@ -115,11 +115,8 @@ class CatalogReader(
   suspend fun library(sc: String, id: String): JSONObject {
     val library = db.libraries().get(sc, id)
     val state = library?.let { db.libraryState().get(sc, id) }
-    // As the tab lists them: a playlist none of whose items the user can reach is not counted
-    val playlists = library?.let {
-      val counts = db.playlists().counts(sc, id).associateBy { it.playlistId }
-      db.playlists().forLibrary(sc, id).count { shown(counts[it.id]) }
-    } ?: 0
+    // Every playlist, as the server's getNumPlaylistsForUserAndLibrary; only a change of this count announces library:<id>
+    val playlists = library?.let { db.playlists().count(sc, id) } ?: 0
     val numUserPlaylists = if (state?.playlistsReconciledAt != null) playlists else maxOf(playlists, library?.numUserPlaylists ?: 0)
     return JSONObject().put("serverConfigId", sc)
             .put("library", library?.let { JSONObject(it.json) } ?: JSONObject.NULL)

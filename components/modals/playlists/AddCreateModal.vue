@@ -234,6 +234,9 @@ export default {
      */
     applyServerPlaylist(playlist) {
       if (!playlist?.id) return
+      // A list read still running started before the write: its answer would put the old playlist back
+      this.loadGeneration++
+      this.loading = false
       const entry = playlistListEntry(playlist)
       const index = this.playlists.findIndex((p) => p.id === entry.id)
       if (!entry.numItems) {

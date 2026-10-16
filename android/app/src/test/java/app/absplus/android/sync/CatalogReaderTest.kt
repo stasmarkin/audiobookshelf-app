@@ -799,8 +799,8 @@ class CatalogReaderTest {
     assertEquals("until the playlists were read, the server's count from the library read", 5,
             runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
     runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, null, null, null, 70L, null)) }
-    assertEquals("as the tab lists them: not the one without reachable items", 2, runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
-    runBlocking { db.playlists().deleteByIds("srv", listOf("p1", "p2")) }
+    assertEquals("every playlist, as the server counts them, also one without reachable items", 3, runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
+    runBlocking { db.playlists().deleteByIds("srv", listOf("p1", "p2", "hidden")) }
     assertEquals(0, runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
   }
 
