@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Discord
-    url: https://discord.gg/HQgCbd6E75
-    about: Ask questions, get help troubleshooting, and join the Abs community here.
+  - name: Report a security vulnerability privately
+    url: https://github.com/ADD-OCD/audiobookshelfplus-app/security/advisories/new
+    about: Keep vulnerability details out of public Issues, PRs, and Discussions.
+  - name: Audiobookshelf+ questions and support
+    url: https://github.com/ADD-OCD/audiobookshelfplus-app/discussions
+    about: Ask questions and discuss Audiobookshelf+ here. Do not post private security reports.

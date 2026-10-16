@@ -2,4 +2,6 @@
 <paths>
   <files-path name="downloads" path="downloads/" />
   <cache-path name="diagnostics_export" path="diagnostics-export/" />
+  <!-- SD card covers are served from validated copies here, never from the card itself (M02) -->
+  <cache-path name="sd_covers" path="sd-covers/" />
 </paths>

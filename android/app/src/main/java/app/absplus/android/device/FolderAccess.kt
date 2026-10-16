@@ -17,6 +17,9 @@ import com.anggrayudi.storage.SimpleStorage
  * at once as "Lost access" and made Local Folders report "Folder permissions failed" for working
  * folders. The persisted tree grant covers folders without a resolvable path, and the folder itself
  * must still exist and be writable (a grant outlives a deleted folder).
+ *
+ * App storage needs no grant: internal storage is always writable, an SD card folder while its volume
+ * is mounted and writable.
  */
 object FolderAccess {
   /** The Android checks, behind an interface so the rules can be tested without storage. */
@@ -29,8 +32,8 @@ object FolderAccess {
     fun folderWritable(contentUrl: String): Boolean
   }
 
-  fun canWrite(folder: LocalFolder, probe: Probe): Boolean {
-    if (folder.id.startsWith("internal-")) return true
+  fun canWrite(folder: LocalFolder, probe: Probe, volumes: VolumeProbe): Boolean {
+    if (AppStorage.isAppStorage(folder.id)) return AppStorage.isAvailable(folder, volumes)
     if (folder.contentUrl.isEmpty()) return false
     val granted =
             (folder.absolutePath.isNotEmpty() && probe.pathAccess(folder.absolutePath)) ||
@@ -46,9 +49,9 @@ object FolderAccess {
           savedFolders.firstOrNull { it.contentUrl == folderUrl }
                   ?: LocalFolder("unsaved", "", folderUrl, "", "", "", "")
 
-  fun canWrite(context: Context, folder: LocalFolder): Boolean =
+  fun canWrite(context: Context, folder: LocalFolder, volumes: VolumeProbe = AndroidVolumeProbe(context)): Boolean =
           try {
-            canWrite(folder, AndroidProbe(context))
+            canWrite(folder, AndroidProbe(context), volumes)
           } catch (e: Exception) {
             AbsLogger.error("FolderAccess", "Could not check access to \"${folder.name}\": ${e.message}")
             false

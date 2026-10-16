@@ -49,6 +49,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
   var serverLibraries = listOf<Library>()
 
   var userSettingsPlaybackRate:Float? = null
+  var onPlaybackError: ((String) -> Unit)? = null
 
   // Android Auto browses on the media browser service main thread, so the server pings
   // and authorize call must not run there or they block it and trigger an ANR

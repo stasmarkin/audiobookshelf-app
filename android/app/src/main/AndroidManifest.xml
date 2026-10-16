@@ -116,6 +116,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".services.StorageMoveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Installer status for in-app updates; only the app's own PendingIntent reaches it -->
         <receiver
           android:name=".updater.UpdateInstallReceiver"

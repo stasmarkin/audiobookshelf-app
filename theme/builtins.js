@@ -161,9 +161,51 @@ const llama = {
   }
 }
 
+// E-ink: paper white and ink black with two grays far apart, because e-paper renders mid-tones, tints and translucency as
+// dither (worse on color Kaleido panels). States are ink too: on e-paper they read by icon, label and shape, and colored
+// fills dither. Cover art keeps its colors (`presentation.cover-color: 'theme'` only stops chrome from being tinted by it).
+const EINK_INK = [0, 0, 0]
+const EINK_PAPER = [255, 255, 255]
+const EINK_LIGHT_GRAY = [204, 204, 204] // tracks, selected rows and segments (1.6:1 to paper, 13:1 to ink)
+const EINK_DARK_GRAY = [85, 85, 85] // secondary text (7.5:1 on paper)
+const eink = {
+  id: 'eink',
+  labelKey: 'LabelThemeEink',
+  colorScheme: 'light',
+  tokens: {
+    'surface.base': EINK_PAPER,
+    'surface.content': EINK_PAPER,
+    'surface.raised': EINK_PAPER,
+    'surface.hover': EINK_LIGHT_GRAY,
+    'surface.recessed': EINK_PAPER,
+    'text.default': EINK_INK,
+    'text.primary': EINK_INK,
+    'text.muted': EINK_DARK_GRAY,
+    'border.default': EINK_INK,
+    'control.toggle': EINK_PAPER,
+    'control.toggle-selected': EINK_LIGHT_GRAY,
+    'progress.track': EINK_LIGHT_GRAY,
+    'progress.buffered': EINK_LIGHT_GRAY,
+    'progress.played': EINK_INK,
+    'overlay.item-header': solid(EINK_PAPER),
+    'overlay.player': solid(EINK_PAPER),
+    'overlay.mini-player': solid(EINK_PAPER),
+    'accent.primary': EINK_INK,
+    'state.success': EINK_INK,
+    'state.success-strong': EINK_INK,
+    'state.success-action': EINK_INK,
+    'state.warning': EINK_INK,
+    'state.error': EINK_INK,
+    'state.info': EINK_INK,
+    ...systemBars,
+    'presentation.finish': 'eink',
+    'presentation.cover-color': 'theme'
+  }
+}
+
 const DEFAULT_THEME_ID = 'dark'
 
-// Order shown in Settings (Black, Dark, Light as before, then LLAMA)
-const BUILTIN_THEMES = [black, dark, light, llama]
+// Order shown in Settings (Black, Dark, Light as before, then LLAMA, then E-ink)
+const BUILTIN_THEMES = [black, dark, light, llama, eink]
 
 module.exports = { BUILTIN_THEMES, DEFAULT_THEME_ID }

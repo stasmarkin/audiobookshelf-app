@@ -7,6 +7,7 @@
  * are integer channels, everything else is a fixed enum, so a record can't inject selectors, URLs or markup.
  */
 const { TOKENS } = require('../tokens')
+const { BUILTIN_THEMES } = require('../builtins')
 const { isRgb } = require('./color')
 
 const SCHEMA_VERSION = 1
@@ -14,7 +15,9 @@ const TOKEN_SCHEMA_VERSION = 1
 const PRESET_FORMAT = 'absplus-rice-preset'
 const STORE_FORMAT = 'absplus-rice-store'
 
+// BASE_IDS anchor custom snapshots; BUILTIN_IDS are what can be selected. E-ink has no custom base: its finish isn't an option
 const BASE_IDS = Object.freeze(['dark', 'black', 'light', 'llama'])
+const BUILTIN_IDS = Object.freeze(BUILTIN_THEMES.map((t) => t.id))
 const STARTER_IDS = Object.freeze(['catppuccin-mocha', 'catppuccin-latte', 'dracula', 'nord', 'gruvbox-dark', 'tokyo-night', 'rose-pine', 'solarized-dark', 'solarized-light', 'everforest-dark'])
 const DEVICE_MODES = Object.freeze(['follow', 'dark'])
 const SOURCE_KINDS = Object.freeze(['builtin', 'starter', 'device', 'github', 'manual'])
@@ -115,7 +118,7 @@ function checkSource(c, value, path) {
   if (!isPlainObject(value)) return c.fail(path, 'not a plain object')
   switch (value.kind) {
     case 'builtin':
-      return c.keys(value, path, ['kind', 'id']) && c.oneOf(value.id, `${path}.id`, BASE_IDS)
+      return c.keys(value, path, ['kind', 'id']) && c.oneOf(value.id, `${path}.id`, BUILTIN_IDS)
     case 'starter':
       return c.keys(value, path, ['kind', 'id']) && c.oneOf(value.id, `${path}.id`, STARTER_IDS)
     case 'device':
@@ -170,7 +173,7 @@ function checkSelection(c, value, path) {
   if (!isPlainObject(value)) return c.fail(path, 'not a plain object')
   switch (value.kind) {
     case 'builtin':
-      return c.keys(value, path, ['kind', 'id']) && c.oneOf(value.id, `${path}.id`, BASE_IDS)
+      return c.keys(value, path, ['kind', 'id']) && c.oneOf(value.id, `${path}.id`, BUILTIN_IDS)
     case 'starter':
       return c.keys(value, path, ['kind', 'id']) && c.oneOf(value.id, `${path}.id`, STARTER_IDS)
     case 'preset':
@@ -202,7 +205,7 @@ function checkEnvelope(c, value, path = 'store') {
   ok = c.oneOf(value.schemaVersion, `${path}.schemaVersion`, [SCHEMA_VERSION]) && ok
   ok = (Number.isSafeInteger(value.revision) && value.revision > 0) || c.fail(`${path}.revision`, 'bad revision')
   ok = c.oneOf(value.riceEnabled, `${path}.riceEnabled`, [true, false]) && ok
-  ok = c.oneOf(value.lastBuiltin, `${path}.lastBuiltin`, BASE_IDS) && ok
+  ok = c.oneOf(value.lastBuiltin, `${path}.lastBuiltin`, BUILTIN_IDS) && ok
   ok = checkSelection(c, value.selection, `${path}.selection`) && ok
   if (value.rememberedRiceSelection !== null) ok = checkSelection(c, value.rememberedRiceSelection, `${path}.rememberedRiceSelection`) && ok
   if (!Array.isArray(value.presets) || value.presets.length > LIMITS.presets) ok = c.fail(`${path}.presets`, 'bad preset list')
@@ -263,6 +266,7 @@ module.exports = {
   PRESET_FORMAT,
   STORE_FORMAT,
   BASE_IDS,
+  BUILTIN_IDS,
   STARTER_IDS,
   DEVICE_MODES,
   SOURCE_KINDS,
