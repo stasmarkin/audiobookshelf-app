@@ -18,8 +18,17 @@ be) in the official app.
 
 ### Latest release
 
-**[Audiobookshelf+ v0.18.2](https://github.com/ADD-OCD/audiobookshelfplus-app/releases/tag/v0.14.2-beta-plus-v0.18.2)** — LLAMA landscape cover frame fix
-([download the APK](https://github.com/ADD-OCD/audiobookshelfplus-app/releases/download/v0.14.2-beta-plus-v0.18.2/audiobookshelf-plus-v0.18.2-release.apk)). [CHANGELOG.md](CHANGELOG.md) lists the changes.
+**[Audiobookshelf+ v0.19.0](https://github.com/ADD-OCD/audiobookshelfplus-app/releases/tag/v0.14.2-beta-plus-v0.19.0)** — Podcast auto downloads, SD card storage, E-ink and Bluetooth controls
+([download the APK](https://github.com/ADD-OCD/audiobookshelfplus-app/releases/download/v0.14.2-beta-plus-v0.19.0/audiobookshelf-plus-v0.19.0-release.apk)). [CHANGELOG.md](CHANGELOG.md) lists the changes.
+
+New in v0.19.0:
+- Automatic podcast downloads, with a managed or keep-all choice per podcast, Wi-Fi and charging limits.
+- Downloads on a removable SD card (Settings → Download storage), with verified, restart-safe moves.
+- Interrupted downloads continue where they stopped; the Downloads screen says why a download waits.
+- Bluetooth / external media controls: Next and Previous skip by time, chapters or audio files (Settings → Playback).
+- E-ink theme, Android reduced-motion support and an optional once-a-minute player.
+- Readable sort arrows and check marks on light themes; security and dependency updates.
+- After installing v0.19.0, do not go back to an earlier version (see the changelog).
 
 New in v0.18.2:
 - LLAMA full player in landscape: the cover's frame fits the cover, sits on the bottom edge and stays below the top
@@ -60,9 +69,14 @@ New in v0.16.0 ([announcement](https://github.com/ADD-OCD/audiobookshelfplus-app
 - Fixed progress being saved to the wrong book during continuous playback.
 - Fixed offline listening progress being overwritten when reconnecting.
 - Fixed playlist items restarting from 0:00 when their progress was only on the server.
+- Choose what Bluetooth, car, watch and lock-screen Next/Previous do: skip by time, chapters or audio files.
+- Per-podcast episode order, and an optional once-a-minute player for e-paper screens.
 
 **Downloads and local files**
 - Download controls: each download's state in words, with Retry, Cancel and Clear.
+- Automatic podcast downloads with Wi-Fi/charging limits and a managed or keep-all choice per podcast.
+- Downloads on a removable SD card, moved and verified file by file.
+- Interrupted downloads continue where they stopped after Android closes the app.
 - A downloaded book shows as downloaded in every library it appears in.
 - Rescan Folder links books already on the phone to the right library, without downloading them again.
 - "Download Series" downloads in series order.
@@ -73,6 +87,7 @@ New in v0.16.0 ([announcement](https://github.com/ADD-OCD/audiobookshelfplus-app
 - Optional LLAMA theme, a late-1990s audio-equipment look (Settings → Theme), including the home screen widget.
 - Optional RICE customization (Settings → Appearance): starter palettes, personal presets, system colors and GitHub
   palette imports, including the home screen widget.
+- E-ink theme for e-paper screens, and the app follows Android's "Remove animations" setting.
 - Bigger, clearer home screen widget buttons.
 - Keyboard-friendly connection and login screens.
 - Its own name and icon, so it installs alongside the official app.
@@ -104,9 +119,9 @@ This fork: [github.com/ADD-OCD/audiobookshelfplus-app](https://github.com/ADD-OC
 
 [Official project repo: github.com/advplyr/audiobookshelf](https://github.com/advplyr/audiobookshelf) or the project site [audiobookshelf.org](https://audiobookshelf.org)
 
-Join the official community on [discord](https://discord.gg/pJsjuNCKRq) — this fork is not
-supported there; use this repo's [Discussions](https://github.com/ADD-OCD/audiobookshelfplus-app/discussions)
-instead for fork-specific problems.
+For Audiobookshelf+ questions and support, use this repository's [Discussions](https://github.com/ADD-OCD/audiobookshelfplus-app/discussions).
+Report bugs and request features in [Issues](https://github.com/ADD-OCD/audiobookshelfplus-app/issues), and report
+security vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Audiobookshelf+ has no Discord server.
 
 **Requires an Audiobookshelf server to connect with**
 

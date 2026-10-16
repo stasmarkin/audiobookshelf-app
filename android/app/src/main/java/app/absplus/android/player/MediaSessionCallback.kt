@@ -17,6 +17,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   private var mediaButtonClickCount: Int = 0
   private var mediaButtonClickTimeout: Long = 1000  //ms
+  private val navigationKeys = ExternalNavigationKeys()
 
   override fun onPrepare() {
     DLog.d(tag, "ON PREPARE MEDIA SESSION COMPAT")
@@ -173,6 +174,19 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
       DLog.d(tag, "handleCallMediaButton keyEvent = $keyEvent | action ${keyEvent?.action}")
 
+      if (keyEvent != null && navigationKeys.isNavigation(keyEvent.keyCode)) {
+        if (navigationKeys.shouldAct(keyEvent)) {
+          when (keyEvent.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_NEXT -> onSkipToNext()
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> onSkipToPrevious()
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> onFastForward()
+            KeyEvent.KEYCODE_MEDIA_REWIND -> onRewind()
+          }
+        }
+        // Consume both DOWN and UP. Returning false lets the framework dispatch the same press again.
+        return true
+      }
+
       // Widget button intent is only sending the action down event
       if (keyEvent?.action == KeyEvent.ACTION_DOWN) {
         DLog.d(tag, "handleCallMediaButton: key action_down for ${keyEvent.keyCode}")
@@ -190,14 +204,6 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
               }
               handleMediaButtonClickCount()
             }
-          }
-          KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-            DLog.d(tag, "handleCallMediaButton: Media Fast Forward")
-            playerNotificationService.jumpForward()
-          }
-          KeyEvent.KEYCODE_MEDIA_REWIND -> {
-            DLog.d(tag, "handleCallMediaButton: Media Rewind")
-            playerNotificationService.jumpBackward()
           }
         }
       }
@@ -226,12 +232,6 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
             DLog.d(tag, "handleCallMediaButton: Media Pause")
             if (0 == mediaButtonClickCount) playerNotificationService.pause()
             handleMediaButtonClickCount()
-          }
-          KeyEvent.KEYCODE_MEDIA_NEXT -> {
-            playerNotificationService.jumpForward()
-          }
-          KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-            playerNotificationService.jumpBackward()
           }
           KeyEvent.KEYCODE_MEDIA_STOP -> {
             playerNotificationService.pause()

@@ -49,6 +49,17 @@ How the app signs in to an Audiobookshelf server and renews an expired access to
 - Native requests carry an `AuthTag` (connection id, token, generation). The generation is bumped on logout, on a server switch and when the active connection is removed. A request sent before then isn't retried, and a 401 always renews the connection the request was sent to, never the one active at the time of the 401.
 - JS invalidates `$authRenewal` on the `user/logout` mutation and when `user/setServerConnectionConfig` changes the connection. `onTokenRefresh` and `onTokenRefreshFailure` events carry the connection id and are ignored for a connection that isn't the signed-in one.
 
+**Refresh redirects (R01).** Renewal sends the saved connection's refresh token only to its original
+`address + /auth/refresh` endpoint, parsed by the existing HTTP client. Native renewal derives a
+client with both HTTP and protocol redirects disabled; the browser-development fallback uses
+Fetch `redirect: 'error'`. No `Location` is followed, including same-origin, relative, cross-origin,
+protocol-changing or chained redirects. A redirect is a recoverable `transient` failure, not a
+token rejection: credentials remain stored. Native diagnostics explain that the direct server
+address must be configured before retrying, without logging the address, Location or credentials.
+Configure the final server URL (including the reverse-proxy subpath); a proxy should serve refresh
+there directly. Direct HTTP and HTTPS renewal, existing URL parsing, single-flight behavior and
+same-owner retries are unchanged. General API and download redirect policies are unchanged.
+
 **Timeouts.**
 - OkHttp's 15-second connect/read/write timeouts bound the native refresh.
 - The JS coordinator gives up after 30 seconds (`AUTH_RENEWAL_TIMEOUT_MS`) as a backstop. A native refresh still running then is joined by the next renewal.

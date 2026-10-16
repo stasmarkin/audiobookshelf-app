@@ -57,6 +57,7 @@ import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
+import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 
 export default {
   async asyncData({ store, params, redirect, app }) {
@@ -113,7 +114,8 @@ export default {
       showMoreMenu: false,
       processing: false,
       resettingProgress: false,
-      startingDownload: false
+      startingDownload: false,
+      itemMovedListener: null
     }
   },
   mixins: [cellularPermissionHelpers],
@@ -350,7 +352,7 @@ export default {
         message: this.$getString('MessageConfirmDeleteLocalEpisode', [localFile.basePath])
       })
       if (value) {
-        const res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItemId, trackLocalFileId: localFile.id, trackContentUrl: localEpisodeAudioTrack.contentUrl })
+        const res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItemId, trackLocalFileId: localFile.id, trackContentUrl: localEpisodeAudioTrack.contentUrl, localEpisodeId: this.localEpisode.id })
         if (res?.id) {
           if (this.isLocal) {
             // If this is local episode then redirect to server episode when available
@@ -442,22 +444,9 @@ export default {
     async download(selectedLocalFolder = null) {
       let localFolder = selectedLocalFolder
       if (!localFolder) {
-        const localFolders = (await this.$db.getLocalFolders()) || []
-        console.log('Local folders loaded', localFolders.length)
-        const foldersWithMediaType = localFolders.filter((lf) => {
-          console.log('Checking local folder', lf.mediaType)
-          return lf.mediaType == this.mediaType
-        })
-        console.log('Folders with media type', this.mediaType, foldersWithMediaType.length)
-        const internalStorageFolder = foldersWithMediaType.find((f) => f.id === `internal-${this.mediaType}`)
-        if (!foldersWithMediaType.length) {
-          localFolder = {
-            id: `internal-${this.mediaType}`,
-            name: this.$strings.LabelInternalAppStorage,
-            mediaType: this.mediaType
-          }
-        } else if (foldersWithMediaType.length === 1 && internalStorageFolder) {
-          localFolder = internalStorageFolder
+        const saf = safFoldersFor((await this.$db.getLocalFolders()) || [], this.mediaType)
+        if (!saf.length) {
+          localFolder = await appStorageFolderFor(this, this.mediaType)
         } else {
           this.$store.commit('globals/showSelectLocalFolderModal', {
             mediaType: this.mediaType,
@@ -468,8 +457,6 @@ export default {
           return
         }
       }
-
-      console.log('Local folder', JSON.stringify(localFolder))
 
       this.startDownload(localFolder)
     },
@@ -606,13 +593,34 @@ export default {
           this.$set(this.episode, 'localEpisode', episode)
         }
       }
+    },
+    onLocalLibraryItemMoved(item) {
+      if (this.isLocal && item.id === this.libraryItem.id) {
+        const episode = item.media?.episodes?.find((ep) => ep.id === this.episode.id)
+        this.libraryItem = item
+        if (episode) this.episode = episode
+      } else if (!this.isLocal && this.libraryItem.localLibraryItem?.id === item.id) {
+        this.$set(this.libraryItem, 'localLibraryItem', item)
+        if (this.episode.localEpisode) {
+          const localEpisode = item.media?.episodes?.find((ep) => ep.serverEpisodeId === this.episode.id)
+          if (localEpisode) this.$set(this.episode, 'localEpisode', localEpisode)
+        }
+      }
     }
   },
-  mounted() {
+  async mounted() {
     this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
     this.bindTimeMarkerEvents()
+    const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
+    // Left the page before the listener was registered
+    if (this._isDestroyed) {
+      listener?.remove()
+      return
+    }
+    this.itemMovedListener = listener
   },
   beforeDestroy() {
+    this.itemMovedListener?.remove()
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
     document.querySelectorAll('.time-marker').forEach((marker) => {
       marker.removeEventListener('click', this.clickPlaybackTime)

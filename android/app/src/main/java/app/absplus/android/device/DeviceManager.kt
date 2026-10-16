@@ -98,6 +98,35 @@ object DeviceManager {
       deviceData.deviceSettings?.androidAutoBrowseSeriesSequenceOrder =
               AndroidAutoBrowseSeriesSequenceOrderSetting.ASC
     }
+    // Podcast auto download added: Paper leaves missing primitives at 0/false, and interval 0 is never valid
+    deviceData.deviceSettings?.let {
+      if (it.autoDownloadIntervalHours == 0) {
+        it.autoDownloadEnabled = false
+        it.autoDownloadAllPodcasts = false
+        it.autoDownloadKeepCount = 3
+        it.autoDownloadWifiOnly = true
+        it.autoDownloadChargingOnly = false
+        it.autoDownloadIntervalHours = 6
+        // Persist for AbsDatabase.getDeviceData, which reads Paper directly; never fail singleton init
+        try {
+          dbManager.saveDeviceData(deviceData)
+        } catch (e: Exception) {
+          Log.e(tag, "Failed to save backfilled auto download settings", e)
+        }
+      }
+    }
+    // Download storage added: Paper leaves the missing field null despite its non-null type
+    deviceData.deviceSettings?.let {
+      val normalized = DownloadStorageSetting.normalize(it.downloadStorage)
+      if (normalized != it.downloadStorage) {
+        it.downloadStorage = normalized
+        try {
+          dbManager.saveDeviceData(deviceData)
+        } catch (e: Exception) {
+          Log.e(tag, "Failed to save backfilled download storage setting", e)
+        }
+      }
+    }
   }
 
   /**

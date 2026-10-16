@@ -96,7 +96,9 @@ class AbsDatabaseWeb extends WebPlugin {
     const refreshToken = localStorage.getItem(`refresh_token_${serverConnectionConfigId}`)
     if (!ssc || !refreshToken) return { status: 'rejected' }
     try {
-      const response = await fetch(`${ssc.address}/auth/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-refresh-token': refreshToken } })
+      // Match native renewal: never forward a refresh secret through an HTTP redirect.
+      // Fetch rejects before contacting Location; catch returns transient and keeps credentials.
+      const response = await fetch(`${ssc.address}/auth/refresh`, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', 'x-refresh-token': refreshToken } })
       if (response.status === 401 || response.status === 403) {
         if (localStorage.getItem(`refresh_token_${serverConnectionConfigId}`) === refreshToken) localStorage.removeItem(`refresh_token_${serverConnectionConfigId}`)
         return { status: 'rejected' }
@@ -285,9 +287,32 @@ class AbsDatabaseWeb extends WebPlugin {
 
   async updateDeviceSettings(payload) {
     const deviceData = await this.getDeviceData()
-    deviceData.deviceSettings = payload
+    // Like native: only setDownloadStorage changes the download storage
+    const downloadStorage = deviceData.deviceSettings?.downloadStorage || 'internal'
+    deviceData.deviceSettings = { ...payload, downloadStorage }
     localStorage.setItem('device', JSON.stringify(deviceData))
     return deviceData
+  }
+
+  async setDownloadStorage({ target }) {
+    if (target === 'sd') {
+      return { error: 'SD card not available', errorCode: 'noSdCard', requiredBytes: 0, freeBytes: 0 }
+    }
+    if (target !== 'internal') throw new Error('Invalid download storage target')
+    const deviceData = await this.getDeviceData()
+    deviceData.deviceSettings = { ...(deviceData.deviceSettings || {}), downloadStorage: 'internal' }
+    localStorage.setItem('device', JSON.stringify(deviceData))
+    return { downloadStorage: 'internal' }
+  }
+
+  async getDownloadStorageStatus() {
+    const deviceData = await this.getDeviceData()
+    return {
+      downloadStorage: deviceData.deviceSettings?.downloadStorage || 'internal',
+      internalFreeBytes: 0,
+      sd: null,
+      move: { total: 0, done: 0, bytesTotal: 0, bytesDone: 0, waiting: {}, running: false, lastError: null }
+    }
   }
 
   async refreshWidgets() {

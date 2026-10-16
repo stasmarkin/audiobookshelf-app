@@ -123,6 +123,16 @@ class DbService {
     return AbsDatabase.updateDeviceSettings(payload)
   }
 
+  // input: 'internal' | 'sd'; returns { downloadStorage } or { error, errorCode, requiredBytes, freeBytes }
+  setDownloadStorage(target) {
+    return AbsDatabase.setDownloadStorage({ target })
+  }
+
+  // returns { downloadStorage, internalFreeBytes, sd: { uuid, mounted, freeBytes } | null, move: { total, done, bytesTotal, bytesDone, waiting, running, lastError } }
+  getDownloadStorageStatus() {
+    return AbsDatabase.getDownloadStorageStatus()
+  }
+
   getMediaItemHistory(mediaId) {
     return AbsDatabase.getMediaItemHistory({ mediaId })
   }
