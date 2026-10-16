@@ -7,6 +7,16 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Playlists offline (all five catalog tabs now open offline):** the Playlists tab, a playlist's page and the
+  "Add to playlist" list read the same catalog copy, so they open without the server with your last synced
+  playlists, books and podcast episodes in the playlist's order. Play and the add-to-queue button of a playlist work
+  offline too: downloaded books and episodes play from the phone and an item that is not downloaded waits for the
+  server. Only downloads made with the current account and server are used. Playlists made, changed or deleted in
+  the web client follow on the phone within a few seconds while the app is connected, also on an open playlist page,
+  and the Playlists tab appears or disappears with them. Creating a playlist and adding or removing items need the
+  server: offline these buttons stay visible, disabled and marked "Requires the server". The "Add to playlist" list
+  now shows every playlist of the library, also beyond the first page. Until a library's playlists have been copied
+  once, they read the server as before; offline the tab says the catalog isn't downloaded yet.
 - **Collections offline:** the Collections tab and a collection's page read the same catalog copy, so they open
   without the server with the last synced collections, each book in the collection's order (as arranged in the web
   client). Play and the add-to-queue button of a collection work offline too: downloaded books play from the phone
@@ -40,7 +50,7 @@ Merged into `plus`, not yet in a published release.
   offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
   limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
   the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
-  the server (offline the tab says so). The Playlists tab is unchanged.
+  the server (offline the tab says so).
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer
   uses the broadcast symbol. Tabs keep equal widths, the labels name each destination for screen readers, and the
