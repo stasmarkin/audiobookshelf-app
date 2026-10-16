@@ -32,9 +32,12 @@ class SyncEngineCatalogTest {
   private val replica = inMemoryReplica()
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val server = FakeCatalogServer().library("lib1")
+  /** What `GET /api/items/{id}` answers, by id; a missing id is a 404. */
+  private val itemAnswers = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, String>>()
   private val api = FakeApi { request ->
     when {
       request.path.startsWith("/api/libraries") -> server.handle(request)
+      request.path.startsWith("/api/items/") -> itemAnswers[request.path.removePrefix("/api/items/")] ?: (404 to "Not found")
       request.method == "GET" && request.path == "/api/me/progress" -> 200 to """{"mediaProgress":[]}"""
       request.method == "GET" && request.path == "/api/me/bookmarks" -> 200 to """{"bookmarks":[]}"""
       else -> 200 to "{}"
@@ -489,6 +492,65 @@ class SyncEngineCatalogTest {
     eventually("three passes") { starts.size >= 3 }
     val gaps = starts.zipWithNext { a, b -> b - a }
     assertTrue("passes $gaps apart, interval $CATALOG_INTERVAL_MS", gaps.all { it >= CATALOG_INTERVAL_MS - 20 })
+  }
+
+  /** `GET /api/items/:id?expanded=1` of a book of lib1 (fixture recorded from 2.37.1) with a chapter. */
+  private fun serveExpanded(id: String, updatedAt: Long) {
+    val node = CatalogJson.mapper.readTree(javaClass.getResource("/catalog/book-expanded.json")) as com.fasterxml.jackson.databind.node.ObjectNode
+    node.put("id", id).put("libraryId", "lib1").put("updatedAt", updatedAt)
+    (node.path("media") as com.fasterxml.jackson.databind.node.ObjectNode).putArray("chapters").addObject().put("id", 0).put("start", 0).put("end", 10).put("title", "One")
+    itemAnswers[id] = 200 to CatalogJson.mapper.writeValueAsString(node)
+  }
+
+  private suspend fun detailLevel(id: String) = replica.items().get("srv", id)?.detailLevel
+
+  @Test
+  fun openDuringACatalogPassIsWrittenAfterIt() = runBlocking {
+    server.book("li1")
+    startOnline()
+    serveExpanded("li1", updatedAt = 1)
+    val gate = Gate()
+    SyncEngine.syncNow(SyncReason.MANUAL)
+    gate.awaitArrived()
+
+    val outcome = SyncEngine.openItem("li1")!!
+    assertEquals(OpenResult.UPDATED, outcome.result)
+    assertEquals("li1", CatalogJson.mapper.readTree(outcome.serverItem).path("id").asText())
+    assertEquals("buffered until the pass ends", app.absplus.android.db.replica.DetailLevel.MINIFIED, detailLevel("li1"))
+
+    gate.release.countDown()
+    awaitPasses(2)
+    assertEquals(app.absplus.android.db.replica.DetailLevel.EXPANDED, detailLevel("li1"))
+  }
+
+  @Test
+  fun notFoundDuringACatalogPassIsRemovedAfterIt() = runBlocking {
+    server.book("li1")
+    startOnline()
+    val gate = Gate()
+    SyncEngine.syncNow(SyncReason.MANUAL)
+    gate.awaitArrived()
+
+    assertEquals(OpenOutcome(OpenResult.REMOVED), SyncEngine.openItem("li1"))
+    gate.release.countDown()
+    awaitPasses(2)
+    assertNull(title("li1"))
+  }
+
+  @Test
+  fun olderAnswerDuringACatalogPassIsNotReturned() = runBlocking {
+    server.book("li1").updatedAt = 200
+    startOnline()
+    serveExpanded("li1", updatedAt = 100)
+    val gate = Gate()
+    SyncEngine.syncNow(SyncReason.MANUAL)
+    gate.awaitArrived()
+
+    assertEquals(OpenOutcome(OpenResult.UP_TO_DATE), SyncEngine.openItem("li1"))
+    gate.release.countDown()
+    awaitPasses(2)
+    assertEquals(200L, replica.items().get("srv", "li1")!!.updatedAt)
+    assertEquals(app.absplus.android.db.replica.DetailLevel.MINIFIED, detailLevel("li1"))
   }
 
   private companion object {

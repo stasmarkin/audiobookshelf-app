@@ -226,6 +226,9 @@ object SyncEngine {
   suspend fun applyEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean =
           core?.applyEvent(name, payloadJson, serverConfigId) ?: false
 
+  /** The user opens [itemId] of the active server: its expanded copy, see [ExpandedItemCache]. Null before [init]. */
+  suspend fun openItem(itemId: String, force: Boolean = false): OpenOutcome? = core?.openItem(itemId, force)
+
   @Synchronized
   internal fun initForTest(deps: SyncDeps) {
     resetForTest()
@@ -260,6 +263,10 @@ object SyncEngine {
     }
     private val catalogApplier = deps.catalog?.let { catalog ->
       CatalogEventApplier(catalog.db, { notifier.notify("catalog", it) }, { catalogReader?.onReplicaChanged() }, catalog.beforeEventWrite)
+    }
+    private val expandedCache = deps.catalog?.let { catalog ->
+      ExpandedItemCache(catalog.db, deps.http, { deps.serverState.value == ServerState.ONLINE }, { deps.activeServer()?.id },
+              { sc, event, payload -> applyCatalogEvent(event, payload, sc) }, deps.log)
     }
     /** Catalog events apply one at a time in arrival order, never under [runMutex]. */
     private val catalogEventMutex = Mutex()
@@ -452,6 +459,12 @@ object SyncEngine {
         socketDown = true
         if (!deps.isForeground()) socketLostInBackground = true
       }
+    }
+
+    suspend fun openItem(itemId: String, force: Boolean): OpenOutcome? {
+      val cache = expandedCache ?: return null
+      val config = deps.activeServer() ?: return OpenOutcome(OpenResult.SKIPPED)
+      return cache.open(config, itemId, force)
     }
 
     /** User events are serialized with runs, so an event never merges between a push and the settling of its rows. */
