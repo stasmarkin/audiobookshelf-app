@@ -1,0 +1,117 @@
+{
+ "results": [
+  {
+   "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+   "ino": "1441876",
+   "oldLibraryItemId": null,
+   "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+   "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+   "path": "/home-podcasts/HP 2",
+   "relPath": "HP 2",
+   "isFile": false,
+   "mtimeMs": 1792185842100,
+   "ctimeMs": 1792185842100,
+   "birthtimeMs": 1792185841927,
+   "addedAt": 1792185842301,
+   "updatedAt": 1792185845368,
+   "isMissing": false,
+   "isInvalid": false,
+   "mediaType": "podcast",
+   "media": {
+    "id": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+    "metadata": {
+     "title": "Second Signal",
+     "author": "Другой Автор",
+     "description": null,
+     "releaseDate": null,
+     "genres": [
+      "Tech",
+      "News"
+     ],
+     "feedUrl": null,
+     "imageUrl": null,
+     "itunesPageUrl": null,
+     "itunesId": "1234500002",
+     "itunesArtistId": null,
+     "explicit": false,
+     "language": null,
+     "type": "episodic",
+     "titleIgnorePrefix": "Second Signal"
+    },
+    "coverPath": null,
+    "tags": [],
+    "numEpisodes": 3,
+    "autoDownloadEpisodes": false,
+    "autoDownloadSchedule": "0 * * * *",
+    "lastEpisodeCheck": null,
+    "maxEpisodesToKeep": 0,
+    "maxNewEpisodesToDownload": 3,
+    "size": 361553
+   },
+   "numFiles": 3,
+   "size": 361553
+  },
+  {
+   "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+   "ino": "1441872",
+   "oldLibraryItemId": null,
+   "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+   "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+   "path": "/home-podcasts/HP 1",
+   "relPath": "HP 1",
+   "isFile": false,
+   "mtimeMs": 1792185841926,
+   "ctimeMs": 1792185841926,
+   "birthtimeMs": 1792185841757,
+   "addedAt": 1792185842415,
+   "updatedAt": 1792185845380,
+   "isMissing": false,
+   "isInvalid": false,
+   "mediaType": "podcast",
+   "media": {
+    "id": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+    "metadata": {
+     "title": "Home Pod One",
+     "author": "Pod Host",
+     "description": null,
+     "releaseDate": null,
+     "genres": [
+      "Tech"
+     ],
+     "feedUrl": null,
+     "imageUrl": null,
+     "itunesPageUrl": null,
+     "itunesId": "1234500001",
+     "itunesArtistId": null,
+     "explicit": false,
+     "language": null,
+     "type": "episodic",
+     "titleIgnorePrefix": "Home Pod One"
+    },
+    "coverPath": null,
+    "tags": [
+     "weekly"
+    ],
+    "numEpisodes": 3,
+    "autoDownloadEpisodes": false,
+    "autoDownloadSchedule": "0 * * * *",
+    "lastEpisodeCheck": null,
+    "maxEpisodesToKeep": 0,
+    "maxNewEpisodesToDownload": 3,
+    "size": 361566
+   },
+   "numFiles": 3,
+   "size": 361566
+  }
+ ],
+ "total": 2,
+ "limit": 100,
+ "page": 0,
+ "sortBy": "addedAt",
+ "sortDesc": false,
+ "mediaType": "podcast",
+ "minified": true,
+ "collapseseries": false,
+ "include": "rssfeed",
+ "offset": 0
+}

@@ -6,6 +6,7 @@ import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
 import app.absplus.android.db.replica.SeriesIndex
 import app.absplus.android.db.replica.UnsupportedFilterException
+import app.absplus.android.db.replica.jsParseFloat
 import app.absplus.android.db.replica.naturalComparator
 import app.absplus.android.db.replica.nocaseCompare
 import app.absplus.android.db.replica.seriesSequenceList
@@ -207,5 +208,12 @@ class LibraryQueryTest {
     assertEquals("1.5-3.5, x", seriesSequenceList(listOf("x", "2.5", "1.5", "3.5", null, "")))
     assertEquals("1.5, 3", seriesSequenceList(listOf("3", "1.5")))
     assertEquals("", seriesSequenceList(listOf(null)))
+  }
+
+  @Test
+  fun jsParseFloatMatchesJavaScript() {
+    val cases = listOf("4a" to 4.0, " 4" to 4.0, "4-5" to 4.0, ".5" to 0.5, "1e3" to 1000.0, "4E2" to 400.0, "1e" to 1.0, "-2.5x" to -2.5,
+            "Infinity" to Double.POSITIVE_INFINITY, "abc" to null, "" to null, null to null, "." to null)
+    cases.forEach { (text, expected) -> assertEquals("parseFloat($text)", expected, jsParseFloat(text)) }
   }
 }

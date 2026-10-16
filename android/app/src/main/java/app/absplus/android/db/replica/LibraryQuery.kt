@@ -149,7 +149,8 @@ internal class Keyed(val entry: QueryEntry, val row: ItemRow, val progress: Medi
 
 internal class Prepared(val entries: List<Keyed>, val primary: Comparator<Keyed>, val random: Boolean)
 
-private const val RECENT_MS = 60L * 24 * 60 * 60 * 1000
+/** "Recent" of the server's filters and home shelves: added within the last 60 days, the edge included. */
+internal const val RECENT_WINDOW_MS = 60L * 24 * 60 * 60 * 1000
 private val mapper = jacksonObjectMapper()
 
 /**
@@ -243,6 +244,18 @@ internal fun sqliteInt(text: String?): Long? {
 internal fun sqliteFloat(text: String?): Double? {
   text ?: return null
   return Regex("""^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?""").find(text)?.value?.trim()?.toDoubleOrNull() ?: 0.0
+}
+
+private val JS_FLOAT = Regex("""^[+-]?(Infinity|\d+\.?\d*([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?)""")
+
+/** JavaScript's `parseFloat`: the longest leading number after whitespace ("4a" is 4, "4-5" is 4); null where JS gives NaN. */
+internal fun jsParseFloat(text: String?): Double? {
+  val match = JS_FLOAT.find(text?.trimStart() ?: return null)?.value ?: return null
+  return when (match.trimStart('+')) {
+    "Infinity" -> Double.POSITIVE_INFINITY
+    "-Infinity" -> Double.NEGATIVE_INFINITY
+    else -> match.toDoubleOrNull()
+  }
 }
 
 /** Nulls first ascending, last descending, as SQLite orders them. */
@@ -412,7 +425,7 @@ private fun rowFilter(
     "explicit" -> { r -> r.explicit }
     "issues" -> { r -> r.isMissing || r.isInvalid }
     "feed-open" -> { r -> r.rssFeedJson != null }
-    "recent" -> { r -> r.addedAt >= now - RECENT_MS }
+    "recent" -> { r -> r.addedAt >= now - RECENT_WINDOW_MS }
     else -> null
   }
   if (common != null) return common
