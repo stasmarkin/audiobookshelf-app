@@ -109,4 +109,12 @@ class ReplicaSearchTest {
     assertEquals(listOf("fav" to 2, "favorite" to 1), result.tags)
     assertEquals(listOf("Fantasy" to 2, "Fable" to 1), result.genres)
   }
+
+  @Test
+  fun narratorInsideAWholeNameIsNotCounted() {
+    val rows = listOf(itemRow("b1", narratorName = "Doe, Jane"), itemRow("b2", narratorName = "Jane, Bob"), itemRow("b3", narratorName = "Doe, Jane, Jane"))
+    val known = listOf("Doe", "Doe, Jane", "Jane", "Bob")
+    assertEquals(listOf("Doe, Jane" to 2, "Jane" to 2), searchReplica(input(rows, "jane", narrators = known)).narrators)
+    assertEquals("the longer name wins", listOf("Doe, Jane" to 2), searchReplica(input(rows, "doe", narrators = known)).narrators)
+  }
 }

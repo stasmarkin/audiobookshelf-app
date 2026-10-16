@@ -54,6 +54,8 @@ class FakeCatalogServer {
   var onAuthorsPage: (AuthorsPage) -> Unit = {}
   var legacyAuthors = false
   var notFound: Set<String> = emptySet()
+  /** Lists of a library (`authors`, `collections`, `playlists`) answered with 500. */
+  var failingLists: Set<String> = emptySet()
   /** Episodes `GET /api/items/{id}` gives a podcast (default 2); null: the answer has no `media.episodes`. */
   val episodeCounts = HashMap<String, Int?>()
   /** Item ids `GET /api/items/{id}` answers with 404, and with 500. */
@@ -170,6 +172,7 @@ class FakeCatalogServer {
     }
     val libraryId = segments[0]
     if (libraries.none { it.first == libraryId } || libraryId in notFound) return 404 to "Not found"
+    if (segments.getOrNull(1) in failingLists) return 500 to "Internal Server Error"
     return when (segments.getOrNull(1)) {
       null -> {
         val filterSeries = mapper.createArrayNode()

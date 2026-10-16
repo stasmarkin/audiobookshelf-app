@@ -87,20 +87,30 @@ fun searchReplica(input: SearchInput): SearchResult {
 }
 
 /**
- * Whole narrator names: the minified `narratorName` joins them with ", ", so "Doe, Jane" would split in two. Names come
- * from filterdata, plus the parts of a row's name that no known name covers (a narrator that came with a socket event
- * after the last reconcile).
+ * Whole narrator names: the minified `narratorName` joins them with ", ", so "Doe, Jane" would split in two. A row's
+ * name is read greedily against the known names (filterdata), longest first; a part no known name covers is a narrator
+ * of its own (one that came with a socket event after the last reconcile).
  */
 private fun narrators(input: SearchInput, matches: (String) -> Boolean): List<Pair<String, Int>> {
-  val known = input.narratorNames.filter { it.isNotEmpty() }.toSet()
-  val knownParts = known.flatMap { it.split(", ") }.toSet()
-  val joined = input.rows.map { it.narratorName }.filter { it.isNotEmpty() }.map { ", $it, " }
-  val extra = input.rows.flatMap { it.narratorName.split(", ") }.filter { it.isNotEmpty() && it !in known && it !in knownParts }
-  return (known + extra).filter(matches)
-          .map { name -> name to joined.count { it.contains(", $name, ") } }
-          .filter { it.second > 0 }
-          .sortedBy { it.first }
-          .take(input.limit)
+  val known = input.narratorNames.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
+  val perRow = input.rows.map { it.narratorName }.filter { it.isNotEmpty() }.map { namesOf(it, known) }
+  val counts = HashMap<String, Int>()
+  perRow.forEach { names -> names.forEach { counts.merge(it, 1, Int::plus) } }
+  return counts.entries.filter { matches(it.key) }.map { it.key to it.value }.sortedBy { it.first }.take(input.limit)
+}
+
+private fun namesOf(narratorName: String, knownLongestFirst: List<String>): Set<String> {
+  val names = LinkedHashSet<String>()
+  var pos = 0
+  while (pos < narratorName.length) {
+    val whole = knownLongestFirst.firstOrNull { name ->
+      narratorName.startsWith(name, pos) && (pos + name.length == narratorName.length || narratorName.startsWith(", ", pos + name.length))
+    }
+    val end = if (whole != null) pos + whole.length else narratorName.indexOf(", ", pos).takeIf { it >= 0 } ?: narratorName.length
+    narratorName.substring(pos, end).takeIf { it.isNotEmpty() }?.let { names += it }
+    pos = end + 2
+  }
+  return names
 }
 
 private fun counted(arrays: List<String>, matches: (String) -> Boolean, limit: Int): List<Pair<String, Int>> {

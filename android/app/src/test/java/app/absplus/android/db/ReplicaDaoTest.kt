@@ -164,12 +164,21 @@ class ReplicaDaoTest {
     db.items().upsertAll(listOf(itemEntity("a", "li1").copy(searchKey = "1\u0001x"), itemEntity("a", "li2"),
             itemEntity("a", "li3").copy(searchKey = "0\u0001x")))
     db.episodes().replaceForPodcast("a", "p1", listOf(episodeRow("a", "e1", "p1", searchKey = "1\u0001x"), episodeRow("a", "e2", "p1")))
-    assertEquals(setOf("li2", "li3"), db.items().staleSearchKeys("a", "lib1", "1\u0001").map { it.id }.toSet())
-    assertEquals(listOf("e2"), db.episodes().staleKeys("a", "lib1", "1\u0001").map { it.id })
+    assertEquals(setOf("li2", "li3"), db.items().staleSearchKeys("a", "lib1", "1\u0001", "", 100).map { it.id }.toSet())
+    assertEquals(listOf("e2"), db.episodes().staleKeys("a", "lib1", "1\u0001", "", 100).map { it.id })
 
     db.items().setSearchKey("a", "li2", "1\u0001y")
     db.episodes().setSearchKey("a", "e2", "1\u0001y")
-    assertEquals(listOf("li3"), db.items().staleSearchKeys("a", "lib1", "1\u0001").map { it.id })
-    assertTrue(db.episodes().staleKeys("a", "lib1", "1\u0001").isEmpty())
+    assertEquals(listOf("li3"), db.items().staleSearchKeys("a", "lib1", "1\u0001", "", 100).map { it.id })
+    assertTrue(db.episodes().staleKeys("a", "lib1", "1\u0001", "", 100).isEmpty())
+  }
+
+  @Test
+  fun staleKeysAreReadInPagesAfterAnId() = runBlocking {
+    db.items().upsertAll((1..5).map { itemEntity("a", "li$it") })
+    db.episodes().replaceForPodcast("a", "p1", (1..5).map { episodeRow("a", "e$it", "p1") })
+    assertEquals(listOf("li1", "li2"), db.items().staleSearchKeys("a", "lib1", "1\u0001", "", 2).map { it.id })
+    assertEquals(listOf("li3", "li4"), db.items().staleSearchKeys("a", "lib1", "1\u0001", "li2", 2).map { it.id })
+    assertEquals(listOf("e5"), db.episodes().staleKeys("a", "lib1", "1\u0001", "e4", 2).map { it.id })
   }
 }

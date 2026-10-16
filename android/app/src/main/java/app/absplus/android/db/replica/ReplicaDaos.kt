@@ -81,7 +81,7 @@ abstract class LibraryItemDao {
 
   suspend fun expandedOf(sc: String, ids: List<String>): List<IdExpanded> = inChunks(ids) { expandedChunk(sc, it) }.flatten()
 
-  @Query("SELECT id, updatedAt, detailLevel, expandedJson FROM library_items WHERE serverConfigId = :sc AND id IN (:ids)")
+  @Query("SELECT id, updatedAt, detailLevel, expandedJson, numEpisodes FROM library_items WHERE serverConfigId = :sc AND id IN (:ids)")
   abstract suspend fun expandedChunk(sc: String, ids: List<String>): List<IdExpanded>
 
   /** Only onto the version it was read from: an expanded copy of an older version never lands on a newer row. */
@@ -98,9 +98,10 @@ abstract class LibraryItemDao {
             AND searchKey LIKE :pattern ESCAPE '\' ORDER BY addedAt, id LIMIT :limit""")
   abstract suspend fun searchCandidates(sc: String, libraryId: String, pattern: String, limit: Int): List<IdSearchJson>
 
+  /** A page of rows with a key of another version, by id after [afterId]: the walk ends even if a key is not written. */
   @Query("""SELECT id, searchKey, json FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId
-            AND searchKey NOT LIKE :prefix || '%'""")
-  abstract suspend fun staleSearchKeys(sc: String, libraryId: String, prefix: String): List<IdSearchJson>
+            AND searchKey NOT LIKE :prefix || '%' AND id > :afterId ORDER BY id LIMIT :limit""")
+  abstract suspend fun staleSearchKeys(sc: String, libraryId: String, prefix: String, afterId: String, limit: Int): List<IdSearchJson>
 
   @Query("UPDATE library_items SET searchKey = :key WHERE serverConfigId = :sc AND id = :id")
   abstract suspend fun setSearchKey(sc: String, id: String, key: String)
@@ -143,9 +144,10 @@ abstract class EpisodeDao {
             AND libraryId = :libraryId AND searchKey LIKE :pattern ESCAPE '\' ORDER BY addedAt, id LIMIT :limit""")
   abstract suspend fun searchByTitle(sc: String, libraryId: String, pattern: String, limit: Int): List<EpisodeKey>
 
+  /** As [LibraryItemDao.staleSearchKeys]. */
   @Query("""SELECT * FROM podcast_episodes WHERE serverConfigId = :sc AND libraryId = :libraryId
-            AND searchKey NOT LIKE :prefix || '%'""")
-  abstract suspend fun staleKeys(sc: String, libraryId: String, prefix: String): List<EpisodeEntity>
+            AND searchKey NOT LIKE :prefix || '%' AND id > :afterId ORDER BY id LIMIT :limit""")
+  abstract suspend fun staleKeys(sc: String, libraryId: String, prefix: String, afterId: String, limit: Int): List<EpisodeEntity>
 
   @Query("UPDATE podcast_episodes SET searchKey = :key WHERE serverConfigId = :sc AND id = :id")
   abstract suspend fun setSearchKey(sc: String, id: String, key: String)
@@ -167,14 +169,6 @@ abstract class EpisodeDao {
     deleteForPodcast(sc, libraryItemId)
     if (list.isNotEmpty()) insertAll(list)
   }
-
-  @Transaction
-  open suspend fun deleteForPodcasts(sc: String, ids: List<String>) {
-    inChunks(ids) { deleteForPodcastsChunk(sc, it) }
-  }
-
-  @Query("DELETE FROM podcast_episodes WHERE serverConfigId = :sc AND libraryItemId IN (:ids)")
-  abstract suspend fun deleteForPodcastsChunk(sc: String, ids: List<String>)
 }
 
 @Dao

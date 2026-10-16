@@ -265,12 +265,29 @@ class CatalogJsonTest {
   fun carryExpandedKeepsTheCopyOfTheSameVersion() {
     val fresh = CatalogJson.itemEntity("srv", fixture("book-minified.json"))
     assertEquals(fresh, CatalogJson.carryExpanded(fresh, null))
-    assertEquals(fresh, CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.MINIFIED, null)))
-    val same = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.EXPANDED, "{}"))
+    assertEquals(fresh, CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.MINIFIED, null, fresh.numEpisodes)))
+    val same = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.EXPANDED, "{}", fresh.numEpisodes))
     assertEquals(DetailLevel.EXPANDED to "{}", same.detailLevel to same.expandedJson)
-    val older = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt - 1, DetailLevel.EXPANDED, "{}"))
+    val older = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt - 1, DetailLevel.EXPANDED, "{}", fresh.numEpisodes))
     assertEquals(DetailLevel.STALE to "{}", older.detailLevel to older.expandedJson)
-    val stale = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.STALE, "{}"))
+    val stale = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.STALE, "{}", fresh.numEpisodes))
     assertEquals(DetailLevel.STALE to "{}", stale.detailLevel to stale.expandedJson)
+  }
+
+  @Test
+  fun podcastWithAnotherEpisodeCountIsStaleAtTheSameVersion() {
+    val fresh = CatalogJson.itemEntity("srv", fixture("podcast-minified.json"))
+    val kept = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.EXPANDED, "{}", fresh.numEpisodes))
+    assertEquals(DetailLevel.EXPANDED, kept.detailLevel)
+    val moved = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.EXPANDED, "{}", fresh.numEpisodes - 1))
+    assertEquals(DetailLevel.STALE to "{}", moved.detailLevel to moved.expandedJson)
+  }
+
+  @Test
+  fun searchKeyWithoutPartsStillCarriesTheVersion() {
+    val book = fixture("book-minified.json").deepCopy<JsonNode>() as ObjectNode
+    (book.path("media").path("metadata") as ObjectNode).putNull("title")
+    assertEquals("1\u0001", CatalogJson.searchKey(book))
+    assertEquals("1\u0001", CatalogJson.episodeSearchKey("  "))
   }
 }

@@ -35,15 +35,29 @@ const val SEARCH_KEY_BACKFILL_CHUNK = 500
  */
 internal suspend fun backfillSearchKeys(db: ReplicaDatabase, sc: String, libraryId: String): Int {
   val prefix = SEARCH_KEY_VERSION + SEARCH_KEY_SEPARATOR
-  val items = db.items().staleSearchKeys(sc, libraryId, prefix)
-  for (chunk in items.chunked(SEARCH_KEY_BACKFILL_CHUNK)) {
-    db.withTransaction { chunk.forEach { db.items().replaceStaleSearchKey(sc, it.id, it.searchKey, CatalogJson.searchKey(CatalogJson.mapper.readTree(it.json))) } }
+  var count = 0
+  // In pages by id: after an update every key is stale, and the whole library's JSON must not be in memory at once
+  var after = ""
+  while (true) {
+    val page = db.items().staleSearchKeys(sc, libraryId, prefix, after, SEARCH_KEY_BACKFILL_CHUNK)
+    if (page.isEmpty()) break
+    db.withTransaction {
+      page.forEach { db.items().replaceStaleSearchKey(sc, it.id, it.searchKey, CatalogJson.searchKey(CatalogJson.mapper.readTree(it.json))) }
+    }
+    count += page.size
+    after = page.last().id
   }
-  val episodes = db.episodes().staleKeys(sc, libraryId, prefix)
-  for (chunk in episodes.chunked(SEARCH_KEY_BACKFILL_CHUNK)) {
-    db.withTransaction { chunk.forEach { db.episodes().replaceStaleSearchKey(sc, it.id, it.searchKey, it.title, CatalogJson.episodeSearchKey(it.title)) } }
+  after = ""
+  while (true) {
+    val page = db.episodes().staleKeys(sc, libraryId, prefix, after, SEARCH_KEY_BACKFILL_CHUNK)
+    if (page.isEmpty()) break
+    db.withTransaction {
+      page.forEach { db.episodes().replaceStaleSearchKey(sc, it.id, it.searchKey, it.title, CatalogJson.episodeSearchKey(it.title)) }
+    }
+    count += page.size
+    after = page.last().id
   }
-  return items.size + episodes.size
+  return count
 }
 
 data class CatalogResult(val libraries: Int, val failedLibraries: List<String>, val stoppedBy: HttpOutcome?)
@@ -162,15 +176,23 @@ class CatalogReconciler(
               .distinct().groupBy({ it.second }, { it.first })
     } else null
     reconcileItems(config, id, idsByName)
-    if (library.mediaType == "podcast") reconcileEpisodes(config, id)
     if (book) runPointQueries(config, id)
     // Last: a failed authors, collections or playlists read skips the library only after its items are in
-    if (book) reconcileAuthors(config, id)
-    if (book) reconcileCollections(config, id)
-    reconcilePlaylists(config, id)
+    val skipped = try {
+      if (book) reconcileAuthors(config, id)
+      if (book) reconcileCollections(config, id)
+      reconcilePlaylists(config, id)
+      null
+    } catch (skip: Skip) {
+      // Kept for the end: episodes and search keys do not depend on these lists and must not wait for them
+      skip
+    }
+    // After the cheap passes: a stop among a podcast's requests must not hold back playlists
+    if (library.mediaType == "podcast") reconcileEpisodes(config, id)
     // Here and not on the first search: on 10 000 rows it takes seconds on a phone
     val backfilled = backfillSearchKeys(db, sc, id)
     if (backfilled > 0) log("Catalog $sc library $id: $backfilled search keys recomputed")
+    if (skipped != null) throw skipped
     updateState(sc, id) { it.copy(lastError = null) }
   }
 
@@ -367,6 +389,7 @@ class CatalogReconciler(
   private suspend fun reconcileEpisodes(config: ServerConnectionConfig, libraryId: String) {
     val sc = config.id
     var requests = 0
+    val firstPass = db.libraryState().get(sc, libraryId)?.episodesReconciledAt == null
     for (podcastId in db.items().podcastsWithoutEpisodes(sc, libraryId)) {
       currentCoroutineContext().ensureActive()
       // Not through get(): any HTTP error there skips the whole library
@@ -404,9 +427,12 @@ class CatalogReconciler(
     }
     log("Catalog $sc library $libraryId: $requests episode requests")
     updateState(sc, libraryId) { it.copy(episodesReconciledAt = clock()) }
-    // A page that read "not reconciled" on an early podcast's event learns here that the library is ready
-    onReplicaChanged()
-    notify(listOf("state:$libraryId"))
+    // A page that read "not reconciled" on an early podcast's event learns here that the library is ready; a pass that
+    // asked nothing changes nothing and keeps every cache
+    if (requests > 0 || firstPass) {
+      onReplicaChanged()
+      notify(listOf("state:$libraryId"))
+    }
   }
 
   /** The topics to announce; none when the row is gone or newer than the answer (a socket event got there first). */
