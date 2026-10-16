@@ -485,6 +485,10 @@ export default {
             if (this.$platform === 'android') AbsAudioPlayer.clearPlaylistQueue()
             const errorMsg = data.error || 'Failed to play'
             this.$toast.error(errorMsg)
+          } else if (data.awaitingServer) {
+            // The queue waits on this item; what is open (paused) keeps its ids, so its bookmarks stay its own
+            this.setSessionServerIds()
+            if (!this.currentPlaybackSession) this.$toast.info(this.$strings.ToastWaitingForServer)
           } else {
             console.log('Library item play response', JSON.stringify(data))
             this.setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId)

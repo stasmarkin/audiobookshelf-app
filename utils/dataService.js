@@ -27,6 +27,16 @@ export const CATALOG_EVENTS = [
 ]
 
 /**
+ * A playlist as a list page carries it (native's `getPlaylists`), cut from the server's expanded one: `numItems`, its
+ * first 4 items for the cover and `itemKeys`, the ids of every item.
+ */
+export function playlistListEntry(playlist) {
+  const items = playlist?.items || []
+  const item = (i) => ({ ...i, episodeId: i.episodeId || null, episode: i.episode || null })
+  return { ...playlist, numItems: items.length, items: items.slice(0, 4).map(item), itemKeys: items.map((i) => ({ libraryItemId: i.libraryItemId, episodeId: i.episodeId || null })) }
+}
+
+/**
  * The `catalog` topics a socket event changes, as native names them (`libraries`, `library:<id>`, `items:<id>`, ...).
  * A feed event has no library: it is taken for the current one. A missing library id sends no topic.
  */
@@ -460,13 +470,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   /** A playlist item as native gives it: a book has `episodeId` and `episode` null. */
   const playlistItem = (item) => ({ ...item, episodeId: item.episodeId || null, episode: item.episode || null })
   /** As native lists playlists: the first items only, for the cover, with the count and the ids of all. */
-  const playlistsPage = (data) => ({
-    ...(data || {}),
-    results: (data?.results || []).map((p) => {
-      const items = p.items || []
-      return { ...p, numItems: items.length, items: items.slice(0, 4).map(playlistItem), itemKeys: items.map((i) => ({ libraryItemId: i.libraryItemId, episodeId: i.episodeId || null })) }
-    })
-  })
+  const playlistsPage = (data) => ({ ...(data || {}), results: (data?.results || []).map(playlistListEntry) })
 
   const getPlaylists = async (args) => {
     const { libraryId, limit, page = 0 } = args

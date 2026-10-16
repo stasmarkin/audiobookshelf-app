@@ -46,7 +46,8 @@ function container(native, { casting = false, confirm = true, prepareAnswer = {}
       getters: { getIsMediaStreaming: () => false, 'user/getServerConnectionConfigId': 'server' },
       commit: (type) => calls.commits.push(type)
     },
-    $toast: { error: (message) => (ctx.error = message) },
+    $toast: { error: (message) => (ctx.error = message), info: (message) => (ctx.info = message) },
+    $strings: { ToastWaitingForServer: 'Waiting for the server' },
     $refs: {},
     checkCellularPermission: async () => {
       calls.cellular++
@@ -156,4 +157,22 @@ test('a queue start that native holds for the server keeps the queue', async () 
   await failed.ctx.startLibraryItem({ libraryItemId: 'li2' }, queue)
   assert.equal(failed.calls.cleared, 1, 'a failed start still clears it')
   assert.equal(failed.ctx.error, 'Server play request failed')
+})
+
+test('while a queue waits for the server, the open book keeps its ids and a cold start says it waits', async () => {
+  // Book A is open (paused by native); the queue now waits on book B
+  const warm = container({ resolvePlaybackSource: async () => ({ source: 'stream' }) }, { prepareAnswer: { awaitingServer: true } })
+  warm.ctx.currentPlaybackSession = { libraryItemId: 'bookA', episodeId: null }
+  warm.ctx.setSessionServerIds()
+  await warm.ctx.startLibraryItem({ libraryItemId: 'bookB' }, { sourceType: 'series', items: [{ libraryItemId: 'bookB' }], currentIndex: 0 })
+  assert.equal(warm.ctx.serverLibraryItemId, 'bookA', "bookmarks go to the open book, not the awaited one")
+  assert.equal(warm.ctx.info, undefined, 'the open player shows the wait')
+
+  const cold = container({ resolvePlaybackSource: async () => ({ source: 'stream' }) }, { prepareAnswer: { awaitingServer: true } })
+  cold.ctx.currentPlaybackSession = null
+  await cold.ctx.startLibraryItem({ libraryItemId: 'bookB' }, { sourceType: 'series', items: [{ libraryItemId: 'bookB' }], currentIndex: 0 })
+  assert.equal(cold.ctx.info, 'Waiting for the server', 'no player to show it: Play is not silent')
+  assert.equal(cold.ctx.serverLibraryItemId, null)
+  const strings = JSON.parse(await read('../strings/en-us.json'))
+  assert.equal(strings.ToastWaitingForServer, 'Waiting for the server')
 })

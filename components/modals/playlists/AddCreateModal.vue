@@ -50,6 +50,7 @@
 
 <script>
 import requiresServer from '@/mixins/requiresServer'
+import { playlistListEntry } from '@/utils/dataService'
 
 /** `$absData` lists at most 20 playlists a call (each carries its cover items). */
 const PLAYLISTS_PAGE = 20
@@ -160,6 +161,7 @@ export default {
         .post(`/api/playlists/${playlist.id}/batch/remove`, { items: itemObjects })
         .then((updatedPlaylist) => {
           console.log(`Items removed from playlist`, updatedPlaylist)
+          this.applyServerPlaylist(updatedPlaylist)
         })
         .catch((error) => {
           console.error('Failed to remove items from playlist', error)
@@ -178,6 +180,7 @@ export default {
         .post(`/api/playlists/${playlist.id}/batch/add`, { items: itemObjects })
         .then((updatedPlaylist) => {
           console.log(`Items added to playlist`, updatedPlaylist)
+          this.applyServerPlaylist(updatedPlaylist)
         })
         .catch((error) => {
           console.error('Failed to add items to playlist', error)
@@ -213,6 +216,9 @@ export default {
           console.log('New playlist created', data)
           this.newPlaylistName = ''
           this.showPlaylistNameInput = false
+          this.applyServerPlaylist(data)
+          // The Playlists tab shows at once, before the catalog notice
+          if (!this.$store.state.libraries.numUserPlaylists) this.$store.commit('libraries/setNumUserPlaylists', 1)
         })
         .catch((error) => {
           console.error('Failed to create playlist', error)
@@ -221,6 +227,22 @@ export default {
         .finally(() => {
           this.processing = false
         })
+    },
+    /**
+     * The server's answer to a write (the expanded playlist) right away: during a catalog pass native's notice comes only
+     * after it. A playlist left without items was deleted by the server.
+     */
+    applyServerPlaylist(playlist) {
+      if (!playlist?.id) return
+      const entry = playlistListEntry(playlist)
+      const index = this.playlists.findIndex((p) => p.id === entry.id)
+      if (!entry.numItems) {
+        if (index >= 0) this.playlists.splice(index, 1)
+      } else if (index >= 0) {
+        this.playlists.splice(index, 1, entry)
+      } else {
+        this.playlists.push(entry)
+      }
     },
     /** Native changed this library's playlists (an add, a remove, a new one): read the list again while open. */
     dataChanged(change) {

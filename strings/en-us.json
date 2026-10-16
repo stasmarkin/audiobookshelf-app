@@ -630,6 +630,7 @@
   "ToastRiceSaved": "Preset saved",
   "ToastSeriesLoadFailed": "Could not open the series",
   "ToastStreamingNotAllowedOnCellular": "Streaming is not allowed on cellular data",
+  "ToastWaitingForServer": "Waiting for the server",
   "UnitMinutesShort": "{0}m",
   "UnitSecondsShort": "{0}s"
 }

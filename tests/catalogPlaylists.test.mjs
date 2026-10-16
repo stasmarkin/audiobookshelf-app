@@ -10,7 +10,7 @@ import vm from 'node:vm'
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
-const { createDataService, catalogTopics, CATALOG_EVENTS } = await importSource('../utils/dataService.js')
+const { createDataService, catalogTopics, CATALOG_EVENTS, playlistListEntry } = await importSource('../utils/dataService.js')
 const { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } = await importSource('../utils/catalogRefresh.js')
 const { trackCount, fetchPlaylistItems } = await importSource('../utils/catalogItem.js')
 const { queueItemPayload, resolveItemProgress } = await importSource('../utils/playbackQueue.js')
@@ -253,23 +253,24 @@ test('playlist row shows the author of a minified book', async () => {
 const modalSource = await read('../components/modals/playlists/AddCreateModal.vue')
 
 /** AddCreateModal over fakes; `serverState` decides whether writes may go. */
-function addCreateModal({ getPlaylists, serverState = 'online', selected = [{ libraryItem: { id: 'li9' }, episode: null }] } = {}) {
-  const def = componentDef(modalSource, { requiresServer })
+function addCreateModal({ getPlaylists, serverState = 'online', selected = [{ libraryItem: { id: 'li9' }, episode: null }], answer = () => ({}) } = {}) {
+  const def = componentDef(modalSource, { requiresServer, playlistListEntry })
   const posts = []
+  const commits = []
   const reads = []
   const toasts = []
   const dataListeners = new Set()
-  const state = { serverState, libraries: { currentLibraryId: 'l1' }, globals: { showPlaylistsAddCreateModal: true, selectedPlaylistItems: selected } }
+  const state = { serverState, libraries: { currentLibraryId: 'l1', numUserPlaylists: 0 }, globals: { showPlaylistsAddCreateModal: true, selectedPlaylistItems: selected } }
   const view = bind(def, {
-    $store: { state, getters: { get getIsServerOnline() { return state.serverState === 'online' } }, commit() {} },
+    $store: { state, getters: { get getIsServerOnline() { return state.serverState === 'online' } }, commit: (...c) => commits.push(c) },
     $strings: strings,
     $hapticsImpact: async () => {},
     $toast: { error: (m) => toasts.push(m) },
     $absData: { getPlaylists: async (args) => (reads.push(args), getPlaylists(args)), onDataChanged: (cb) => (dataListeners.add(cb), () => dataListeners.delete(cb)) },
-    $nativeHttp: { post: async (path, body) => (posts.push([path, body]), {}), delete: async (path) => (posts.push(['DELETE', path]), {}), get: async () => assert.fail('the modal reads through $absData') },
+    $nativeHttp: { post: async (path, body) => (posts.push([path, body]), answer(path, body)), delete: async (path) => (posts.push(['DELETE', path]), {}), get: async () => assert.fail('the modal reads through $absData') },
     $socket: { $on: () => assert.fail('the modal follows $absData, not the socket'), $off() {} }
   })
-  return { def, view, posts, reads, toasts, state, dataListeners, send: (change) => dataListeners.forEach((cb) => cb(change)) }
+  return { def, view, posts, reads, toasts, state, commits, dataListeners, send: (change) => dataListeners.forEach((cb) => cb(change)) }
 }
 
 /** 50 playlists of 12 items; p0..p49, item li9 is the 10th of every even one. */
@@ -719,4 +720,97 @@ test('requiresServer mixin reads the server state', () => {
   assert.equal(view.isServerOnline, false)
   assert.equal(view.requiresServerLabel(), 'Requires the server')
   assert.equal(bind({ mixins: [requiresServer] }, { $store: { getters: { getIsServerOnline: true } }, $strings: strings }).isServerOnline, true)
+})
+
+/** The server's expanded playlist after a write: `ids` are its books. */
+const expanded = (id, ids) => ({ id, libraryId: 'l1', name: `Playlist ${id}`, items: ids.map((i) => ({ libraryItemId: i, libraryItem: book(i) })) })
+
+test('the add-to-playlist list follows a write at once', async () => {
+  const modal = addCreateModal({
+    getPlaylists: async (args) => playlistsAnswer(args),
+    answer: (path, body) => {
+      if (path === '/api/playlists/p49/batch/add') return expanded('p49', ['other0', 'li9'])
+      if (path === '/api/playlists/p48/batch/remove') return expanded('p48', [])
+      if (path === '/api/playlists') return { ...expanded('new', ['li9']), name: body.name }
+      return {}
+    }
+  })
+  await modal.view.loadPlaylists()
+  await modal.view.clickPlaylist(modal.view.sortedPlaylists.find((p) => p.id === 'p49'))
+  await flush()
+  const added = modal.view.sortedPlaylists.find((p) => p.id === 'p49')
+  assert.equal(added.isItemIncluded, true, 'marked without waiting for the catalog notice')
+  assert.equal(added.numItems, 2)
+  assert.equal(added.itemKeys.length, 2)
+  await modal.view.clickPlaylist(modal.view.sortedPlaylists.find((p) => p.id === 'p48'))
+  await flush()
+  assert.equal(modal.view.playlists.some((p) => p.id === 'p48'), false, 'emptied: the server deleted it')
+  modal.view.createPlaylist()
+  modal.view.newPlaylistName = 'Новый'
+  await modal.view.submitCreatePlaylist()
+  await flush()
+  assert.equal(modal.view.sortedPlaylists.find((p) => p.id === 'new').isItemIncluded, true)
+  assert.deepEqual(plain(modal.commits), [['libraries/setNumUserPlaylists', 1]], 'the Playlists tab shows at once')
+  modal.state.libraries.numUserPlaylists = 3
+  await modal.view.submitCreatePlaylist()
+  assert.equal(modal.commits.length, 1, 'a count already there stays')
+})
+
+test('a removed item leaves the open playlist page at once', async () => {
+  const page = playlistPage({ absData: createDataService({ plugin: fakePlugin({ items: [entry(book('li0')), entry(podcast, 'ep1'), entry(podcast, 'ep2')] }), store: fakeStore() }) })
+  const view = await page.mount()
+  assert.match(pageSource, /@removedFromPlaylist="itemRemoved"/)
+  view.itemRemoved({ libraryItemId: 'pod1', episodeId: 'ep1' })
+  assert.deepEqual(view.playlist.items.map((i) => [i.libraryItemId, i.episodeId]), [['li0', null], ['pod1', 'ep2']])
+  view.itemRemoved({ libraryItemId: 'li0', episodeId: null })
+  view.itemRemoved({ libraryItemId: 'pod1', episodeId: 'ep2' })
+  assert.deepEqual(page.replaced, ['/bookshelf/playlists'], 'the server deleted the emptied playlist')
+})
+
+/** ItemMoreMenuModal over fakes. */
+async function moreMenu({ libraryItem, playlist = null, devices = [] }) {
+  const def = componentDef(await read('../components/modals/ItemMoreMenuModal.vue'), { requiresServer, progressTarget: () => ({}), isCopyOfActiveServer: () => false, Dialog: {}, AbsFileSystem: {} })
+  const emitted = []
+  const getters = new Proxy({ getIsServerOnline: true }, { get: (target, name) => (name in target ? target[name] : () => null) })
+  const view = bind(def, {
+    value: true,
+    libraryItem,
+    episode: null,
+    playlist,
+    rssFeed: null,
+    hideRssFeedOption: true,
+    processing: false,
+    $platform: 'android',
+    $strings: strings,
+    $store: { state: { libraries: { ereaderDevices: devices }, activeServerConfigId: 'a' }, getters, commit() {} },
+    $nativeHttp: { delete: async () => ({}), post: async (path, body) => (emitted.push(['post', path, body]), {}) },
+    $toast: { error() {}, success() {} },
+    $emit: (...e) => emitted.push(e),
+    $nextTick: (fn) => fn()
+  })
+  return { view, emitted }
+}
+
+test('removing from the playlist page tells the page', async () => {
+  const { view, emitted } = await moreMenu({ libraryItem: book('li1'), playlist: { id: 'p1' } })
+  view.removeFromPlaylistClick()
+  await flush()
+  assert.deepEqual(plain(emitted.find(([name]) => name === 'removedFromPlaylist')), ['removedFromPlaylist', { libraryItemId: 'li1', episodeId: null }])
+})
+
+test('a minified book with an e-book can be sent to a device', async () => {
+  const minified = { ...book('li1'), media: { ...book('li1').media, ebookFormat: 'epub' } }
+  const { view, emitted } = await moreMenu({ libraryItem: minified, devices: [{ name: 'Kindle' }] })
+  assert.deepEqual(plain(view.ereaderDeviceItems), [{ text: 'Kindle', value: 'Kindle' }])
+  assert.ok(view.moreMenuItems.some((i) => i.value === 'sendEbook'))
+  view.sendEbookToDeviceAction('Kindle')
+  assert.deepEqual(plain(emitted.find(([name]) => name === 'post')), ['post', '/api/emails/send-ebook-to-device', { libraryItemId: 'li1', deviceName: 'Kindle' }], 'by the item id')
+  assert.deepEqual(plain((await moreMenu({ libraryItem: book('li2'), devices: [{ name: 'Kindle' }] })).view.ereaderDeviceItems), [], 'no e-book, no devices')
+})
+
+test('a downloaded episode in a playlist opens its copy', async () => {
+  const def = componentDef(await read('../components/tables/playlist/ItemTableRow.vue'), { trackCount })
+  const row = (item) => bind(def, { item, $store: { getters: { getIsMediaStreaming: () => false, 'user/getUserMediaProgress': () => null }, state: {} } })
+  assert.equal(row({ ...entry(podcast, 'ep1'), localLibraryItem: { id: 'local_pod' }, localEpisode: { id: 'local_ep1' } }).itemUrl, '/item/local_pod/local_ep1')
+  assert.equal(row(entry(podcast, 'ep1')).itemUrl, '/item/pod1/ep1')
 })

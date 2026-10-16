@@ -51,6 +51,8 @@ export default {
   },
   computed: {
     itemUrl() {
+      // A downloaded episode opens its copy, as the podcast's own page does offline
+      if (this.episodeId && this.localLibraryItem && this.localEpisode) return `/item/${this.localLibraryItem.id}/${this.localEpisode.id}`
       if (this.episodeId) return `/item/${this.libraryItem.id}/${this.episodeId}`
       // Offline on a cold start the server item page has nothing to read; the downloaded copy has
       if (this.localLibraryItem) return `/item/${this.libraryItem.id}?localLibraryItemId=${this.localLibraryItem.id}`

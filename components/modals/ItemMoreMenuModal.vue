@@ -171,7 +171,8 @@ export default {
       return items
     },
     ereaderDeviceItems() {
-      if (!this.ebookFile || !this.$store.state.libraries.ereaderDevices?.length) return []
+      // A minified item (the catalog replica) names the e-book's format, not its file; sending goes by the item id
+      if (!(this.ebookFile || this.media.ebookFormat) || !this.$store.state.libraries.ereaderDevices?.length) return []
       return this.$store.state.libraries.ereaderDevices.map((d) => {
         return {
           text: d.name,
@@ -487,6 +488,8 @@ export default {
         .delete(url)
         .then(() => {
           this.$toast.success('Item removed from playlist')
+          // The page drops it at once: during a catalog pass native's notice comes only after it
+          this.$emit('removedFromPlaylist', { libraryItemId: this.serverLibraryItemId, episodeId: this.serverEpisodeId || null })
         })
         .catch((error) => {
           const errorMsg = error.response?.data || 'Unknown error'

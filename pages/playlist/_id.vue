@@ -25,7 +25,7 @@
       </div>
     </div>
 
-    <modals-item-more-menu-modal v-model="showMoreMenu" :library-item="selectedLibraryItem" :episode="selectedEpisode" :playlist="playlist" hide-rss-feed-option :processing.sync="processing" />
+    <modals-item-more-menu-modal v-model="showMoreMenu" :library-item="selectedLibraryItem" :episode="selectedEpisode" :playlist="playlist" hide-rss-feed-option :processing.sync="processing" @removedFromPlaylist="itemRemoved" />
     <div v-show="processing" class="fixed top-0 left-0 w-screen h-screen flex items-center justify-center bg-black/50 z-50">
       <ui-loading-indicator />
     </div>
@@ -192,6 +192,11 @@ export default {
     async addToQueueClick() {
       await this.$hapticsImpact()
       this.$eventBus.$emit('add-queue-source-to-queue', { sourceType: 'playlist', sourceId: this.playlist.id, items: this.playableItems })
+    },
+    /** Removed on the server: gone from the page at once; the server deletes a playlist left empty. */
+    itemRemoved({ libraryItemId, episodeId }) {
+      this.playlist = { ...this.playlist, items: this.playlistItems.filter((i) => !(i.libraryItemId === libraryItemId && (i.episodeId || null) === (episodeId || null))) }
+      if (!this.playlist.items.length) this.$router.replace('/bookshelf/playlists')
     },
     /** Native changed this library's playlists or items: read the playlist again (debounced). */
     dataChanged(change) {
