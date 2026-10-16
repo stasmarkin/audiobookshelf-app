@@ -758,8 +758,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       if (!keepPlaybackPin) LocalItemLocks.clearPlaybackPin()
       return
     }
-    if (playbackSession.localLibraryItem == null && !keepPlaybackPin && LocalItemLocks.clearPlaybackPin()) {
-      StorageMoveService.requestReconcile(this)
+    if (playbackSession.localLibraryItem == null && !keepPlaybackPin) {
+      pinOwner = null
+      if (LocalItemLocks.clearPlaybackPin()) StorageMoveService.requestReconcile(this)
     }
 
     PlaybackRestoreStore.setResumable(this, true)
@@ -1151,7 +1152,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   // Which start holds the playback pin: a replaced start gives back only its own pin, never a newer start's
   private val pinOwnerLock = Any()
-  private var pinOwner: Any? = null
+  @Volatile private var pinOwner: Any? = null
 
   /** Re-reads [plan]'s copy under its item lock and pins it for [owner], so a storage move cannot commit under it. */
   private suspend fun pinLocal(plan: PlaybackSource.Local, owner: Any): PlaybackSource = withContext(Dispatchers.IO) {
@@ -1170,11 +1171,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   // A start replaced after it pinned its copy gives the pin back to what plays now. Off main: a pin may wait on an item lock
   private fun releaseStalePin(owner: Any) {
-    val playing = currentPlaybackSession?.localLibraryItem?.id
     startScope.launch(Dispatchers.IO) {
       synchronized(pinOwnerLock) {
+        // Close and a stream start drop the owner with the pin, so nothing is pinned again after them
         if (pinOwner !== owner) return@synchronized
         pinOwner = null
+        val playing = currentPlaybackSession?.localLibraryItem?.id
         if (playing != null) {
           LocalItemLocks.pinForPlayback(playing)
         } else if (LocalItemLocks.clearPlaybackPin()) {
@@ -2055,6 +2057,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     startGate.invalidate()
     playlistQueue = emptyList()
     playlistQueueIndex = -1
+    pinOwner = null
     if (LocalItemLocks.clearPlaybackPin()) StorageMoveService.requestReconcile(this)
     DLog.d(tag, "closePlayback")
     val config = DeviceManager.serverConnectionConfig
