@@ -5,6 +5,8 @@ import app.absplus.android.db.replica.CollectionCounts
 import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.DEFAULT_SEARCH_LIMIT
 import app.absplus.android.db.replica.DEFAULT_SHELF_LIMIT
+import app.absplus.android.db.replica.DetailLevel
+import app.absplus.android.db.replica.EpisodeKey
 import app.absplus.android.db.replica.MAX_SEARCH_LIMIT
 import app.absplus.android.db.replica.MAX_SHELF_LIMIT
 import app.absplus.android.db.replica.SearchInput
@@ -31,6 +33,9 @@ import app.absplus.android.db.replica.nocaseCompare
 import app.absplus.android.db.replica.orderItems
 import app.absplus.android.db.replica.withoutPrefix
 import app.absplus.android.db.userdata.MediaProgressEntity
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.NullNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.random.Random
@@ -85,6 +90,9 @@ data class PersonalizedRequest(val libraryId: String, val limit: Int)
 
 /** `GET /api/libraries/:id/search`: [limit] entries per group, 1..[MAX_SEARCH_LIMIT] (default [DEFAULT_SEARCH_LIMIT]). */
 data class SearchRequest(val libraryId: String, val q: String, val limit: Int)
+
+/** `GET /api/libraries/:id/recent-episodes`: episodes the user has not finished, newest published first. */
+data class RecentEpisodesRequest(val libraryId: String, val limit: Int, val page: Int)
 
 /** The home is computed again at least this often: "recent" moves with the clock, without any write. */
 const val HOME_CACHE_BUCKET_MS = 60L * 60 * 1000
@@ -566,7 +574,8 @@ class CatalogReader(
 
   /**
    * `GET /api/libraries/:id/personalized` from the replica and the progress: `{ shelves, replica }`. Books of series
-   * come whole, so an answer may carry more than [MAX_READ_LIMIT] items: the one bridge call above that limit.
+   * come whole, so an answer may carry more than [MAX_READ_LIMIT] items; the only other bridge call above that limit is
+   * a podcast's [libraryItem] with all its episodes.
    */
   suspend fun personalized(sc: String, req: PersonalizedRequest): JSONObject {
     require(req.limit in 1..MAX_SHELF_LIMIT) { "limit must be 1..$MAX_SHELF_LIMIT" }
@@ -718,5 +727,99 @@ class CatalogReader(
     results.put("tags", JSONArray().apply { found.tags.forEach { (name, n) -> put(JSONObject().put("name", name).put("numItems", n)) } })
     results.put("genres", JSONArray().apply { found.genres.forEach { (name, n) -> put(JSONObject().put("name", name).put("numItems", n)) } })
     return answer
+  }
+
+  /**
+   * `GET /api/items/:id?expanded=1&include=rssfeed` from the replica: `{ serverConfigId, libraryItem, detailLevel,
+   * replica }`. [DetailLevel.EXPANDED]: the stored copy as it is; [DetailLevel.STALE]: the copy of an older version
+   * under the row's current metadata; no copy: [CatalogJson.pseudoExpanded], without chapters. A podcast carries every
+   * episode the replica has, so the answer may hold more than [MAX_READ_LIMIT] entities. `libraryItem: null` for an
+   * item the replica lacks, with `reconciledAt` null while any library of the server was never read.
+   */
+  suspend fun libraryItem(sc: String, id: String): JSONObject {
+    val mapper = CatalogJson.mapper
+    return db.withTransaction {
+      val row = db.items().get(sc, id) ?: return@withTransaction JSONObject().put("serverConfigId", sc)
+              .put("libraryItem", JSONObject.NULL).put("detailLevel", JSONObject.NULL).put("replica", missingItemReplica(sc))
+      val podcast = row.mediaType == "podcast"
+      suspend fun fresh(): ObjectNode {
+        val minified = mapper.readTree(row.json)
+        return if (podcast) CatalogJson.pseudoExpanded(minified, emptyList(), emptyMap())
+        else CatalogJson.pseudoExpanded(minified, seriesOfItem(sc, id, row.seriesName), authorIdsByName(sc, row.libraryId))
+      }
+      val copy = row.expandedJson?.let { mapper.readTree(it) as? ObjectNode }
+      val (item, level) = when {
+        copy != null && row.detailLevel == DetailLevel.EXPANDED -> copy to DetailLevel.EXPANDED
+        copy != null && row.detailLevel == DetailLevel.STALE -> CatalogJson.overFreshRow(copy, fresh()) to DetailLevel.STALE
+        else -> fresh() to DetailLevel.MINIFIED
+      }
+      item.set<JsonNode>("rssFeed", row.rssFeedJson?.let { mapper.readTree(it) } ?: NullNode.instance)
+      if (podcast) {
+        val media = item.get("media") as? ObjectNode ?: item.putObject("media")
+        val episodes = media.putArray("episodes")
+        db.episodes().forPodcast(sc, id).forEach { episodes.add(mapper.readTree(it.json)) }
+        media.put("numEpisodes", episodes.size())
+      }
+      val state = db.libraryState().get(sc, row.libraryId)
+      JSONObject().put("serverConfigId", sc).put("libraryItem", JSONObject(mapper.writeValueAsString(item))).put("detailLevel", level)
+              .put("replica", replica(state?.itemsReconciledAt, state?.itemsComplete ?: false))
+    }
+  }
+
+  /** As the other answers by id: an item may be in any library, so every one of them has to have been read. */
+  private suspend fun missingItemReplica(sc: String): JSONObject {
+    val states = db.libraryState().all(sc).associateBy { it.libraryId }
+    val libraries = db.libraries().all(sc).map { states[it.id] }
+    val times = libraries.map { it?.itemsReconciledAt }
+    return replica(if (times.isEmpty() || times.any { it == null }) null else times.filterNotNull().min(),
+            libraries.isNotEmpty() && libraries.all { it?.itemsComplete == true })
+  }
+
+  /** The series of a book with their names, in the order of its `seriesName`. */
+  private suspend fun seriesOfItem(sc: String, id: String, seriesName: String): List<Triple<String, String, String?>> =
+          db.series().membershipOfItem(sc, id).mapNotNull { m -> db.series().get(sc, m.seriesId)?.let { Triple(m.seriesId, it.name, m.sequence) } }
+                  .sortedWith(compareBy<Triple<String, String, String?>> { seriesName.indexOf(it.second).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+                          .thenBy { it.first })
+
+  private suspend fun authorIdsByName(sc: String, libraryId: String): Map<String, String> {
+    val out = HashMap<String, String>()
+    db.authors().forLibrary(sc, libraryId).sortedBy { it.id }.forEach { out.putIfAbsent(it.name, it.id) }
+    return out
+  }
+
+  /**
+   * `GET /api/libraries/:id/recent-episodes` from the replica: `{ serverConfigId, episodes, total, limit, page, replica }`,
+   * each episode with `libraryId` and `podcast` (the podcast's media with `libraryItemId` and no episodes). As the server
+   * (`getRecentEpisodes`): episodes without a finished progress, newest published first, unpublished last.
+   */
+  suspend fun recentEpisodes(sc: String, req: RecentEpisodesRequest): JSONObject {
+    require(req.limit in 1..MAX_READ_LIMIT) { "limit must be 1..$MAX_READ_LIMIT" }
+    require(req.page >= 0) { "page must not be negative" }
+    val mapper = CatalogJson.mapper
+    val state = db.libraryState().get(sc, req.libraryId)
+    val finished = progress(sc).filter { it.episodeId.isNotEmpty() && it.isFinished }.mapTo(HashSet()) { it.libraryItemId to it.episodeId }
+    val (episodes, podcasts, total) = db.withTransaction {
+      val podcastIds = db.items().ids(sc, req.libraryId).toHashSet()
+      val ordered = db.episodes().keys(sc, req.libraryId)
+              .filter { it.libraryItemId in podcastIds && (it.libraryItemId to it.id) !in finished }
+              .sortedWith(compareBy<EpisodeKey> { it.publishedAt == null }.thenByDescending { it.publishedAt }.thenByDescending { it.addedAt }.thenBy { it.id })
+      val slice = ordered.drop(offset(req.page, req.limit)).take(req.limit)
+      val episodes = db.episodes().byIds(sc, slice.map { it.id }).associateBy { it.id }
+      val podcasts = db.items().json(sc, slice.map { it.libraryItemId }.distinct()).associateBy { it.id }
+      Triple(slice.mapNotNull { key -> episodes[key.id]?.takeIf { it.libraryItemId == key.libraryItemId } }, podcasts, ordered.size)
+    }
+    val list = JSONArray()
+    for (episode in episodes) {
+      val podcastJson = podcasts[episode.libraryItemId]?.json ?: continue
+      val podcastMedia = (mapper.readTree(podcastJson).get("media") as? ObjectNode ?: mapper.createObjectNode())
+      podcastMedia.put("libraryItemId", episode.libraryItemId).putArray("episodes")
+      val json = mapper.readTree(episode.json) as? ObjectNode ?: continue
+      if (!json.hasNonNull("libraryItemId")) json.put("libraryItemId", episode.libraryItemId)
+      json.set<JsonNode>("podcast", podcastMedia)
+      json.put("libraryId", req.libraryId)
+      list.put(JSONObject(mapper.writeValueAsString(json)))
+    }
+    return JSONObject().put("serverConfigId", sc).put("episodes", list).put("total", total).put("limit", req.limit).put("page", req.page)
+            .put("replica", replica(homeReconciledAt(state, "podcast"), state?.itemsComplete ?: false))
   }
 }

@@ -4,6 +4,9 @@ import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CollectionBooksRequest
 import app.absplus.android.sync.CollectionsRequest
 import app.absplus.android.sync.ItemsRequest
+import app.absplus.android.sync.OpenOutcome
+import app.absplus.android.sync.OpenResult
+import app.absplus.android.sync.RecentEpisodesRequest
 import app.absplus.android.sync.PersonalizedRequest
 import app.absplus.android.sync.SearchRequest
 import app.absplus.android.sync.PlaylistItemsRequest
@@ -13,6 +16,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -159,6 +163,54 @@ class AbsDataPayloadTest {
       } catch (expected: IllegalArgumentException) {
         assertEquals(message, expected.message)
       }
+    }
+  }
+
+  @Test
+  fun recentEpisodesArgumentsAreValidated() {
+    assertEquals(RecentEpisodesRequest("lib1", 50, 2), recentEpisodesRequest(JSONObject().put("libraryId", "lib1").put("limit", 50).put("page", 2)))
+    assertEquals(RecentEpisodesRequest("lib1", 100, 0), recentEpisodesRequest(JSONObject().put("libraryId", "lib1").put("limit", "100")))
+    for (limit in listOf(0, 101)) {
+      try {
+        recentEpisodesRequest(JSONObject().put("libraryId", "lib1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..100", expected.message)
+      }
+    }
+    try {
+      recentEpisodesRequest(JSONObject().put("limit", 10))
+      fail("no library")
+    } catch (expected: IllegalArgumentException) {
+      assertEquals("libraryId is required", expected.message)
+    }
+  }
+
+  @Test
+  fun itemAnswerPrefersTheServerItemAfterARefresh() {
+    val replicaState = JSONObject().put("reconciledAt", 5).put("complete", true)
+    val replicaAnswer = JSONObject().put("serverConfigId", "srv").put("detailLevel", "minified").put("replica", replicaState)
+            .put("libraryItem", JSONObject().put("id", "li1").put("media", JSONObject().put("numChapters", 2)))
+    val serverItem = """{"id":"li1","media":{"chapters":[{"id":0,"title":"One"},{"id":1,"title":"Two"}]}}"""
+
+    for (result in listOf(OpenResult.UPDATED, OpenResult.NOT_IN_REPLICA)) {
+      val answer = itemAnswer(OpenOutcome(result, serverItem), replicaAnswer)
+      assertEquals(2, answer.getJSONObject("libraryItem").getJSONObject("media").getJSONArray("chapters").length())
+      assertEquals("expanded", answer.getString("detailLevel"))
+      assertTrue(answer.getBoolean("fromServer"))
+      assertEquals("srv", answer.getString("serverConfigId"))
+      assertEquals(5, answer.getJSONObject("replica").getInt("reconciledAt"))
+    }
+
+    val removed = itemAnswer(OpenOutcome(OpenResult.REMOVED), replicaAnswer)
+    assertTrue("the replica row may still wait for the end of a pass", removed.isNull("libraryItem"))
+    assertTrue(removed.getBoolean("removed"))
+    assertEquals("srv", removed.getString("serverConfigId"))
+    assertEquals(5, removed.getJSONObject("replica").getInt("reconciledAt"))
+
+    for (outcome in listOf(OpenOutcome(OpenResult.UP_TO_DATE), OpenOutcome(OpenResult.SKIPPED), OpenOutcome(OpenResult.FAILED), null)) {
+      val answer = itemAnswer(outcome, replicaAnswer)
+      assertEquals(replicaAnswer.toString(), answer.toString())
     }
   }
 }

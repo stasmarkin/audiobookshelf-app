@@ -388,4 +388,60 @@ object CatalogJson {
             .values.flatten().toSet()
     return SeriesNameParse.Ambiguous(candidates, unknownPart = readings.isEmpty())
   }
+
+  /**
+   * A minified item in the expanded shape a page reads: a book gets `metadata.authors` (an id where the library knows
+   * the name, else null), `series` ([series]: id, name, sequence) and `narrators` back from its joined names. Chapters,
+   * tracks and files stay unknown; their counts (`numTracks`, `numChapters`, `ebookFormat`) stay. A podcast as it is.
+   */
+  fun pseudoExpanded(minified: JsonNode, series: List<Triple<String, String, String?>>, authorIdByName: Map<String, String>): ObjectNode {
+    val out = minified.deepCopy<JsonNode>() as ObjectNode
+    if (out.path("mediaType").asText() == "podcast") return out
+    val media = out.get("media") as? ObjectNode ?: out.putObject("media")
+    val metadata = media.get("metadata") as? ObjectNode ?: media.putObject("metadata")
+    val authors = metadata.putArray("authors")
+    splitNames(metadata.text("authorName") ?: "", authorIdByName.keys).forEach { name ->
+      authors.addObject().put("id", authorIdByName[name]).put("name", name)
+    }
+    val seriesList = metadata.putArray("series")
+    series.forEach { (id, name, sequence) -> seriesList.addObject().put("id", id).put("name", name).put("sequence", sequence) }
+    val narrators = metadata.putArray("narrators")
+    (metadata.text("narratorName") ?: "").split(", ").filter { it.isNotEmpty() }.forEach { narrators.add(it) }
+    return out
+  }
+
+  /**
+   * `"A, B"` read against [known] names, longest first, so a known name with a comma stays whole; the rest splits on
+   * `", "`.
+   */
+  private fun splitNames(joined: String, known: Collection<String>): List<String> {
+    val names = known.filter { it.isNotEmpty() }.sortedByDescending { it.length }
+    val out = mutableListOf<String>()
+    var pos = 0
+    while (pos < joined.length) {
+      val name = names.firstOrNull { joined.startsWith(it, pos) && (pos + it.length == joined.length || joined.startsWith(", ", pos + it.length)) }
+              ?: joined.indexOf(", ", pos).let { end -> joined.substring(pos, if (end < 0) joined.length else end) }
+      if (name.isNotEmpty()) out += name
+      pos += name.length + 2
+    }
+    return out
+  }
+
+  private val LINK_KEYS = setOf("authors", "narrators", "series", "genres")
+
+  /**
+   * The expanded copy of an older version with the current row over it ([fresh]: its [pseudoExpanded] item): the top
+   * level, the metadata values and links, cover, tags and duration are the row's; chapters, tracks and files the copy's.
+   */
+  fun overFreshRow(copy: ObjectNode, fresh: JsonNode): ObjectNode {
+    fresh.fields().forEach { (key, value) -> if (key != "media") copy.set<JsonNode>(key, value.deepCopy()) }
+    val freshMedia = fresh.path("media")
+    val media = copy.get("media") as? ObjectNode ?: copy.putObject("media")
+    listOf("coverPath", "tags", "duration").forEach { key -> freshMedia.get(key)?.let { media.set<JsonNode>(key, it.deepCopy()) } }
+    val metadata = media.get("metadata") as? ObjectNode ?: media.putObject("metadata")
+    freshMedia.path("metadata").fields().forEach { (key, value) ->
+      if (value.isValueNode || key in LINK_KEYS) metadata.set<JsonNode>(key, value.deepCopy())
+    }
+    return copy
+  }
 }

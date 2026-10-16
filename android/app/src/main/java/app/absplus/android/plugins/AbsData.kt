@@ -15,7 +15,10 @@ import app.absplus.android.sync.MAX_COLLECTIONS_LIMIT
 import app.absplus.android.sync.ItemsRequest
 import app.absplus.android.sync.MAX_PLAYLISTS_LIMIT
 import app.absplus.android.sync.MAX_READ_LIMIT
+import app.absplus.android.sync.OpenOutcome
+import app.absplus.android.sync.OpenResult
 import app.absplus.android.sync.PersonalizedRequest
+import app.absplus.android.sync.RecentEpisodesRequest
 import app.absplus.android.sync.PlaylistItemsRequest
 import app.absplus.android.sync.PlaylistsRequest
 import app.absplus.android.sync.SearchRequest
@@ -102,6 +105,28 @@ internal fun playlistItemsRequest(data: JSONObject): PlaylistItemsRequest {
   return PlaylistItemsRequest(id, limit, page)
 }
 
+/** `getRecentEpisodes` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun recentEpisodesRequest(data: JSONObject): RecentEpisodesRequest {
+  val (libraryId, limit, page) = pageArguments(data)
+  return RecentEpisodesRequest(libraryId, limit, page)
+}
+
+/**
+ * The answer of `getLibraryItem` after [outcome] of opening it: the server's item when it was just read (the replica
+ * may still hold it back until a catalog pass ends), none when the server no longer has it, else the replica's.
+ * `serverConfigId` and `replica` are always the replica answer's.
+ */
+internal fun itemAnswer(outcome: OpenOutcome?, replicaAnswer: JSONObject): JSONObject {
+  val base = { JSONObject().put("serverConfigId", replicaAnswer.opt("serverConfigId") ?: JSONObject.NULL).put("replica", replicaAnswer.opt("replica") ?: JSONObject.NULL) }
+  return when {
+    outcome == null -> replicaAnswer
+    (outcome.result == OpenResult.UPDATED || outcome.result == OpenResult.NOT_IN_REPLICA) && outcome.serverItem != null ->
+      base().put("libraryItem", JSONObject(outcome.serverItem)).put("detailLevel", "expanded").put("fromServer", true)
+    outcome.result == OpenResult.REMOVED -> base().put("libraryItem", JSONObject.NULL).put("detailLevel", JSONObject.NULL).put("removed", true)
+    else -> replicaAnswer
+  }
+}
+
 private fun limitArgument(data: JSONObject, default: Int, max: Int): Int {
   if (!data.has("limit") || data.isNull("limit")) return default
   val limit = (data.opt("limit") as? Number)?.toInt() ?: data.optString("limit").toIntOrNull()
@@ -136,8 +161,8 @@ private fun pageArguments(data: JSONObject, maxLimit: Int = MAX_READ_LIMIT, idKe
 /**
  * Offline-first data bridge: the active server's reachability (its state, the WebView's reports about its own requests
  * and socket, a manual retry), the user's progress, bookmarks and user object from userdata.db with their writes, the
- * catalog from replica.db (at most [MAX_READ_LIMIT] entities a call), and the sync engine (`onDataChanged`,
- * `onSyncState`, manual sync, server events the WebView received).
+ * catalog from replica.db (at most [MAX_READ_LIMIT] entities a call, except the home shelves and a podcast item), and
+ * the sync engine (`onDataChanged`, `onSyncState`, manual sync, server events the WebView received).
  */
 @CapacitorPlugin(name = "AbsData")
 class AbsData : Plugin() {
@@ -623,6 +648,40 @@ class AbsData : Plugin() {
       JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
               .put("found", false).put("replica", emptyReplica())
     }) { reader, sc -> reader.playlistItems(sc, request) }
+  }
+
+  /**
+   * `GET /api/items/:id?expanded=1` from the replica: `{ serverConfigId, libraryItem, detailLevel, replica }` (see
+   * [CatalogReader.libraryItem]). `refresh`: the user opened the item, so while online the active server's expanded
+   * copy is read first when the replica lacks it (`force`: whatever the replica has); its answer comes with
+   * `fromServer: true`, a server that no longer has the item answers `libraryItem: null, removed: true`. A podcast
+   * carries all its episodes: an exception to the 100 entities of a call.
+   */
+  @PluginMethod
+  fun getLibraryItem(call: PluginCall) {
+    val id = call.getString("id")
+    if (id.isNullOrEmpty()) return call.reject("id is required")
+    val refresh = flag(call.data, "refresh")
+    val force = flag(call.data, "force")
+    readCatalog(call, { JSONObject().put("libraryItem", JSONObject.NULL).put("detailLevel", JSONObject.NULL).put("replica", emptyReplica()) }) { reader, sc ->
+      // Only the active server is asked; a downloaded copy's other server answers from the replica
+      val outcome = if (refresh && sc == ActiveServer.current()?.id) SyncEngine.openItem(id, force) else null
+      itemAnswer(outcome, reader.libraryItem(sc, id))
+    }
+  }
+
+  /** A page of `GET /api/libraries/:id/recent-episodes` from the replica; `limit` must be 1..100. */
+  @PluginMethod
+  fun getRecentEpisodes(call: PluginCall) {
+    val request = try {
+      recentEpisodesRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("episodes", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.recentEpisodes(sc, request) }
   }
 
   /** The library the next catalog pass reconciles first. */

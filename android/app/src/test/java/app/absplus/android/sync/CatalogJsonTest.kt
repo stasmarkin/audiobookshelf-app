@@ -290,4 +290,37 @@ class CatalogJsonTest {
     assertEquals("1\u0001", CatalogJson.searchKey(book))
     assertEquals("1\u0001", CatalogJson.episodeSearchKey("  "))
   }
+
+  @Test
+  fun pseudoExpandedRestoresLinks() {
+    val minified = fixture("book-minified.json") as ObjectNode
+    val metadata = minified.path("media").path("metadata") as ObjectNode
+    metadata.put("authorName", "Ann Lee, John Smith").put("narratorName", "X, Y")
+    (minified.path("media") as ObjectNode).put("numChapters", 3).put("ebookFormat", "epub")
+    val series = listOf(Triple("s1", "Мир", "1"), Triple("s2", "Трилогия", "3"))
+
+    val item = CatalogJson.pseudoExpanded(minified, series, mapOf("Ann Lee" to "a1"))
+    val out = item.path("media").path("metadata")
+    assertEquals(CatalogJson.mapper.readTree("""[{"id":"a1","name":"Ann Lee"},{"id":null,"name":"John Smith"}]"""), out.path("authors"))
+    assertEquals(CatalogJson.mapper.readTree("""[{"id":"s1","name":"Мир","sequence":"1"},{"id":"s2","name":"Трилогия","sequence":"3"}]"""), out.path("series"))
+    assertEquals(CatalogJson.mapper.readTree("""["X","Y"]"""), out.path("narrators"))
+    assertFalse(item.path("media").has("chapters"))
+    assertFalse(item.path("media").has("tracks"))
+    assertEquals(1, item.path("media").path("numTracks").asInt())
+    assertEquals(3, item.path("media").path("numChapters").asInt())
+    assertEquals("epub", item.path("media").path("ebookFormat").asText())
+    assertEquals("the input is not changed", "Ann Lee, John Smith", minified.path("media").path("metadata").path("authorName").asText())
+    assertFalse(minified.path("media").path("metadata").has("authors"))
+
+    metadata.put("narratorName", "").put("authorName", "")
+    val empty = CatalogJson.pseudoExpanded(minified, emptyList(), emptyMap()).path("media").path("metadata")
+    assertEquals(0, empty.path("narrators").size())
+    assertEquals(0, empty.path("authors").size())
+    assertTrue(empty.path("narrators").isArray && empty.path("series").isArray)
+
+    // A known name with a comma is one author, not two
+    metadata.put("authorName", "Smith, Jr., Ann Lee")
+    val comma = CatalogJson.pseudoExpanded(minified, emptyList(), mapOf("Smith, Jr." to "a2", "Ann Lee" to "a1")).path("media").path("metadata")
+    assertEquals(CatalogJson.mapper.readTree("""[{"id":"a2","name":"Smith, Jr."},{"id":"a1","name":"Ann Lee"}]"""), comma.path("authors"))
+  }
 }
