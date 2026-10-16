@@ -16,11 +16,14 @@
 
 <script>
 import { CapacitorHttp } from '@capacitor/core'
-import { AbsLogger } from '@/plugins/capacitor'
+import { AbsLogger, AbsDownloader } from '@/plugins/capacitor'
+
+const AUTO_DOWNLOAD_CHECK_MIN_INTERVAL_MS = 15 * 60 * 1000
 
 export default {
   data() {
     return {
+      lastAutoDownloadCheckAt: 0,
       inittingLibraries: false,
       hasMounted: false,
       initialSessionsSynced: false,
@@ -360,6 +363,7 @@ export default {
           console.log(`✅ [default] device visibility: reloading local media progress`)
           // Reload local media progresses
           await this.$store.dispatch('globals/loadLocalMediaProgress')
+          if (this.hasMounted) this.checkAutoDownloads('foreground')
         }
         if (document.visibilityState === 'visible') {
           this.$eventBus.$emit('device-focus-update', true)
@@ -368,6 +372,17 @@ export default {
         console.log('⛔️ [default] device visibility: does NOT have focus')
         this.timeLostFocus = Date.now()
         this.$eventBus.$emit('device-focus-update', false)
+      }
+    },
+    async checkAutoDownloads(reason) {
+      if (this.$platform !== 'android') return
+      if (Date.now() - this.lastAutoDownloadCheckAt < AUTO_DOWNLOAD_CHECK_MIN_INTERVAL_MS) return
+      try {
+        const result = await AbsDownloader.checkAutoDownloads()
+        if (result?.status === 'started') this.lastAutoDownloadCheckAt = Date.now()
+        console.log(`[default] checkAutoDownloads (${reason}): ${result?.status}`)
+      } catch (error) {
+        console.error(`[default] checkAutoDownloads (${reason}) failed`, error)
       }
     },
     changeLanguage(code) {
@@ -411,6 +426,8 @@ export default {
 
       await this.syncLocalSessions(true)
       this.initialSessionsSynced = !!this.user
+
+      this.checkAutoDownloads('app-open')
 
       AbsLogger.info({ tag: 'default', message: 'mounted: fully initialized' })
       this.$eventBus.$emit('abs-ui-ready')

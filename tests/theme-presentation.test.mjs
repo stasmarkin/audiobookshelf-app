@@ -25,7 +25,7 @@ test('surface.recessed and both presentation policies are part of the schema', (
   assert.deepEqual(
     policyTokens.map((t) => [t.name, t.type, t.values, t.cssVar]),
     [
-      ['presentation.finish', 'enum', ['standard', 'equipment'], undefined],
+      ['presentation.finish', 'enum', ['standard', 'equipment', 'eink'], undefined],
       ['presentation.cover-color', 'enum', ['legacy', 'theme'], undefined]
     ]
   )

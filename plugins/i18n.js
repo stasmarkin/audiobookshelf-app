@@ -54,7 +54,9 @@ function syncDownloadNotificationStrings() {
     downloadingFile: Vue.prototype.$strings.MessageDownloadingFile,
     waitingForStorage: Vue.prototype.$strings.MessageWaitingForAvailableStorage,
     downloads: Vue.prototype.$strings.HeaderDownloads,
-    cancel: Vue.prototype.$strings.ButtonCancel
+    cancel: Vue.prototype.$strings.ButtonCancel,
+    moveToSd: Vue.prototype.$strings.MessageDownloadStorageMovingToSd,
+    moveToInternal: Vue.prototype.$strings.MessageDownloadStorageMovingToInternal
   }).catch((error) => console.warn('Failed to update download notification strings', error))
   AbsFileSystem.setFolderPickerStrings({
     writeAccessRequired: Vue.prototype.$strings.MessageStorageWriteAccessRequired,

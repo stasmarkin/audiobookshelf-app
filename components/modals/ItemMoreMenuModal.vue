@@ -2,6 +2,7 @@
   <div>
     <modals-dialog v-model="show" :items="moreMenuItems" @action="moreMenuAction" />
     <modals-item-details-modal v-model="showDetailsModal" :library-item="libraryItem" />
+    <modals-podcast-auto-download-modal v-model="showPodcastAutoDownloadModal" :library-item-id="libraryItem && libraryItem.id" />
     <modals-dialog v-model="showSendEbookDevicesModal" :title="$strings.LabelSelectADevice" :items="ereaderDeviceItems" @action="sendEbookToDeviceAction" />
   </div>
 </template>
@@ -35,6 +36,7 @@ export default {
   data() {
     return {
       showDetailsModal: false,
+      showPodcastAutoDownloadModal: false,
       showSendEbookDevicesModal: false
     }
   },
@@ -118,6 +120,14 @@ export default {
           text: this.rssFeed ? this.$strings.HeaderRSSFeed : this.$strings.HeaderOpenRSSFeed,
           value: 'rssFeed',
           icon: 'rss_feed'
+        })
+      }
+
+      if (this.showPodcastAutoDownloadOption) {
+        items.push({
+          text: this.$strings.ButtonAutoDownloadSettings,
+          value: 'podcastAutoDownload',
+          icon: 'download_for_offline'
         })
       }
 
@@ -267,6 +277,9 @@ export default {
       // If rss feed is open then show feed url to users otherwise just show to admins
       return this.userIsAdminOrUp || this.rssFeed
     },
+    showPodcastAutoDownloadOption() {
+      return this.$platform === 'android' && this.isPodcast && !this.isLocal && !this.episode && !!this.$store.getters['user/getServerConnectionConfigId']
+    },
     mediaId() {
       if (this.isPodcast) return null
       return this.serverLibraryItemId || this.localLibraryItemId
@@ -311,6 +324,8 @@ export default {
         this.clickRSSFeed()
       } else if (action === 'sendEbook') {
         this.showSendEbookDevicesModal = true
+      } else if (action === 'podcastAutoDownload') {
+        this.showPodcastAutoDownloadModal = true
       } else if (action === 'openWebClient') {
         this.$store.dispatch('user/openWebClient', `/item/${this.serverLibraryItemId}`)
       }
@@ -429,7 +444,7 @@ export default {
         message: this.$getString('MessageConfirmDeleteLocalEpisode', [localFile.basePath])
       })
       if (value) {
-        const res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItemId, trackLocalFileId: localFile.id, trackContentUrl: localEpisodeAudioTrack.contentUrl })
+        const res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItemId, trackLocalFileId: localFile.id, trackContentUrl: localEpisodeAudioTrack.contentUrl, localEpisodeId: this.localEpisode.id })
         if (res?.id) {
           if (this.isLocal) {
             // If this is local episode then redirect to server episode when available
@@ -467,7 +482,8 @@ export default {
             // Remove localLibraryItem
             this.$delete(this.libraryItem, 'localLibraryItem')
           }
-        } else this.$toast.error('Failed to delete')
+        } else if (res?.reason === 'storageUnavailable') this.$toast.error(this.$strings.LabelDownloadStorageUnavailable)
+        else this.$toast.error('Failed to delete')
       }
     },
     clickRSSFeed() {

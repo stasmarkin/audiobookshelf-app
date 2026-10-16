@@ -39,7 +39,7 @@
     </div>
 
     <template v-for="episode in episodesSorted">
-      <tables-podcast-episode-row :episode="episode" :local-episode="localEpisodeMap[episode.id]" :library-item-id="libraryItemId" :local-library-item-id="localLibraryItemId" :is-local="isLocal" :sort-key="sortKey" :key="episode.id" @addToPlaylist="addEpisodeToPlaylist" />
+      <tables-podcast-episode-row :episode="episode" :local-episode="localEpisodeMap[episode.id]" :library-item-id="libraryItemId" :local-library-item-id="localLibraryItemId" :is-local="isLocal" :sort-key="sortKey" :auto-downloaded="autoEpisodeIds.includes(episode.id)" :key="episode.id" @addToPlaylist="addEpisodeToPlaylist" />
     </template>
 
     <!-- Huhhh?
@@ -56,6 +56,7 @@
 
 <script>
 import { Dialog } from '@capacitor/dialog'
+import { AbsDownloader } from '@/plugins/capacitor'
 import { podcastSortOverrideKey, resolvePodcastEpisodeSort, sortPodcastEpisodes } from '@/utils/podcastEpisodes'
 
 export default {
@@ -84,7 +85,8 @@ export default {
       podcastFeedEpisodes: [],
       showPodcastEpisodeFeed: false,
       episodesDownloading: [],
-      episodeDownloadsQueued: []
+      episodeDownloadsQueued: [],
+      autoEpisodeIds: []
     }
   },
   watch: {
@@ -298,6 +300,12 @@ export default {
         this.episodeDownloadsQueued.push(episodeDownload)
       }
     },
+    // Episodes auto download fetched (current server): marked on their row when the copy is on the device
+    async loadAutoEpisodes() {
+      if (this.isLocal || !this.libraryItemId) return
+      const result = await AbsDownloader.getAutoDownloadedEpisodes({ libraryItemId: this.libraryItemId }).catch(() => null)
+      this.autoEpisodeIds = Array.isArray(result?.episodeIds) ? result.episodeIds : []
+    },
     episodeDownloadStarted(episodeDownload) {
       if (episodeDownload.libraryItemId === this.libraryItemId) {
         this.episodeDownloadsQueued = this.episodeDownloadsQueued.filter((d) => d.id !== episodeDownload.id)
@@ -315,6 +323,7 @@ export default {
     if (this.$route.query['episodefilter'] === 'downloaded') {
       this.$store.dispatch('user/updateUserSettings', { podcastEpisodesFilterBy: 'downloaded' })
     }
+    this.loadAutoEpisodes()
     this.$socket.$on('episode_download_queued', this.episodeDownloadQueued)
     this.$socket.$on('episode_download_started', this.episodeDownloadStarted)
     this.$socket.$on('episode_download_finished', this.episodeDownloadFinished)
