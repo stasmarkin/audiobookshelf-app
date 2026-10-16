@@ -447,3 +447,17 @@ test('home does not read /personalized directly', async () => {
   assert.match(script, /onDataChanged\(this\.dataChanged\)/)
   assert.match(source.match(/<template>([\s\S]*)<\/template>/)[1], /MessageCatalogNotLoaded/)
 })
+
+test("another library's shelves go before the downloaded items are read", async () => {
+  const page = await homePage()
+  await page.view.fetchCategories()
+  assert.equal(page.view.shelves[0].id, 'continue-listening')
+  let release
+  page.view.$db.getLocalLibraryItems = () => new Promise((resolve) => (release = () => resolve([])))
+  page.store.state.libraries.currentLibraryId = 'lib2'
+  const read = page.view.fetchCategories()
+  assert.deepEqual(page.view.shelves, [], 'synchronously, before the local items answer')
+  release()
+  await read
+  assert.equal(page.view.shelves[0].id, 'continue-listening')
+})

@@ -106,6 +106,8 @@ export default {
       answerResults: {},
       // The downloaded items, read once for the open page and again when a download finishes or a copy is deleted
       localItems: null,
+      // Bumped when the cache is dropped: a read that started before must not fill it
+      localItemsGeneration: 0,
       refreshDebouncer: null,
       stopDataChanged: null,
       bookResults: [],
@@ -186,8 +188,11 @@ export default {
       this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.totalResults
     },
     async loadLocalItems() {
-      if (this.localItems === null) this.localItems = await this.$db.getLocalLibraryItems().catch(() => [])
-      return this.localItems
+      if (this.localItems !== null) return this.localItems
+      const generation = this.localItemsGeneration
+      const items = await this.$db.getLocalLibraryItems().catch(() => [])
+      if (generation === this.localItemsGeneration) this.localItems = items
+      return this.localItems || []
     },
     /** The groups of the shown answer with the downloaded copies of the active server joined. */
     showResults() {
@@ -211,6 +216,7 @@ export default {
     /** A download finished or a downloaded copy was deleted: the copies joined to the results change. */
     async localItemsChanged() {
       this.localItems = null
+      this.localItemsGeneration++
       await this.loadLocalItems()
       this.showResults()
     },

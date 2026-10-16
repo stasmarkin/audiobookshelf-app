@@ -346,3 +346,19 @@ test('a downloaded search result opens its copy offline', async () => {
   await asyncData({ store: { state: { user: { serverConnectionConfig: null } }, getters: {} }, params: { id: 'li1' }, query: { localLibraryItemId: 'local_1' }, redirect: (path) => redirects.push(path), app: {} })
   assert.deepEqual(redirects, ['/item/local_1?noredirect=1'])
 })
+
+test('a read of downloaded copies started before a change does not fill the cache', async () => {
+  const page = await searchPage({ search: ({ libraryId, q }) => ({ serverConfigId: 'a', libraryId, q, results: { book: [book('li1')] }, replica: replica() }) })
+  const pending = []
+  page.view.$db.getLocalLibraryItems = () => new Promise((resolve) => pending.push(resolve))
+  const search = page.view.runSearch('a')
+  await flush()
+  const changed = page.view.localItemsChanged()
+  await flush()
+  pending[1]([{ id: 'local_1', libraryItemId: 'li1', serverConnectionConfigId: 'a', media: {} }])
+  await changed
+  pending[0]([])
+  await search
+  assert.equal(page.view.localItems.length, 1, 'the older read (no copies) did not overwrite the newer one')
+  assert.equal(page.view.bookResults[0].localLibraryItem.id, 'local_1')
+})

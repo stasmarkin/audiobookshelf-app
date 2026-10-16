@@ -226,7 +226,11 @@ export default {
       const seq = ++this.fetchSeq
       const shelvesFor = `${serverConfigId}|${libraryId}`
       const otherShelves = !this.shelves.length || this.shownFor !== shelvesFor
-      if (otherShelves) this.isLoading = true
+      if (otherShelves) {
+        this.isLoading = true
+        // Not a moment of the previous library's shelves while the downloaded items are read
+        if (this.shownFor !== null && this.shownFor !== shelvesFor) this.showLocalShelves([])
+      }
 
       const localLibraryItems = await this.$db.getLocalLibraryItems()
       if (seq !== this.fetchSeq) return
