@@ -9,6 +9,7 @@
       <p class="pl-4">{{ $strings.MessageLoadingServerData }}</p>
     </div>
 
+    <p v-if="catalogNotLoaded && shelves.length" class="w-full px-6 pt-4 text-center text-sm text-fg-muted">{{ $strings.MessageCatalogNotLoaded }}</p>
     <div class="w-full" :class="{ 'py-6': altViewEnabled }">
       <template v-for="(shelf, index) in shelves">
         <bookshelf-shelf :key="shelf.id" :label="getShelfLabel(shelf)" :entities="shelf.entities" :type="shelf.type" :style="{ zIndex: shelves.length - index }" />
@@ -18,7 +19,7 @@
     <div v-if="!shelves.length && !isLoading" class="absolute top-0 left-0 w-full h-full flex items-center justify-center">
       <div>
         <p class="mb-4 text-center text-xl">
-          {{ $strings.MessageBookshelfEmpty }}
+          {{ catalogNotLoaded ? $strings.MessageCatalogNotLoaded : $strings.MessageBookshelfEmpty }}
         </p>
         <div class="w-full" v-if="!user && serverUnreachable">
           <div class="flex justify-center items-center mb-3">
@@ -46,47 +47,35 @@
 </template>
 
 <script>
+import { mergeHomeShelves, shouldRefreshHome, continueKeysOf } from '@/utils/homeShelves'
+import { createDebouncer } from '@/utils/catalogRefresh'
+
+/** A read of the same library, server and connection within this time is skipped (notices of native are not). */
+const FETCH_THROTTLE_MS = 5000
+
 export default {
   props: {},
   data() {
     return {
       shelves: [],
-      isFirstNetworkConnection: true,
-      lastServerFetch: 0,
-      lastServerFetchLibraryId: null,
-      lastLocalFetch: 0,
+      catalogNotLoaded: false,
+      lastFetch: 0,
+      lastFetchKey: null,
+      fetchSeq: 0,
+      // The key of the playing item a playback tick already re-read the home for (see shouldRefreshHome)
+      refreshedForKey: null,
+      refreshDebouncer: null,
+      stopDataChanged: null,
       localLibraryItems: [],
       isLoading: false
     }
   },
   watch: {
-    networkConnected(newVal) {
-      // Update shelves when network connect status changes
-      console.log(`[categories] Network changed to ${newVal} - fetch categories. ${this.lastServerFetch}/${this.lastLocalFetch}`)
-
-      if (newVal) {
-        // Fetch right away the first time network connects
-        if (this.isFirstNetworkConnection) {
-          this.isFirstNetworkConnection = false
-          console.log(`[categories] networkConnected true first network connection. lastServerFetch=${this.lastServerFetch}`)
-          this.fetchCategories()
-          return
-        }
-
-        setTimeout(() => {
-          // Using timeout because making this fetch as soon as network gets connected will often fail on Android
-          console.log(`[categories] networkConnected true so fetching categories. lastServerFetch=${this.lastServerFetch}`)
-          this.fetchCategories()
-        }, 4000)
-      } else {
-        console.log(`[categories] networkConnected false so fetching categories`)
-        this.fetchCategories()
-      }
-    },
     user(newVal, oldVal) {
+      // A sign-in makes the server readable for a library native never reconciled
       if ((newVal && !oldVal) || (!newVal && oldVal)) {
         console.log(`[categories] user changed so fetching categories`)
-        this.fetchCategories()
+        this.fetchCategories({ force: true })
       }
     }
   },
@@ -97,9 +86,6 @@ export default {
     },
     user() {
       return this.$store.state.user.user
-    },
-    networkConnected() {
-      return this.$store.state.networkConnected
     },
     isIos() {
       return this.$platform === 'ios'
@@ -218,78 +204,58 @@ export default {
 
       return categories
     },
-    async fetchCategories() {
-      console.log(`[categories] fetchCategories networkConnected=${this.networkConnected}, lastServerFetch=${this.lastServerFetch}, lastLocalFetch=${this.lastLocalFetch}`)
-
-      // TODO: Find a better way to keep the shelf up-to-date with local vs server library because this is a disaster
-      const isConnectedToServerWithInternet = this.user && this.currentLibraryId && this.networkConnected
-      if (isConnectedToServerWithInternet) {
-        if (this.lastServerFetch && Date.now() - this.lastServerFetch < 5000 && this.lastServerFetchLibraryId == this.currentLibraryId) {
-          console.log(`[categories] fetchCategories server fetch was ${Date.now() - this.lastServerFetch}ms ago so not doing it.`)
-          return
-        } else {
-          console.log(`[categories] fetchCategories fetching from server. Last was ${this.lastServerFetch ? Date.now() - this.lastServerFetch + 'ms' : 'Never'} ago. lastServerFetchLibraryId=${this.lastServerFetchLibraryId} and currentLibraryId=${this.currentLibraryId}`)
-          this.lastServerFetchLibraryId = this.currentLibraryId
-          this.lastServerFetch = Date.now()
-          this.lastLocalFetch = 0
-        }
-      } else {
-        if (this.lastLocalFetch && Date.now() - this.lastLocalFetch < 5000) {
-          console.log(`[categories] fetchCategories local fetch was ${Date.now() - this.lastLocalFetch}ms ago so not doing it.`)
-          return
-        } else {
-          console.log(`[categories] fetchCategories fetching from local. Last was ${this.lastLocalFetch ? Date.now() - this.lastLocalFetch + 'ms' : 'Never'} ago`)
-          this.lastServerFetchLibraryId = null
-          this.lastServerFetch = 0
-          this.lastLocalFetch = Date.now()
-        }
+    /**
+     * The home of the current library: native's shelves (the replica, or the server while the library was never
+     * reconciled), the downloaded copies joined to them, and the local shelves. `force`: a re-read for a change native
+     * reported, not throttled; `playbackKey`: the playing item's key when a playback tick asked for it.
+     */
+    async fetchCategories({ force = false, playbackKey = null } = {}) {
+      const libraryId = this.currentLibraryId
+      const serverConfigId = this.$store.state.activeServerConfigId ?? null
+      const readsCatalog = !!(this.$store.getters['getHasActiveServer'] && libraryId)
+      const key = [serverConfigId, libraryId, !!this.user, this.$store.state.serverState].join('|')
+      if (!force && this.lastFetch && Date.now() - this.lastFetch < FETCH_THROTTLE_MS && this.lastFetchKey === key) {
+        console.log(`[categories] fetchCategories was ${Date.now() - this.lastFetch}ms ago so not doing it.`)
+        return
       }
-
+      this.lastFetch = Date.now()
+      this.lastFetchKey = key
+      this.refreshedForKey = playbackKey
+      const seq = ++this.fetchSeq
       this.isLoading = true
 
-      // Set local library items first
-      this.localLibraryItems = await this.$db.getLocalLibraryItems()
-      const localCategories = this.getLocalMediaItemCategories()
-      this.shelves = localCategories
-      console.log('[categories] Local shelves set', this.shelves.length, this.lastLocalFetch)
+      const localLibraryItems = await this.$db.getLocalLibraryItems()
+      if (seq !== this.fetchSeq) return
+      this.localLibraryItems = localLibraryItems
+      const localShelves = this.getLocalMediaItemCategories()
+      // Something to show while native answers, on the first read only: a re-read keeps the shelves in place
+      if (!this.shelves.length) this.shelves = localShelves
 
-      if (isConnectedToServerWithInternet) {
-        const categories = await this.$nativeHttp.get(`/api/libraries/${this.currentLibraryId}/personalized?minified=1&include=rssfeed,numEpisodesIncomplete`, { connectTimeout: 10000 }).catch((error) => {
-          console.error('[categories] Failed to fetch categories', error)
-          return []
+      let answer = null
+      let failed = false
+      if (readsCatalog) {
+        answer = await this.$absData.getPersonalized({ libraryId }).catch((error) => {
+          console.error('[categories] Failed to read the home shelves', error)
+          failed = true
+          return null
         })
-        if (!categories.length) {
-          // Failed to load categories so use local shelves
-          console.warn(`[categories] Failed to get server categories so using local categories`)
-          this.lastServerFetch = 0
-          this.lastLocalFetch = Date.now()
+        if (seq !== this.fetchSeq) return
+        // Asked for another library or server than the current one: the read for the current one is on its way
+        if (answer && (answer.libraryId !== this.currentLibraryId || (answer.serverConfigId ?? null) !== (this.$store.state.activeServerConfigId ?? null))) {
           this.isLoading = false
-          console.log('[categories] Local shelves set from failure', this.shelves.length, this.lastLocalFetch)
           return
         }
-
-        this.shelves = categories.map((cat) => {
-          if (cat.type == 'book' || cat.type == 'podcast' || cat.type == 'episode') {
-            // Map localLibraryItem to entities
-            cat.entities = cat.entities.map((entity) => {
-              const localLibraryItem = this.localLibraryItems.find((lli) => {
-                return lli.libraryItemId == entity.id
-              })
-              if (localLibraryItem) {
-                entity.localLibraryItem = localLibraryItem
-              }
-              return entity
-            })
-          }
-          return cat
-        })
-
-        // Only add the local shelf with the same media type
-        const localShelves = localCategories.filter((cat) => cat.type === this.currentLibraryMediaType && !cat.localOnly)
-        this.shelves.push(...localShelves)
-        console.log('[categories] Server shelves set', this.shelves.length, this.lastServerFetch)
       }
 
+      if (failed) {
+        this.shelves = localShelves
+        this.catalogNotLoaded = false
+      } else {
+        const merged = mergeHomeShelves({ answer, localShelves, localItems: localLibraryItems, activeServerConfigId: serverConfigId, mediaType: this.currentLibraryMediaType })
+        this.shelves = merged.shelves
+        this.catalogNotLoaded = merged.catalogNotLoaded
+      }
+      console.log('[categories] Shelves set', this.shelves.length, answer?.fromServer ? 'from the server' : 'from the device')
       this.isLoading = false
     },
     libraryChanged() {
@@ -298,45 +264,15 @@ export default {
         this.fetchCategories()
       }
     },
-    audiobookAdded(audiobook) {
-      // TODO: Check if audiobook would be on this shelf
-      if (!this.search) {
-        this.fetchCategories()
-      }
-    },
-    audiobookUpdated(audiobook) {
-      this.shelves.forEach((shelf) => {
-        if (shelf.type === 'books') {
-          shelf.entities = shelf.entities.map((ent) => {
-            if (ent.id === audiobook.id) {
-              return audiobook
-            }
-            return ent
-          })
-        } else if (shelf.type === 'series') {
-          shelf.entities.forEach((ent) => {
-            ent.books = ent.books.map((book) => {
-              if (book.id === audiobook.id) return audiobook
-              return book
-            })
-          })
-        }
-      })
-    },
-    removeBookFromShelf(audiobook) {
-      this.shelves.forEach((shelf) => {
-        if (shelf.type === 'books') {
-          shelf.entities = shelf.entities.filter((ent) => {
-            return ent.id !== audiobook.id
-          })
-        } else if (shelf.type === 'series') {
-          shelf.entities.forEach((ent) => {
-            ent.books = ent.books.filter((book) => {
-              return book.id !== audiobook.id
-            })
-          })
-        }
-      })
+    /** A change native reported that may change the home: one re-read a second after the last such notice. */
+    dataChanged(change) {
+      const playingEpisodeId = this.$store.state.currentPlaybackSession?.episodeId || null
+      const continueKeys = continueKeysOf(this.shelves)
+      if (!shouldRefreshHome(change, { libraryId: this.currentLibraryId, continueKeys, playingEpisodeId, refreshedForKey: this.refreshedForKey })) return
+      const keyOf = (id) => (playingEpisodeId ? `${id}:${playingEpisodeId}` : id)
+      const playbackKey = change.scope === 'playback' ? keyOf((change.ids || []).find((id) => keyOf(id) !== continueKeys[0] && keyOf(id) !== this.refreshedForKey)) : null
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(() => this.fetchCategories({ force: true, playbackKey }))
     },
     initListeners() {
       this.$eventBus.$on('library-changed', this.libraryChanged)
@@ -353,12 +289,16 @@ export default {
     }
 
     this.initListeners()
+    this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
     await this.$store.dispatch('globals/loadLocalMediaProgress')
     console.log(`[categories] mounted so fetching categories`)
     this.fetchCategories()
   },
   beforeDestroy() {
     this.removeListeners()
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
   }
 }
 </script>

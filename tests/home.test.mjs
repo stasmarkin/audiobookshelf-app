@@ -247,3 +247,129 @@ test('web dev fallback proxies home and search to $axios', async () => {
   assert.equal(found.replica.complete, true)
   assert.deepEqual(plugin.calls, [], 'native is not asked in the browser')
 })
+
+// ---- The home page (pages/bookshelf/index.vue) as a plain object over fakes
+
+const { createDebouncer } = await importSource('../utils/catalogRefresh.js')
+const { continueKeysOf } = await import(`data:text/javascript;base64,${Buffer.from(homeSource).toString('base64')}`)
+
+const fakeTimers = () => {
+  let queue = []
+  return {
+    setTimer: (fn, ms) => {
+      const t = { fn, ms }
+      queue.push(t)
+      return t
+    },
+    clearTimer: (t) => (queue = queue.filter((q) => q !== t)),
+    run: () => {
+      const due = queue
+      queue = []
+      due.forEach((t) => t.fn())
+      return due.map((t) => t.ms)
+    }
+  }
+}
+
+const flush = async (n = 30) => {
+  for (let i = 0; i < n; i++) await Promise.resolve()
+}
+
+async function homePage({ user = null, activeServerConfigId = 'a', serverState = 'offline', hasActiveServer = true, currentLibraryId = 'lib1', mediaType = 'book', plugin = fakePlugin(), localItems = [], signedIn = !!user } = {}) {
+  const source = await read('../pages/bookshelf/index.vue')
+  const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
+  const component = new Function('mergeHomeShelves', 'shouldRefreshHome', 'continueKeysOf', 'createDebouncer', script)(mergeHomeShelves, shouldRefreshHome, continueKeysOf, createDebouncer)
+  const store = {
+    state: { user: { user, serverConnectionConfig: signedIn ? { id: activeServerConfigId } : null }, activeServerConfigId, serverState, libraries: { currentLibraryId }, globals: { localMediaProgress: [] }, currentPlaybackSession: null },
+    getters: { getHasActiveServer: hasActiveServer, 'libraries/getCurrentLibraryMediaType': mediaType, 'globals/getLocalMediaProgressById': () => null },
+    commit() {},
+    async dispatch() {}
+  }
+  const http = fakeHttp(() => [shelf('from-server', 'book', [{ id: 'srv' }])])
+  const nativeHttpCalls = []
+  const absData = createDataService({ plugin, store, nativeHttp: () => http })
+  const view = {
+    ...component.data(),
+    $store: store,
+    $absData: absData,
+    $db: { getLocalLibraryItems: async () => localItems },
+    $nativeHttp: { get: async (path) => (nativeHttpCalls.push(path), []) },
+    $strings: { LabelContinueBooks: 'Continue', LabelLocalBooks: 'Local books', LabelLocalPodcasts: 'Local podcasts', LabelContinueEpisodes: 'Continue episodes' },
+    $eventBus: { $on() {}, $off() {} }
+  }
+  for (const [name, fn] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: fn.bind(view), configurable: true })
+  for (const [name, fn] of Object.entries(component.methods)) view[name] = fn.bind(view)
+  return { view, store, http, nativeHttpCalls, plugin, component }
+}
+
+test('cold start offline shows replica shelves', async () => {
+  const page = await homePage({ localItems: [{ id: 'local_1', libraryItemId: 'li1', serverConnectionConfigId: 'a', mediaType: 'book', media: {} }] })
+  await page.view.fetchCategories()
+  assert.deepEqual(page.view.shelves.map((s) => s.id), ['continue-listening', 'local-books'])
+  assert.equal(page.view.shelves[0].entities[0].localLibraryItem.id, 'local_1')
+  assert.equal(page.view.catalogNotLoaded, false)
+  assert.equal(page.view.isLoading, false)
+  assert.deepEqual(page.nativeHttpCalls, [])
+  assert.deepEqual(page.http.paths, [])
+
+  // An empty replica offline: the local shelves and "catalog not loaded"
+  const empty = await homePage({ plugin: fakePlugin({ getPersonalized: async ({ libraryId }) => ({ serverConfigId: 'a', libraryId, shelves: [], replica: replica(null) }) }) })
+  await empty.view.fetchCategories()
+  assert.equal(empty.view.catalogNotLoaded, true)
+
+  // An answer for another library is dropped
+  const other = await homePage({ plugin: fakePlugin({ getPersonalized: async () => ({ serverConfigId: 'a', libraryId: 'lib2', shelves: [shelf('x', 'book', [{ id: 'x' }])], replica: replica() }) }) })
+  await other.view.fetchCategories()
+  assert.deepEqual(other.view.shelves, [])
+  assert.equal(other.view.isLoading, false)
+
+  // No active server: nothing asked, the local shelves
+  const none = await homePage({ hasActiveServer: false, activeServerConfigId: null })
+  await none.view.fetchCategories()
+  assert.deepEqual(none.plugin.calls, [])
+  assert.equal(none.view.catalogNotLoaded, false)
+})
+
+test('a progress change re-reads the home once', async () => {
+  const page = await homePage()
+  await page.view.fetchCategories()
+  assert.equal(page.plugin.calls.length, 1)
+  const timers = fakeTimers()
+  page.view.refreshDebouncer = createDebouncer({ delayMs: 1000, ...timers })
+  for (let i = 0; i < 3; i++) page.view.dataChanged({ scope: 'progress', ids: ['li1'] })
+  assert.equal(page.plugin.calls.length, 1)
+  assert.deepEqual(timers.run(), [1000])
+  await flush()
+  assert.equal(page.plugin.calls.length, 2, 'one re-read, not throttled by the read just before')
+
+  // The playing book is already first in "continue": a tick re-reads nothing
+  page.view.dataChanged({ scope: 'playback', ids: ['li1'] })
+  assert.deepEqual(timers.run(), [])
+  // Another book: one re-read, and its next tick none
+  page.view.dataChanged({ scope: 'playback', ids: ['li9'] })
+  timers.run()
+  await flush()
+  assert.equal(page.plugin.calls.length, 3)
+  assert.equal(page.view.refreshedForKey, 'li9')
+  page.view.dataChanged({ scope: 'playback', ids: ['li9'] })
+  assert.deepEqual(timers.run(), [])
+  // Any other re-read forgets the key
+  page.view.dataChanged({ scope: 'catalog', ids: ['state:lib1'] })
+  timers.run()
+  await flush()
+  assert.equal(page.view.refreshedForKey, null)
+  page.view.dataChanged({ scope: 'catalog', ids: ['items:lib2'] })
+  assert.deepEqual(timers.run(), [])
+})
+
+test('home does not read /personalized directly', async () => {
+  const source = await read('../pages/bookshelf/index.vue')
+  const script = source.match(/<script>([\s\S]*?)<\/script>/)[1]
+  assert.doesNotMatch(script, /\$nativeHttp\.get\([^)]*personalized/)
+  assert.match(script, /\$absData\.getPersonalized\(/)
+  assert.match(script, /getters\['getHasActiveServer'\] && libraryId/)
+  assert.doesNotMatch(script, /networkConnected\(/, 'the replica does not depend on the network')
+  assert.doesNotMatch(script, /audiobookAdded|audiobookUpdated|removeBookFromShelf/)
+  assert.match(script, /onDataChanged\(this\.dataChanged\)/)
+  assert.match(source.match(/<template>([\s\S]*)<\/template>/)[1], /MessageCatalogNotLoaded/)
+})
