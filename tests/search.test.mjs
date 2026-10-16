@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises'
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
 const { createDataService } = await importSource('../utils/dataService.js')
-const { createDebouncer } = await importSource('../utils/catalogRefresh.js')
+const { createDebouncer, isReplicaIncomplete } = await importSource('../utils/catalogRefresh.js')
 const { findLocalCopy } = await importSource('../utils/localCopy.js')
 
 const replica = (reconciledAt = 5) => ({ reconciledAt, complete: reconciledAt != null })
@@ -42,7 +42,7 @@ const episode = (podcastId, episodeId) => ({ libraryItem: { id: podcastId, media
 
 /** pages/search.vue as a plain object; `search` answers native's search (args → answer or a promise of it). */
 async function searchPage({ user = null, serverState = 'offline', activeServerConfigId = 'a', signedIn = !!user, search, localItems = [], useDataService = false, plugin = null } = {}) {
-  const component = new Function('findLocalCopy', 'createDebouncer', scriptOf(await read('../pages/search.vue')))(findLocalCopy, createDebouncer)
+  const component = new Function('findLocalCopy', 'createDebouncer', 'isReplicaIncomplete', scriptOf(await read('../pages/search.vue')))(findLocalCopy, createDebouncer, isReplicaIncomplete)
   const store = {
     state: { user: { user, serverConnectionConfig: signedIn ? { id: activeServerConfigId } : null }, serverState, activeServerConfigId, libraries: { currentLibraryId: 'lib1' }, globals: { lastSearch: null } },
     getters: { 'libraries/getBookCoverAspectRatio': 1.6 },
@@ -174,7 +174,7 @@ test('the search follows another library or server', async () => {
   await flush()
   assert.deepEqual(page.asked.map((a) => a.libraryId), ['lib1', 'lib2', 'lib2'])
   assert.equal(page.view.bookResults.length, 1)
-  const component = new Function('findLocalCopy', 'createDebouncer', scriptOf(await read('../pages/search.vue')))(findLocalCopy, createDebouncer)
+  const component = new Function('findLocalCopy', 'createDebouncer', 'isReplicaIncomplete', scriptOf(await read('../pages/search.vue')))(findLocalCopy, createDebouncer, isReplicaIncomplete)
   assert.deepEqual(Object.keys(component.watch).sort(), ['activeServerConfigId', 'currentLibraryId'])
   void rerun
 })
@@ -361,4 +361,24 @@ test('a read of downloaded copies started before a change does not fill the cach
   await search
   assert.equal(page.view.localItems.length, 1, 'the older read (no copies) did not overwrite the newer one')
   assert.equal(page.view.bookResults[0].localLibraryItem.id, 'local_1')
+})
+
+test('results of an unfinished catalog copy carry the partial note while the server is away', async () => {
+  const shown = async (replicaState, serverState, results = { book: [book('li1')] }) => {
+    const page = await searchPage({ serverState, search: ({ libraryId, q }) => ({ serverConfigId: 'a', libraryId, q, results, replica: replicaState }) })
+    await page.view.runSearch('x')
+    return page.view
+  }
+  assert.equal((await shown({ reconciledAt: null, complete: false }, 'offline')).showCatalogPartial, true)
+  assert.equal((await shown({ reconciledAt: 5, complete: false }, 'unauthorized')).showCatalogPartial, true)
+  assert.equal((await shown(replica(), 'offline')).showCatalogPartial, false, 'a full copy')
+  assert.equal((await shown({ reconciledAt: 5, complete: false }, 'online')).showCatalogPartial, false)
+  const nothing = await shown({ reconciledAt: null, complete: false }, 'offline', {})
+  assert.equal(nothing.showCatalogPartial, false, 'nothing found: "catalog not loaded" alone')
+  assert.equal(nothing.catalogNotLoaded, true)
+  await nothing.runSearch('')
+  assert.equal(nothing.replicaIncomplete, false)
+  const template = templateOf(await read('../pages/search.vue'))
+  const tabs = (await read('../components/bookshelf/LazyBookshelf.vue')).match(/<div v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}<\/div>/)[0]
+  assert.ok(template.includes(tabs), 'the same note as the catalog tabs')
 })

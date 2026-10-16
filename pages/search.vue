@@ -4,6 +4,7 @@
       <ui-text-input ref="input" v-model="search" @input="updateSearch" borderless :placeholder="$strings.ButtonSearch" bg="white bg-opacity-10" rounded="md" prepend-icon="search" text-size="base" clearable class="w-full text-lg" />
     </div>
     <div class="w-full overflow-x-hidden overflow-y-auto search-content px-4" @click.stop>
+      <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px">{{ $strings.MessageCatalogPartial }}</div>
       <div v-show="isFetching" class="w-full py-8 flex justify-center">
         <p class="text-lg text-fg-muted">{{ $strings.MessageFetching }}</p>
       </div>
@@ -87,7 +88,7 @@
 
 <script>
 import { findLocalCopy } from '@/utils/localCopy'
-import { createDebouncer } from '@/utils/catalogRefresh'
+import { createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
 
 /** Catalog topics after which an open search is run again (so it moves from the server to the replica). */
 const SEARCH_TOPICS = ['state', 'items', 'series', 'authors', 'episodes']
@@ -102,6 +103,8 @@ export default {
       // Only the answer of the latest request is shown and clears isFetching
       searchSeq: 0,
       catalogNotLoaded: false,
+      // Results of a library whose reconcile never finished (or was unstable)
+      replicaIncomplete: false,
       // The groups of the shown answer, before the downloaded copies are joined
       answerResults: {},
       // The downloaded items, read once for the open page and again when a download finishes or a copy is deleted
@@ -128,6 +131,10 @@ export default {
     }
   },
   computed: {
+    /** Results from an unfinished catalog copy carry the same note as the catalog tabs while the server is away. */
+    showCatalogPartial() {
+      return this.replicaIncomplete && this.$store.state.serverState !== 'online'
+    },
     activeServerConfigId() {
       return this.$store.state.activeServerConfigId ?? null
     },
@@ -152,6 +159,7 @@ export default {
       this.tagResults = []
       this.answerResults = {}
       this.catalogNotLoaded = false
+      this.replicaIncomplete = false
     },
     /**
      * `silent`: a re-run for a catalog change, which keeps the shown results and shows no "Fetching" until it answers.
@@ -186,6 +194,8 @@ export default {
       this.answerResults = answer?.results || {}
       this.showResults()
       this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.totalResults
+      // Nothing found says "catalog not loaded" (or "no items") instead
+      this.replicaIncomplete = isReplicaIncomplete({ ...answer, total: this.totalResults })
     },
     async loadLocalItems() {
       if (this.localItems !== null) return this.localItems

@@ -1,5 +1,6 @@
 <template>
   <div class="w-full h-full min-h-full relative">
+    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px">{{ $strings.MessageCatalogPartial }}</div>
     <div v-if="attemptingConnection" class="w-full pt-4 flex items-center justify-center">
       <widgets-loading-spinner />
       <p class="pl-4">{{ $strings.MessageAttemptingServerConnection }}</p>
@@ -48,7 +49,7 @@
 
 <script>
 import { mergeHomeShelves, shouldRefreshHome, continueKeysOf } from '@/utils/homeShelves'
-import { createDebouncer } from '@/utils/catalogRefresh'
+import { createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
 
 /** A read of the same library, server and connection within this time is skipped (notices of native are not). */
 const FETCH_THROTTLE_MS = 5000
@@ -59,6 +60,8 @@ export default {
     return {
       shelves: [],
       catalogNotLoaded: false,
+      // Native's shelves come from a library whose reconcile never finished (or was unstable)
+      replicaIncomplete: false,
       lastFetch: 0,
       lastFetchKey: null,
       fetchSeq: 0,
@@ -84,6 +87,10 @@ export default {
   },
   computed: {
     // A saved server that does not answer: connecting again is not what helps, the indicator already says so
+    /** Shelves of an unfinished catalog copy carry the same note as the catalog tabs while the server is away. */
+    showCatalogPartial() {
+      return this.replicaIncomplete && this.$store.state.serverState !== 'online'
+    },
     serverUnreachable() {
       return this.$store.getters['getHasActiveServer'] && this.$store.state.serverState === 'offline'
     },
@@ -263,6 +270,8 @@ export default {
         const merged = mergeHomeShelves({ answer, localShelves, localItems: localLibraryItems, activeServerConfigId: serverConfigId, mediaType: this.currentLibraryMediaType })
         this.shelves = merged.shelves
         this.catalogNotLoaded = merged.catalogNotLoaded
+        // Without native's shelves "catalog not loaded" (or nothing) says it instead
+        this.replicaIncomplete = isReplicaIncomplete({ ...answer, total: answer?.shelves?.length || 0 })
         this.shownFor = shelvesFor
       }
       console.log('[categories] Shelves set', this.shelves.length, answer?.fromServer ? 'from the server' : 'from the device')
@@ -272,6 +281,7 @@ export default {
     showLocalShelves(localShelves) {
       this.shelves = localShelves
       this.catalogNotLoaded = false
+      this.replicaIncomplete = false
       this.shownFor = null
     },
     /** A download finished or a downloaded copy was deleted: the copies joined to the shelves change. */

@@ -250,7 +250,7 @@ test('web dev fallback proxies home and search to $axios', async () => {
 
 // ---- The home page (pages/bookshelf/index.vue) as a plain object over fakes
 
-const { createDebouncer } = await importSource('../utils/catalogRefresh.js')
+const { createDebouncer, isReplicaIncomplete } = await importSource('../utils/catalogRefresh.js')
 const { continueKeysOf } = await import(`data:text/javascript;base64,${Buffer.from(homeSource).toString('base64')}`)
 
 const fakeTimers = () => {
@@ -278,7 +278,7 @@ const flush = async (n = 30) => {
 async function homePage({ user = null, activeServerConfigId = 'a', serverState = 'offline', hasActiveServer = true, currentLibraryId = 'lib1', mediaType = 'book', plugin = fakePlugin(), localItems = [], signedIn = !!user } = {}) {
   const source = await read('../pages/bookshelf/index.vue')
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
-  const component = new Function('mergeHomeShelves', 'shouldRefreshHome', 'continueKeysOf', 'createDebouncer', script)(mergeHomeShelves, shouldRefreshHome, continueKeysOf, createDebouncer)
+  const component = new Function('mergeHomeShelves', 'shouldRefreshHome', 'continueKeysOf', 'createDebouncer', 'isReplicaIncomplete', script)(mergeHomeShelves, shouldRefreshHome, continueKeysOf, createDebouncer, isReplicaIncomplete)
   const store = {
     state: { user: { user, serverConnectionConfig: signedIn ? { id: activeServerConfigId } : null }, activeServerConfigId, serverState, libraries: { currentLibraryId }, globals: { localMediaProgress: [] }, currentPlaybackSession: null },
     getters: { getHasActiveServer: hasActiveServer, 'libraries/getCurrentLibraryMediaType': mediaType, 'globals/getLocalMediaProgressById': () => null },
@@ -460,4 +460,26 @@ test("another library's shelves go before the downloaded items are read", async 
   release()
   await read
   assert.equal(page.view.shelves[0].id, 'continue-listening')
+})
+
+test('shelves of an unfinished catalog copy carry the partial note while the server is away', async () => {
+  const answering = (replicaState, extra = {}) => fakePlugin({ getPersonalized: async ({ libraryId }) => ({ serverConfigId: 'a', libraryId, shelves: [shelf('recently-added', 'book', [{ id: 'li1' }])], replica: replicaState, ...extra }) })
+  const shown = async (plugin, serverState) => {
+    const page = await homePage({ plugin, serverState })
+    await page.view.fetchCategories()
+    return page.view.showCatalogPartial
+  }
+  assert.equal(await shown(answering({ reconciledAt: null, complete: false }), 'offline'), true)
+  assert.equal(await shown(answering({ reconciledAt: 5, complete: false }), 'unauthorized'), true, 'an unstable reconcile too')
+  assert.equal(await shown(answering(replica()), 'offline'), false, 'a full copy')
+  // Online the same answer goes to the server while never reconciled; an unstable copy shows no note online
+  assert.equal(await shown(answering({ reconciledAt: 5, complete: false }), 'online'), false)
+  // Nothing from native: "catalog not loaded", not both
+  const empty = await homePage({ plugin: fakePlugin({ getPersonalized: async ({ libraryId }) => ({ serverConfigId: 'a', libraryId, shelves: [], replica: replica(null) }) }) })
+  await empty.view.fetchCategories()
+  assert.equal(empty.view.showCatalogPartial, false)
+  assert.equal(empty.view.catalogNotLoaded, true)
+  const template = (await read('../pages/bookshelf/index.vue')).match(/<template>([\s\S]*)<\/template>/)[1]
+  const tabs = (await read('../components/bookshelf/LazyBookshelf.vue')).match(/<div v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}<\/div>/)[0]
+  assert.ok(template.includes(tabs), 'the same note as the catalog tabs')
 })
