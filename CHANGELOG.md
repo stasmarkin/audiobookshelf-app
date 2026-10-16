@@ -7,6 +7,25 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Home and search offline:** Home (Continue Listening and Reading, Continue Series, Recently Added, Recent Series,
+  Discover, Listen and Read Again, Newest Authors; in podcast libraries Continue Listening, Newest Episodes, Recently
+  Added and Listen Again) and search are now computed on the phone from the catalog copy and your progress, online
+  and offline alike, so they open on a cold start in airplane mode and show the same shelves and results as online.
+  Progress from another device, "Mark as finished" and a book that starts playing move books between shelves within
+  a second, without leaving Home. The catalog copy now also keeps the episodes of every podcast, fetched once per
+  podcast during the background sync and again only when it changed. Search finds books by title, subtitle, ASIN and
+  ISBN, series, authors, narrators, tags and genres, and podcasts and their episodes; case and accents do not
+  matter, also in Cyrillic. The search button shows whenever a server is saved, not only while signed in. Offline,
+  results and Home episode cards that are not downloaded are marked "Not available offline" and tell so when
+  tapped; downloaded ones open their copy, and an episode card only counts as downloaded when that episode is. The
+  "continue" shelves of downloaded items show only while the catalog copy has none of its own (before the first
+  sync), so they no longer appear twice. Until a library has been copied once (podcast libraries: with their
+  episodes), Home and search read the server as before; offline Home shows the downloaded items and search says the
+  catalog isn't downloaded yet. Known differences from the server: search finds a few more matches with accents,
+  and `%` and `_` are searched as plain characters; counts of narrators, tags and genres include only books you can
+  access; a podcast episode edited on the server shows the change offline only after the podcast itself changes
+  next; a series whose membership is still being synced may briefly be missing from Continue Series and Discover;
+  Discover keeps its picks until the app restarts (the server reshuffles every 30 minutes).
 - **Catalog copy keeps podcast episodes (schema 2):** updating keeps the offline catalog. Going back to a version
   before this one empties the offline catalog until the next sync with the server; downloads, progress and bookmarks
   are not affected.
