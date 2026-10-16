@@ -59,8 +59,8 @@ const TOKENS = [
   { name: 'system.navigation-bar', type: 'rgb', purpose: 'Navigation bar background (native; not yet applied at runtime)' },
 
   // Presentation policies: validated enums selecting repository-owned behavior, never CSS values.
-  // finish: 'standard' = no extra rules; 'equipment' = the fixed recipe in theme/presets.js
-  { name: 'presentation.finish', type: 'enum', values: ['standard', 'equipment'], purpose: 'Which fixed presentation recipe applies' },
+  // finish: 'standard' = no extra rules; 'equipment' and 'eink' = the fixed recipes in theme/presets.js
+  { name: 'presentation.finish', type: 'enum', values: ['standard', 'equipment', 'eink'], purpose: 'Which fixed presentation recipe applies' },
   // cover-color: 'legacy' = player/item chrome follows the cover's average color (existing behavior);
   // 'theme' = that chrome uses the theme palette instead (cover art itself is unchanged)
   { name: 'presentation.cover-color', type: 'enum', values: ['legacy', 'theme'], purpose: 'Whether player/item chrome is tinted from cover art' }

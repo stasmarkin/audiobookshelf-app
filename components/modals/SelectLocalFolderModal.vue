@@ -24,6 +24,8 @@
 </template>
 
 <script>
+import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
+
 export default {
   data() {
     return {
@@ -66,16 +68,8 @@ export default {
       this.callback(folder)
     },
     async init() {
-      const localFolders = (await this.$db.getLocalFolders()) || []
-
-      if (!localFolders.some((lf) => lf.id === `internal-${this.mediaType}`)) {
-        localFolders.push({
-          id: `internal-${this.mediaType}`,
-          name: this.$strings.LabelInternalAppStorage,
-          mediaType: this.mediaType
-        })
-      }
-      this.localFolders = localFolders.filter((lf) => lf.mediaType == this.mediaType)
+      const folders = (await this.$db.getLocalFolders()) || []
+      this.localFolders = [...safFoldersFor(folders, this.mediaType), await appStorageFolderFor(this, this.mediaType)]
     }
   },
   mounted() {}

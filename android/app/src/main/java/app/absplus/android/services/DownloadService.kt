@@ -18,7 +18,7 @@ import app.absplus.android.models.DownloadItemPart
 class DownloadService : Service() {
   override fun onCreate() {
     super.onCreate()
-    createChannel()
+    ensureChannel(this)
     startForegroundWithType(DownloadServiceHost.notificationStrings(this).preparing)
     DownloadServiceHost.attachService(this)
   }
@@ -81,22 +81,22 @@ class DownloadService : Service() {
             .build()
   }
 
-  private fun createChannel() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-    val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-    manager.createNotificationChannel(
-            NotificationChannel(
-                    CHANNEL_ID,
-                    DownloadServiceHost.notificationStrings(this).downloads,
-                    NotificationManager.IMPORTANCE_LOW))
-  }
-
   private fun pendingIntentFlags(): Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
   companion object {
-    private const val CHANNEL_ID = "downloads"
+    const val CHANNEL_ID = "downloads"
     private const val NOTIFICATION_ID = 11
     private const val ACTION_CANCEL = "app.absplus.android.download.CANCEL"
     fun intent(context: Context) = Intent(context, DownloadService::class.java)
+
+    fun ensureChannel(context: Context) {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+      val manager = context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+      manager.createNotificationChannel(
+              NotificationChannel(
+                      CHANNEL_ID,
+                      DownloadServiceHost.notificationStrings(context).downloads,
+                      NotificationManager.IMPORTANCE_LOW))
+    }
   }
 }
