@@ -15,6 +15,7 @@ const { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } = await impor
 const { trackCount, fetchPlaylistItems } = await importSource('../utils/catalogItem.js')
 const { queueItemPayload, resolveItemProgress } = await importSource('../utils/playbackQueue.js')
 const requiresServer = (await importSource('../mixins/requiresServer.js')).default
+const { leavesOnLibraryChange } = await importSource('../utils/libraryScope.js')
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const replica = (reconciledAt = 5) => ({ reconciledAt, complete: reconciledAt != null })
 const flush = async (n = 30) => {
@@ -113,9 +114,9 @@ const pageSource = await read('../pages/playlist/_id.vue')
 function playlistPage({ absData, localItems = {}, activeServerConfigId = 'a', user = null, progress = {} } = {}) {
   const timers = []
   const fakeDebouncer = (options) => createDebouncer({ ...options, setTimer: (fn, ms) => (timers.push({ fn, ms }), timers.at(-1)), clearTimer: (t) => timers.includes(t) && timers.splice(timers.indexOf(t), 1) })
-  const component = componentDef(pageSource, { trackCount, fetchPlaylistItems, createDebouncer: fakeDebouncer, downloadMissingItems() {}, queueItemPayload, resolveItemProgress })
+  const component = componentDef(pageSource, { trackCount, fetchPlaylistItems, createDebouncer: fakeDebouncer, downloadMissingItems() {}, queueItemPayload, resolveItemProgress, leavesOnLibraryChange })
   const store = {
-    state: { activeServerConfigId, user: { user }, playerIsPlaying: false, playerIsStartingPlayback: false },
+    state: { activeServerConfigId, user: { user }, playerIsPlaying: false, playerIsStartingPlayback: false, libraries: { currentLibraryId: 'l1' } },
     getters: {
       getIsMediaStreaming: () => false,
       getAskBeforeStreamingIncomplete: false,
@@ -153,7 +154,7 @@ function playlistPage({ absData, localItems = {}, activeServerConfigId = 'a', us
     component.mounted.call(view)
     return view
   }
-  return { component, asyncData, mount, timers, replaced, emitted, localCalls, dataListeners, send: (change) => dataListeners.forEach((cb) => cb(change)), destroy: (view) => component.beforeDestroy.call(view) }
+  return { component, store, asyncData, mount, timers, replaced, emitted, localCalls, dataListeners, send: (change) => dataListeners.forEach((cb) => cb(change)), destroy: (view) => component.beforeDestroy.call(view) }
 }
 
 const episodeCopy = (id, serverConnectionConfigId) => ({ id, libraryItemId: 'pod1', serverConnectionConfigId, mediaType: 'podcast', media: { episodes: [{ id: `${id}_ep1`, serverEpisodeId: 'ep1' }] } })
@@ -926,4 +927,110 @@ test('a removed item and a playlist gone meanwhile leave for the tab', async () 
   page.timers.shift().fn()
   await flush()
   assert.deepEqual(page.replaced, ['/bookshelf/playlists'])
+})
+
+test('a sign-in or reconnect does not take the playlist page away', async () => {
+  const page = playlistPage({ absData: createDataService({ plugin: fakePlugin(), store: fakeStore() }) })
+  const view = await page.mount()
+  view.libraryChanged()
+  assert.deepEqual(page.replaced, [], 'the same library and server announced again')
+  page.store.state.libraries.currentLibraryId = null
+  view.libraryChanged()
+  assert.deepEqual(page.replaced, [], 'no current library yet')
+  page.store.state.libraries.currentLibraryId = 'l2'
+  view.libraryChanged()
+  assert.deepEqual(page.replaced, ['/bookshelf/playlists'], 'another library picked')
+
+  // Another account of the same server: same library ids, someone else's playlists
+  const other = playlistPage({ absData: createDataService({ plugin: fakePlugin(), store: fakeStore() }) })
+  const otherView = await other.mount()
+  other.store.state.activeServerConfigId = 'b'
+  otherView.libraryChanged()
+  assert.deepEqual(other.replaced, ['/bookshelf/playlists'])
+})
+
+test('the collection and item pages leave only for another library or server', async () => {
+  const collectionDef = componentDef(await read('../pages/collection/_id.vue'), { leavesOnLibraryChange, trackCount, createDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {} })
+  const state = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
+  const replaced = []
+  const view = bind(collectionDef, { collection: { id: 'c1', libraryId: 'l1' }, $store: { state }, $router: { replace: (to) => replaced.push(to) }, $eventBus: { $on() {} }, $absData: { onDataChanged: () => () => {} } })
+  collectionDef.mounted.call(view)
+  view.libraryChanged()
+  assert.deepEqual(replaced, [])
+  state.activeServerConfigId = 'b'
+  view.libraryChanged()
+  assert.deepEqual(replaced, ['/bookshelf/collections'])
+  state.activeServerConfigId = 'a'
+  state.libraries.currentLibraryId = 'l2'
+  view.libraryChanged()
+  assert.equal(replaced.length, 2)
+
+  const itemSource = await read('../pages/item/_id/index.vue')
+  const itemDef = componentDef(itemSource, { leavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {} })
+  const itemState = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
+  const left = []
+  const item = bind({ methods: { libraryChanged: itemDef.methods.libraryChanged } }, { libraryItem: { id: 'li1', libraryId: 'l1' }, loadedServerConfigId: 'a', $store: { state: itemState }, $router: { replace: (to) => left.push(to) } })
+  item.libraryChanged()
+  assert.deepEqual(left, [], 'a reconnect keeps the item page')
+  itemState.libraries.currentLibraryId = 'l2'
+  item.libraryChanged()
+  assert.deepEqual(left, ['/bookshelf'])
+  assert.match(itemSource, /this\.loadedServerConfigId = this\.\$store\.state\.activeServerConfigId\n\s*this\.\$eventBus\.\$on\('library-changed'/, 'the server it was opened for')
+
+  assert.equal(leavesOnLibraryChange({ libraries: { currentLibraryId: 'l1' }, activeServerConfigId: null }, 'l1', null), false)
+  assert.equal(leavesOnLibraryChange({ libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }, 'l1', null), true)
+})
+
+test('authors and latest still read again when the same library is announced after the sign-in', async () => {
+  // The layout announces a sign-in without naming a library: pages that cache by library id read again
+  const layout = await read('../layouts/default.vue')
+  assert.match(layout, /this\.\$eventBus\.\$emit\('library-changed'\)/)
+  const data = await read('../utils/dataService.js')
+  assert.doesNotMatch(data, /\$emit\('library-changed', /)
+
+  const authorsDef = componentDef(await read('../pages/bookshelf/authors.vue'), { shouldRefreshShelf, createDebouncer, isReplicaIncomplete, window: { innerWidth: 412 } })
+  const reads = []
+  const authors = bind(authorsDef, {
+    $store: { state: { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a', serverState: 'online' }, getters: { 'libraries/getCurrentLibraryMediaType': 'book', getHasActiveServer: true } },
+    $absData: { getAuthors: async (args) => (reads.push(args), { serverConfigId: 'a', results: [], total: 0, replica: replica() }), onDataChanged: () => () => {} },
+    $eventBus: { $emit() {}, $on() {}, $off() {} },
+    $router: { replace() {} }
+  })
+  await authors.init()
+  const before = reads.length
+  authors.libraryChanged()
+  await flush()
+  assert.ok(reads.length > before, 'authors read again, now able to fall back to the server')
+
+  const latestDef = componentDef(await read('../pages/bookshelf/latest.vue'))
+  const gets = []
+  const latest = bind(latestDef, {
+    $store: { state: { libraries: { currentLibraryId: 'pods' } }, getters: { 'libraries/getCurrentLibraryMediaType': 'podcast' } },
+    $nativeHttp: { get: async (path) => (gets.push(path), gets.length === 1 ? Promise.reject(new Error('offline')) : { episodes: [], total: 0 }) },
+    $toast: { error() {} },
+    $router: { replace() {} }
+  })
+  await latest.loadRecentEpisodes().catch(() => {})
+  latest.libraryChanged()
+  await flush()
+  assert.equal(gets.length, 2, 'the failed offline load is tried again after the sign-in')
+})
+
+test('the offline label of the create button is its own line and a disabled row button looks disabled', async () => {
+  const create = modalSource.slice(modalSource.indexOf('<!-- create playlist btn -->'), modalSource.indexOf('</modals-fullscreen-modal>'))
+  const button = create.slice(create.indexOf('<ui-btn'), create.indexOf('</ui-btn>'))
+  assert.doesNotMatch(button, /requires-server-label/, 'not inside the button, where it ran into its text')
+  assert.match(create.slice(create.indexOf('</ui-btn>')), /<p v-if="!isServerOnline" class="requires-server-label[^"]*text-center[^"]*">/)
+  const row = await read('../components/modals/playlists/PlaylistRow.vue')
+  assert.equal(row.match(/:disabled="disabled" class="w-full" :class="disabled \? 'opacity-50' : ''"/g)?.length, 2)
+})
+
+test('the catalog-partial note stays pinned over every row', async () => {
+  const shelf = await read('../components/bookshelf/LazyBookshelf.vue')
+  // assets/app.css gives #bookshelf one screen of height: the sticky note left with it after one screen of rows
+  const css = await read('../assets/app.css')
+  const rule = css.match(/#bookshelf \{([^}]*)\}/)[1]
+  assert.doesNotMatch(rule, /(^|[^-])height:/, 'no fixed height: one screen of it left the sticky note behind after one screen of rows')
+  assert.match(shelf, /<div id="bookshelf" class="w-full max-w-full min-h-full">/, 'the box grows with the rows')
+  assert.match(modalSource, /<div v-if="!showPlaylistNameInput" class="[^"]*min-h-20 pt-2 pb-2[^"]*">/, 'the create button and its label are not cut off')
 })

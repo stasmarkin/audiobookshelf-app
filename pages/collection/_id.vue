@@ -38,6 +38,7 @@ import { downloadMissingItems } from '@/utils/bulkDownload'
 import { buildQueueSourceItems } from '@/utils/playbackQueue'
 import { trackCount, fetchCollectionBooks } from '@/utils/catalogItem'
 import { createDebouncer } from '@/utils/catalogRefresh'
+import { leavesOnLibraryChange } from '@/utils/libraryScope'
 
 /**
  * The collection with all its books ($absData: the replica, also offline), each with its downloaded copy of the active
@@ -221,15 +222,16 @@ export default {
       }
       this.collection = collection
     },
-    libraryChanged(libraryId) {
-      // A collection belongs to a single library, so leave this page when a different library is
+    libraryChanged() {
+      // A collection belongs to a single library, so leave this page when a different library (or server) is
       // selected rather than showing a collection that is not in the current library
-      if (!libraryId || libraryId !== this.collection.libraryId) {
+      if (leavesOnLibraryChange(this.$store.state, this.collection.libraryId, this.loadedServerConfigId)) {
         this.$router.replace('/bookshelf/collections')
       }
     }
   },
   mounted() {
+    this.loadedServerConfigId = this.$store.state.activeServerConfigId
     this.$eventBus.$on('library-changed', this.libraryChanged)
     this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },

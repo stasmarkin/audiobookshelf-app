@@ -38,6 +38,7 @@ import { queueItemPayload, resolveItemProgress } from '@/utils/playbackQueue'
 import { downloadMissingItems } from '@/utils/bulkDownload'
 import { trackCount, fetchPlaylistItems } from '@/utils/catalogItem'
 import { createDebouncer } from '@/utils/catalogRefresh'
+import { leavesOnLibraryChange } from '@/utils/libraryScope'
 
 /**
  * The playlist with all its items ($absData: the replica, also offline), each with its downloaded copy of the active
@@ -237,12 +238,13 @@ export default {
       this.showItems(playlist)
     },
     libraryChanged() {
-      // Playlist contents are shown in the context of the selected library, so leave this page
-      // when the library changes rather than showing stale items
-      this.$router.replace('/bookshelf/playlists')
+      // Playlist contents are shown in the context of the selected library, so leave this page when another library
+      // (or server) is selected; a sign-in or reconnect announces the same one again
+      if (leavesOnLibraryChange(this.$store.state, this.playlist.libraryId, this.loadedServerConfigId)) this.$router.replace('/bookshelf/playlists')
     }
   },
   mounted() {
+    this.loadedServerConfigId = this.$store.state.activeServerConfigId
     this.$eventBus.$on('library-changed', this.libraryChanged)
     this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },

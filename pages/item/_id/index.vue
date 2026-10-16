@@ -182,6 +182,7 @@ import { podcastSortOverrideKey, resolvePodcastEpisodeSort, sortPodcastEpisodes 
 import coverPresentation from '@/theme/coverPresentation'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { downloadState, DownloadState } from '@/utils/downloadState'
+import { leavesOnLibraryChange } from '@/utils/libraryScope'
 
 export default {
   async asyncData({ store, params, redirect, app, query }) {
@@ -748,8 +749,9 @@ export default {
         this.$set(this.libraryItem, 'localLibraryItem', item)
       }
     },
-    libraryChanged(libraryId) {
-      if (this.libraryItem.libraryId !== libraryId) {
+    libraryChanged() {
+      // Also announced when nothing changed (a sign-in, a reconnect): the current library and server decide
+      if (leavesOnLibraryChange(this.$store.state, this.libraryItem.libraryId, this.loadedServerConfigId)) {
         this.$router.replace('/bookshelf')
       }
     },
@@ -790,6 +792,7 @@ export default {
 
       this.windowWidth = window.innerWidth
       window.addEventListener('resize', this.windowResized)
+      this.loadedServerConfigId = this.$store.state.activeServerConfigId
       this.$eventBus.$on('library-changed', this.libraryChanged)
       this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
       this.$socket.$on('item_updated', this.itemUpdated)
