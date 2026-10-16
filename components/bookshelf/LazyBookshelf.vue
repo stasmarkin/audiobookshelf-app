@@ -306,6 +306,14 @@ export default {
       this.pagesLoaded[page] = true
       await this.fetchEntities(page)
     },
+    /** The pages after the first that the first screen shows: a collections page (20) can be less than a screen. */
+    async loadPagesInView(toIndex) {
+      const pages = []
+      for (let page = 1; page <= Math.floor((toIndex - 1) / this.booksPerFetch); page++) {
+        if (!this.pagesLoaded[page]) pages.push(this.loadPage(page))
+      }
+      await Promise.all(pages)
+    },
     async retryPage(page) {
       if (this.pagesLoaded[page] || !this.canLoad) return
       await this.loadPage(page)
@@ -400,6 +408,7 @@ export default {
         await this.loadPage(0)
         var lastBookIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
         this.mountEntites(0, lastBookIndex)
+        await this.loadPagesInView(lastBookIndex)
       } else {
         // Local only
       }
@@ -461,6 +470,7 @@ export default {
       await this.loadPage(0)
       var lastBookIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
       this.mountEntites(0, lastBookIndex)
+      await this.loadPagesInView(lastBookIndex)
 
       // Set last scroll position for this bookshelf page
       if (this.$store.state.lastBookshelfScrollData[this.page] && window['bookshelf-wrapper']) {

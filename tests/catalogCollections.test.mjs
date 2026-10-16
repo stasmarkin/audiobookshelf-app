@@ -341,6 +341,25 @@ test('collections tab reads the replica at most 20 a page', async () => {
   assert.equal(shelf.view.readsCatalog, true)
 })
 
+test('collections tab loads every page the first screen shows', async () => {
+  const page = ({ limit, page }) => ({ serverConfigId: 'a', results: Array.from({ length: Math.max(0, Math.min(limit, 45 - page * limit)) }, (_, i) => ({ id: `c${page * limit + i}`, books: [] })), total: 45, limit, page, replica: replica() })
+  const shelf = await bookshelf({ realSize: true, getCollections: async (args) => page(args) })
+  // A tablet: more than 20 cards in view, 20 collections a read
+  globalThis.document = { getElementById: (id) => (id === 'bookshelf' ? { clientHeight: 7000, clientWidth: 1600 } : null) }
+  globalThis.window = { innerWidth: 1600 }
+  try {
+    await shelf.view.init()
+    assert.deepEqual(shelf.reads.map((r) => r.page), [0, 1, 2], 'no card in view stays empty without a scroll')
+    assert.equal(shelf.view.entities[44].id, 'c44')
+    shelf.reads.length = 0
+    await shelf.view.resetEntities()
+    assert.deepEqual(shelf.reads.map((r) => r.page), [0, 1, 2], 'and after a reset')
+  } finally {
+    delete globalThis.document
+    delete globalThis.window
+  }
+})
+
 test('collection page re-reads on collections:<lib>', async () => {
   let books = booksOf(3)
   let collectionGone = false
