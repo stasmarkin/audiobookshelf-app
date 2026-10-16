@@ -11,7 +11,17 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import app.absplus.android.BuildConfig
 import app.absplus.android.R
+import app.absplus.android.device.AndroidVolumeProbe
+import app.absplus.android.device.AppStorage
+import app.absplus.android.device.VolumeProbe
+import app.absplus.android.device.AndroidStorageIo
+import app.absplus.android.device.AppVolume
+import app.absplus.android.device.NodeKind
+import app.absplus.android.device.StorageIo
+import app.absplus.android.device.VolumeIdentity
+import java.security.MessageDigest
 import app.absplus.android.diagnostics.DLog
+import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 
@@ -30,6 +40,8 @@ internal object CoverArt {
   const val FAILURE_TTL_MS = 5 * 60 * 1000L
   private const val MAX_REMEMBERED = 32
   private const val TAG = "CoverArt"
+  private const val SD_COVER_DIR = "sd-covers"
+  private const val MAX_SD_COVER_BYTES = 20L * 1024 * 1024
 
   // Replaceable in tests; production decodes through the platform decoder
   internal var decoder: (Context, Uri) -> Bitmap? = ::platformDecode
@@ -64,16 +76,43 @@ internal object CoverArt {
   /**
    * Content URI for a local cover. A `file:` cover is served through the app's FileProvider; one the provider
    * can't serve (outside its paths, or not a valid file URI) gets the default artwork instead of throwing.
+   * The provider maps internal downloads and a cache folder only. A cover on the app's SD card folder is first copied
+   * into that cache folder, and only when it is a regular file (not a link) on the registered card (M02).
    */
-  fun localCoverUri(ctx: Context, coverContentUrl: String): Uri {
+  fun localCoverUri(ctx: Context, coverContentUrl: String, probe: VolumeProbe = AndroidVolumeProbe(ctx), io: StorageIo = AndroidStorageIo): Uri {
     if (!coverContentUrl.startsWith("file:")) return Uri.parse(coverContentUrl)
     return try {
-      FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", Uri.parse(coverContentUrl).toFile())
+      val file = Uri.parse(coverContentUrl).toFile()
+      val served = sdCardCover(ctx, file, probe, io) ?: file
+      FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", served)
     } catch (e: IllegalArgumentException) {
       record(coverContentUrl, Failure.INVALID, "cover uri")
       defaultUri()
     }
   }
+
+  /** The cached copy of a cover in an SD card download folder; null when [file] is not on a removable volume. */
+  internal fun sdCardCover(ctx: Context, file: File, probe: VolumeProbe, io: StorageIo): File? {
+    val volume = probe.volumes().firstOrNull { it.removable && AppStorage.isUnder(file, it.filesDir) } ?: return null
+    if (!isServableCoverPath(file, volume, io)) throw IllegalArgumentException("not a servable cover")
+    val cacheDir = File(ctx.cacheDir, SD_COVER_DIR)
+    val name = MessageDigest.getInstance("SHA-256").digest(file.absolutePath.toByteArray()).joinToString("") { "%02x".format(it) }
+    val cached = File(cacheDir, "$name.${file.extension.takeIf { it.length in 1..5 } ?: "img"}")
+    if (cached.isFile && cached.length() == file.length() && cached.lastModified() >= file.lastModified()) return cached
+    if (!cacheDir.isDirectory && !cacheDir.mkdirs()) throw IllegalArgumentException("no cover cache")
+    val tmp = File(cacheDir, "$name.tmp")
+    file.inputStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+    if (!tmp.renameTo(cached)) {
+      tmp.delete()
+      throw IllegalArgumentException("cover cache rename failed")
+    }
+    return cached
+  }
+
+  /** On the registered card's app folder, a regular file (no link) of a cover's size. */
+  internal fun isServableCoverPath(file: File, volume: AppVolume, io: StorageIo): Boolean =
+          volume.mounted && volume.identity == VolumeIdentity.VERIFIED && AppStorage.isUnder(file, volume.filesDir) &&
+                  io.kind(file) == NodeKind.FILE && io.length(file) in 1..MAX_SD_COVER_BYTES
 
   fun classify(e: Throwable): Failure? = when {
     e is FileNotFoundException -> Failure.MISSING

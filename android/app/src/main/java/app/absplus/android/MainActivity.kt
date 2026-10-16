@@ -30,6 +30,8 @@ import app.absplus.android.plugins.AbsThemeImport
 import app.absplus.android.plugins.AbsUpdater
 import app.absplus.android.plugins.AbsData
 import app.absplus.android.sync.SyncRuntime
+import app.absplus.android.services.DownloadServiceHost
+import app.absplus.android.services.StorageMoveService
 import com.getcapacitor.BridgeActivity
 
 
@@ -135,10 +137,15 @@ class MainActivity : BridgeActivity() {
 
   override fun onResume() {
     super.onResume()
+    isForeground = true
     SyncRuntime.setForeground(true)
+    StorageMoveService.startIfNeeded(this)
+    DownloadServiceHost.resumeAwaitingStorage()
+    DownloadServiceHost.releaseAutoHold(this)
   }
 
   override fun onPause() {
+    isForeground = false
     SyncRuntime.setForeground(false)
     super.onPause()
   }
@@ -213,5 +220,10 @@ class MainActivity : BridgeActivity() {
     grantResults.forEach { DLog.d(tag, "GRANTREUSLTS $it") }
     // Mandatory for Activity, but not for Fragment & ComponentActivity
     storageHelper.onRequestPermissionsResult(requestCode, permissions, grantResults)
+  }
+
+  companion object {
+    // Foreground services may only be started while the app is visible (Android 12+)
+    @Volatile var isForeground = false
   }
 }
