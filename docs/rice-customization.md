@@ -67,6 +67,7 @@ No CSS editor, imported fonts or images, layout switch, navigation or player cha
 Full snapshots, never live inheritance.
 - **Snapshot:** `{ baseId, colorScheme, tokens, appearance }`.
   - `baseId` is one of the four built-ins (the CSS anchor), and it must match the scheme: `light` ⇔ light.
+  - E-ink is a built-in but not a base: its paint-only finish isn't a custom option, so a copy of E-ink keeps its colors on the `light` base.
   - `tokens` holds exactly the 29 tokens of `theme/tokens.js`:
     - colors are `[r, g, b]` integers;
     - overlays are solid colors only (no gradients or alpha in custom data);

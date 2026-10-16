@@ -1,41 +1,17 @@
-<!--
-For Work In Progress Pull Requests, please use the Draft PR feature,
-see https://github.blog/2019-02-14-introducing-draft-pull-requests/ for further details.
+## Summary
 
-If you do not follow this template, the PR may be closed without review.
+<!-- Explain the problem, the resulting behavior, and any important tradeoffs. -->
 
-Please ensure all checks pass.
-If you are a new contributor, the workflows will need to be manually approved before they run.
--->
+## Related issue
 
-## Brief summary
+<!-- Use Fixes #123 only when this fully resolves it; otherwise use Related to #123. A small standalone fix need not have an issue. -->
 
-<!-- Please provide a brief summary of what your PR attempts to achieve. -->
+## Validation
 
-## Which issue is fixed?
+<!-- List commands/results and any Android device/version tested. Explain checks not run or not applicable. Include redacted before/after screenshots for UI changes. -->
 
-<!-- Which issue number does this PR fix? Ex: "Fixes #1234" -->
+- [ ] Targets `plus`; follows [CONTRIBUTING.md](https://github.com/ADD-OCD/audiobookshelfplus-app/blob/plus/CONTRIBUTING.md).
+- [ ] Relevant tests, translations, and documentation are updated, or explained as not applicable.
+- [ ] Contains no credentials, private server URLs, personal data, or unpatched sensitive vulnerability details.
 
-## Pull Request Type
-
-<!--
-Audiobookshelf+ is Android-only (the inherited iOS project is not maintained here).
-Does this change the web (Nuxt/Vue) layer, the Android native layer, or both?
--->
-
-## In-depth Description
-
-<!--
-Describe your solution in more depth.
-How does it work? Why is this the best solution?
-Does it solve a problem that affects multiple users or is this an edge case for your setup?
--->
-
-## How have you tested this?
-
-<!-- Please describe in detail with reproducible steps how you tested your changes. -->
-
-## Screenshots
-
-<!-- If your PR includes any changes to the front-end, please include screenshots or a
-short video from before and after your changes. -->
+<!-- Use a draft PR for unfinished work. Maintainers review outside contributions; passing CI does not authorize automatic merging. Security reports belong at https://github.com/ADD-OCD/audiobookshelfplus-app/security/advisories/new . -->

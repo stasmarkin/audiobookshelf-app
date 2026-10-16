@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from '../utils/reducedMotion.js'
+
 class WrappingMarquee {
   #scrollDelay = 2000
   #scrollSpeed = 30
@@ -108,7 +110,14 @@ class WrappingMarquee {
     this.pEl.innerText = innerText
     this.pEl.style.transform = 'translateX(0px)'
 
-    if (this.el.scrollWidth > this.el.clientWidth) {
+    // Reduced motion: a static title cut with an ellipsis instead of scrolling
+    const reduced = prefersReducedMotion()
+    this.pEl.style.overflow = reduced ? 'hidden' : ''
+    this.pEl.style.textOverflow = reduced ? 'ellipsis' : ''
+
+    if (reduced) {
+      this.el.style.maskImage = ''
+    } else if (this.el.scrollWidth > this.el.clientWidth) {
       this.setMask(false)
       this.startTimer()
     } else {

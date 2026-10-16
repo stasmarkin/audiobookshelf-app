@@ -106,7 +106,15 @@ class Podcast(
   fun addEpisode(audioTrack:AudioTrack, episode:PodcastEpisode):PodcastEpisode {
     val localEpisodeId = "local_ep_" + episode.id
     val newEpisode = PodcastEpisode(localEpisodeId,(episodes?.size ?: 0) + 1,episode.episode,episode.episodeType,episode.title,episode.subtitle,episode.description,null,null,null,audioTrack,episode.chapters,audioTrack.duration,episode.size, episode.id, localEpisodeId)
-    episodes?.add(newEpisode)
+    // The same server episode always has the same local id: a re-download replaces its entry in place (its progress,
+    // keyed by that id, stays attached) instead of adding a second record of it
+    val existingIndex = episodes?.indexOfFirst { it.id == localEpisodeId } ?: -1
+    if (existingIndex >= 0) {
+      episodes?.removeAll { it.id == localEpisodeId }
+      episodes?.add(existingIndex.coerceAtMost(episodes?.size ?: 0), newEpisode)
+    } else {
+      episodes?.add(newEpisode)
+    }
 
     var index = 1
     episodes?.forEach {

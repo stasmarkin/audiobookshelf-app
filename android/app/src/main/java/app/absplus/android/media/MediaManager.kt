@@ -5,8 +5,14 @@ import android.content.Context
 import android.support.v4.media.MediaBrowserCompat
 import android.util.Log
 import app.absplus.android.data.*
+import app.absplus.android.device.AndroidVolumeProbe
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.sync.ActiveServer
+import app.absplus.android.diagnostics.DLog
+import app.absplus.android.managers.LibraryItemDownloadStarter
+import app.absplus.android.managers.LocalItemLocks
+import app.absplus.android.player.LocalAvailability
+import app.absplus.android.player.LocalPlaybackAvailability
 import app.absplus.android.server.ApiHandler
 import com.getcapacitor.JSObject
 import java.util.*
@@ -49,6 +55,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
   var serverLibraries = listOf<Library>()
 
   var userSettingsPlaybackRate:Float? = null
+  var onPlaybackError: ((String) -> Unit)? = null
 
   // Android Auto browses on the media browser service main thread, so the server pings
   // and authorize call must not run there or they block it and trigger an ANR
@@ -987,7 +994,25 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
 
   fun play(libraryItemWrapper:LibraryItemWrapper, episode:PodcastEpisode?, playItemRequestPayload:PlayItemRequestPayload, cb: (PlaybackSession?) -> Unit) {
     if (libraryItemWrapper is LocalLibraryItem) {
-      cb(libraryItemWrapper.getPlaybackSession(episode, playItemRequestPayload.deviceInfo))
+      val id = libraryItemWrapper.id
+      var availability: LocalAvailability? = null
+      var freshEpisode: PodcastEpisode? = null
+      val item = LocalItemLocks.readForPlayback(id, { DeviceManager.dbManager.getLocalLibraryItem(id) }) {
+        if (episode != null) freshEpisode = (it.media as? Podcast)?.episodes?.find { ep -> ep.id == episode.id }
+        availability = LocalPlaybackAvailability.check(it, AndroidVolumeProbe(ctx)) { episode == null || freshEpisode != null }
+        availability == LocalAvailability.OK
+      }
+      if (item == null) {
+        if (availability == LocalAvailability.STORAGE_UNAVAILABLE) {
+          DLog.e(tag, "play: SD card not available for $id")
+          onPlaybackError?.invoke(LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE)
+        } else {
+          DLog.e(tag, "play: Local library item or episode not found $id ${episode?.id ?: ""}")
+        }
+        cb(null)
+        return
+      }
+      cb(item.getPlaybackSession(freshEpisode, playItemRequestPayload.deviceInfo))
     } else {
       val libraryItem = libraryItemWrapper as LibraryItem
       apiHandler.playLibraryItem(libraryItem.id,episode?.id ?: "", playItemRequestPayload) {

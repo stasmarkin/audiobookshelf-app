@@ -6,7 +6,12 @@ import android.os.Looper
 import android.util.Log
 import app.absplus.android.MainActivity
 import app.absplus.android.data.*
+import app.absplus.android.device.AndroidVolumeProbe
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.managers.LibraryItemDownloadStarter
+import app.absplus.android.managers.LocalItemLocks
+import app.absplus.android.player.LocalAvailability
+import app.absplus.android.player.LocalPlaybackAvailability
 import app.absplus.android.media.MediaEventManager
 import app.absplus.android.player.CastManager
 import app.absplus.android.player.PlayerListener
@@ -268,26 +273,33 @@ class AbsAudioPlayer : Plugin() {
     }
 
     if (libraryItemId.startsWith("local")) { // Play local media item
-      val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItem(libraryItemId)
+      var availability: LocalAvailability? = null
+      var episode: PodcastEpisode? = null
+      val localLibraryItem = LocalItemLocks.readForPlayback(libraryItemId, { DeviceManager.dbManager.getLocalLibraryItem(libraryItemId) }) {
+        if (episodeId.isNotEmpty()) episode = (it.media as Podcast).episodes?.find { ep -> ep.id == episodeId }
+        availability = LocalPlaybackAvailability.check(it, AndroidVolumeProbe(mainActivity)) {
+          (episodeId.isEmpty() || episode != null) && it.hasTracks(mainActivity, episode)
+        }
+        availability == LocalAvailability.OK
+      }
       if (localLibraryItem == null) {
-        // Must resolve here - an unresolved call leaves AudioPlayerContainer.vue's
-        // preparingPlayback guard stuck true, permanently blocking all further playback.
-        DLog.e(tag, "prepareLibraryItem: Local library item not found $libraryItemId")
-        return call.resolve(JSObject("{\"error\":\"Local library item not found\"}"))
+        if (availability == null) {
+          // Must resolve here - an unresolved call leaves AudioPlayerContainer.vue's
+          // preparingPlayback guard stuck true, permanently blocking all further playback.
+          DLog.e(tag, "prepareLibraryItem: Local library item not found $libraryItemId")
+          return call.resolve(JSObject("{\"error\":\"Local library item not found\"}"))
+        }
+        if (availability == LocalAvailability.STORAGE_UNAVAILABLE) {
+          DLog.e(tag, "prepareLibraryItem: SD card not available for $libraryItemId")
+          return call.resolve(JSObject().put("error", LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE))
+        }
+        if (episodeId.isNotEmpty() && episode == null) {
+          DLog.e(tag, "prepareLibraryItem: Podcast episode not found $episodeId")
+          return call.resolve(JSObject("{\"error\":\"Podcast episode not found\"}"))
+        }
+        return call.resolve(JSObject("{\"error\":\"No audio files found on device. Download book again to fix.\"}"))
       }
       localLibraryItem.let {
-        var episode: PodcastEpisode? = null
-        if (episodeId.isNotEmpty()) {
-          val podcastMedia = it.media as Podcast
-          episode = podcastMedia.episodes?.find { ep -> ep.id == episodeId }
-          if (episode == null) {
-            DLog.e(tag, "prepareLibraryItem: Podcast episode not found $episodeId")
-            return call.resolve(JSObject("{\"error\":\"Podcast episode not found\"}"))
-          }
-        }
-        if (!it.hasTracks(mainActivity, episode)) {
-          return call.resolve(JSObject("{\"error\":\"No audio files found on device. Download book again to fix.\"}"))
-        }
 
         Handler(Looper.getMainLooper()).post {
           val playbackSession = it.getPlaybackSession(episode, playerNotificationService.getDeviceInfo())

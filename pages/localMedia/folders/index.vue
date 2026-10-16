@@ -8,7 +8,7 @@
     </div>
 
     <div v-if="!isIos" class="w-full max-w-full px-2 py-2">
-      <template v-for="folder in localFolders">
+      <template v-for="folder in visibleLocalFolders">
         <nuxt-link :to="`/localMedia/folders/${folder.id}`" :key="folder.id" class="flex items-center px-2 py-4 bg-primary rounded-md border-bg mb-1">
           <span class="material-symbols fill text-xl text-yellow-400">folder</span>
           <p class="ml-2">{{ folder.name }}</p>
@@ -17,7 +17,7 @@
           <span class="material-symbols text-xl text-fg-muted">arrow_right</span>
         </nuxt-link>
       </template>
-      <div v-if="!localFolders.length" class="flex justify-center">
+      <div v-if="!visibleLocalFolders.length" class="flex justify-center">
         <p class="text-center">{{ $strings.MessageNoMediaFolders }}</p>
       </div>
       <div v-if="!isAndroid10OrBelow || overrideFolderRestriction" class="flex border-t border-fg/10 my-4 py-4">
@@ -39,12 +39,14 @@
 <script>
 import { AbsFileSystem } from '@/plugins/capacitor'
 import { Dialog } from '@capacitor/dialog'
+import { appStorageFolderIds, visibleFolders } from '@/utils/appStorage'
 
 export default {
   data() {
     return {
       localFolders: [],
       localLibraryItems: [],
+      downloadStorage: undefined,
       newFolderMediaType: null,
       mediaTypeItems: [
         {
@@ -64,6 +66,13 @@ export default {
   computed: {
     isIos() {
       return this.$platform === 'ios'
+    },
+    visibleLocalFolders() {
+      const itemsCountByFolder = {}
+      for (const item of this.localLibraryItems || []) {
+        itemsCountByFolder[item.folderId] = (itemsCountByFolder[item.folderId] || 0) + 1
+      }
+      return visibleFolders(this.localFolders, itemsCountByFolder, appStorageFolderIds(this.downloadStorage))
     }
   },
   methods: {
@@ -108,6 +117,11 @@ export default {
       this.isAndroid10OrBelow = !!androidSdkVersion && androidSdkVersion <= 29
       console.log(`androidSdkVersion=${androidSdkVersion}, isAndroid10OrBelow=${this.isAndroid10OrBelow}`)
 
+      try {
+        this.downloadStorage = (await this.$db.getDownloadStorageStatus())?.downloadStorage
+      } catch (error) {
+        console.error('[localFolders] Failed to read download storage status', error)
+      }
       this.localFolders = (await this.$db.getLocalFolders()) || []
       this.localLibraryItems = await this.$db.getLocalLibraryItems()
     }
