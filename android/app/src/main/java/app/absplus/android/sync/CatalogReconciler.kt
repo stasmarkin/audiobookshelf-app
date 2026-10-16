@@ -2,6 +2,8 @@ package app.absplus.android.sync
 
 import androidx.room.withTransaction
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.db.replica.DetailLevel
+import app.absplus.android.db.replica.EpisodeEntity
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryItemEntity
@@ -10,6 +12,7 @@ import app.absplus.android.db.replica.ReplicaDatabase
 import app.absplus.android.db.replica.SeriesEntity
 import app.absplus.android.db.replica.SeriesItemEntity
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.security.MessageDigest
@@ -33,7 +36,8 @@ fun emptyLibraryState(sc: String, libraryId: String) = LibraryStateEntity(sc, li
  * not move; otherwise the walk is repeated once, and a second unstable walk keeps what it saw without deleting.
  * Series membership comes from the items' `seriesName`; names that cannot be read with certainty are asked from the
  * server per series ([LibraryStateEntity.pendingSeriesQueries], kept across interrupted passes).
- * Downloaded copies (Paper) are never touched; expanded items are never requested.
+ * A podcast whose episodes are not known for its current version is read expanded, one request per podcast; expanded
+ * books are never requested. Downloaded copies (Paper) are never touched.
  */
 class CatalogReconciler(
         private val db: ReplicaDatabase,
@@ -138,6 +142,7 @@ class CatalogReconciler(
               .distinct().groupBy({ it.second }, { it.first })
     } else null
     reconcileItems(config, id, idsByName)
+    if (library.mediaType == "podcast") reconcileEpisodes(config, id)
     if (book) runPointQueries(config, id)
     // Last: a failed authors, collections or playlists read skips the library only after its items are in
     if (book) reconcileAuthors(config, id)
@@ -330,6 +335,75 @@ class CatalogReconciler(
     }
     notify(listOf("state:$libraryId"))
   }
+
+  /**
+   * Episodes of each podcast that has none for its current version, one `GET /api/items/{id}?expanded=1` at a time.
+   * A podcast that failed with an HTTP error stays a candidate for the next pass but does not hold the library: a pass
+   * that gave every podcast a try sets [LibraryStateEntity.episodesReconciledAt].
+   */
+  private suspend fun reconcileEpisodes(config: ServerConnectionConfig, libraryId: String) {
+    val sc = config.id
+    var requests = 0
+    for (podcastId in db.items().podcastsWithoutEpisodes(sc, libraryId)) {
+      currentCoroutineContext().ensureActive()
+      // Not through get(): any HTTP error there skips the whole library
+      val outcome = http.send(config, "GET", "/api/items/$podcastId?expanded=1")
+      requests++
+      currentCoroutineContext().ensureActive()
+      when (outcome) {
+        is HttpOutcome.Ok -> {
+          val answer = try {
+            mapper.readTree(outcome.body)?.takeIf { it.isObject && it.path("id").asText() == podcastId }
+          } catch (e: Exception) {
+            null
+          }
+          val episodes = answer?.let { CatalogJson.episodeEntities(sc, libraryId, it) }
+          if (answer == null || episodes == null) {
+            log("Catalog $sc podcast $podcastId: no episodes in the answer")
+            continue
+          }
+          val topics = writeEpisodes(sc, libraryId, podcastId, answer, episodes)
+          if (topics.isNotEmpty()) {
+            onReplicaChanged()
+            notify(topics)
+          }
+        }
+        is HttpOutcome.HttpError -> if (outcome.code == 404) {
+          // Gone between the item walk and this request
+          db.items().deleteByIds(sc, listOf(podcastId))
+          onReplicaChanged()
+          notify(listOf("items:$libraryId", "episodes:$libraryId"))
+        } else {
+          log("Catalog $sc podcast $podcastId: HTTP ${outcome.code}, episodes read again next pass")
+        }
+        is HttpOutcome.Unreachable, HttpOutcome.Unauthorized -> throw Stop(outcome)
+      }
+    }
+    log("Catalog $sc library $libraryId: $requests episode requests")
+    updateState(sc, libraryId) { it.copy(episodesReconciledAt = clock()) }
+    // A page that read "not reconciled" on an early podcast's event learns here that the library is ready
+    onReplicaChanged()
+    notify(listOf("state:$libraryId"))
+  }
+
+  /** The topics to announce; none when the row is gone or newer than the answer (a socket event got there first). */
+  private suspend fun writeEpisodes(sc: String, libraryId: String, podcastId: String, answer: JsonNode, episodes: List<EpisodeEntity>): List<String> =
+          db.withTransaction {
+            val old = db.items().get(sc, podcastId) ?: return@withTransaction emptyList()
+            val updatedAt = answer.path("updatedAt").asLong()
+            if (old.updatedAt > updatedAt) return@withTransaction emptyList()
+            val expanded = CatalogJson.expandedForStorage(answer).toString()
+            db.episodes().replaceForPodcast(sc, podcastId, episodes)
+            if (old.updatedAt == updatedAt) {
+              db.items().setExpanded(sc, podcastId, updatedAt, DetailLevel.EXPANDED, expanded)
+              return@withTransaction listOf("episodes:$libraryId")
+            }
+            // Asked without include=rssfeed: the row keeps its feed
+            val item = answer.deepCopy<JsonNode>() as ObjectNode
+            if (!item.has("rssFeed") && old.rssFeedJson != null) item.set<JsonNode>("rssFeed", mapper.readTree(old.rssFeedJson))
+            db.items().upsertAll(listOf(CatalogJson.itemEntity(sc, item).copy(detailLevel = DetailLevel.EXPANDED, expandedJson = expanded)))
+            listOf("items:$libraryId", "episodes:$libraryId")
+          }
 
   /** Changes whenever the known series of a library (ids and names) change. */
   private fun seriesVersion(idsByName: Map<String, List<String>>): String {

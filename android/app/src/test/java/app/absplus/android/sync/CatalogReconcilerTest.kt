@@ -39,7 +39,8 @@ class CatalogReconcilerTest {
   private val topics: MutableList<String> = Collections.synchronizedList(mutableListOf())
   private val logs: MutableList<String> = Collections.synchronizedList(mutableListOf())
   private var now = 1_000L
-  private val reconciler = CatalogReconciler(db, syncHttp(api), { now }, { topics.addAll(it) }, {}, { logs.add(it) })
+  private var replicaChanges = 0
+  private val reconciler = CatalogReconciler(db, syncHttp(api), { now }, { topics.addAll(it) }, { replicaChanges++ }, { logs.add(it) })
 
   @After
   fun tearDown() = db.close()
@@ -912,5 +913,160 @@ class CatalogReconcilerTest {
     assertEquals(1_000L, state("lib1")!!.collectionsReconciledAt)
     assertNull(state("lib1")!!.playlistsReconciledAt)
     assertEquals(listOf("lib1"), result.failedLibraries)
+  }
+
+  private fun itemFetches() = api.requests.filter { it.path.startsWith("/api/items/") }.map {
+    assertEquals("expanded=1", it.query)
+    it.path.removePrefix("/api/items/")
+  }
+
+  private fun episodes(podcastId: String) = runBlocking { db.episodes().forPodcast("srv", podcastId) }.map { it.id }
+
+  private fun podcasts(vararg ids: String) {
+    server.library("pods", "podcast")
+    ids.forEach { server.book(it, libraryId = "pods") }
+  }
+
+  @Test
+  fun episodesAreFetchedOncePerPodcast() {
+    podcasts("p1", "p2", "p3")
+
+    reconcile()
+
+    assertEquals(listOf("p1", "p2", "p3"), itemFetches())
+    assertEquals(listOf("p1-e0", "p1-e1"), episodes("p1"))
+    assertEquals(2, episodes("p3").size)
+    listOf("p1", "p2", "p3").forEach { assertEquals(DetailLevel.EXPANDED, runBlocking { db.items().get("srv", it) }!!.detailLevel) }
+    assertEquals(1_000L, state("pods")!!.episodesReconciledAt)
+    assertTrue(logs.any { it.contains("3 episode requests") })
+
+    api.requests.clear()
+    reconcile()
+    assertEquals(emptyList<String>(), itemFetches())
+  }
+
+  @Test
+  fun changedPodcastIsFetchedAgain() {
+    podcasts("p1", "p2")
+    server.books.getValue("p2").rssFeedId = "feed2"
+    reconcile()
+    val feed = runBlocking { db.items().get("srv", "p2") }!!.rssFeedJson
+    assertNotNull(feed)
+    api.requests.clear()
+
+    server.books.getValue("p2").updatedAt = 5
+    server.episodeCounts["p2"] = 3
+    reconcile()
+
+    assertEquals(listOf("p2"), itemFetches())
+    assertEquals(listOf("p2-e0", "p2-e1", "p2-e2"), episodes("p2"))
+    val row = runBlocking { db.items().get("srv", "p2") }!!
+    assertEquals(DetailLevel.EXPANDED, row.detailLevel)
+    assertEquals(feed, row.rssFeedJson)
+  }
+
+  @Test
+  fun newerAnswerRewritesTheRowAndKeepsTheFeed() {
+    podcasts("p1")
+    server.books.getValue("p1").rssFeedId = "feed1"
+    server.onItemFetch = { server.books.getValue("p1").apply { updatedAt = 9; title = "Renamed" } }
+
+    reconcile()
+
+    val row = runBlocking { db.items().get("srv", "p1") }!!
+    assertEquals(9L, row.updatedAt)
+    assertEquals("Renamed", row.title)
+    assertTrue(row.rssFeedJson!!.contains("feed1"))
+    assertEquals(DetailLevel.EXPANDED, row.detailLevel)
+    assertEquals(2, episodes("p1").size)
+  }
+
+  @Test
+  fun answerOlderThanTheRowWritesNothing() {
+    podcasts("p1")
+    server.onItemFetch = { runBlocking { db.items().upsertAll(listOf(db.items().get("srv", "p1")!!.copy(updatedAt = 50))) } }
+
+    reconcile()
+
+    assertTrue(episodes("p1").isEmpty())
+    assertEquals(listOf("p1"), runBlocking { db.items().podcastsWithoutEpisodes("srv", "pods") })
+  }
+
+  @Test
+  fun answerWithoutEpisodesArrayKeepsEpisodes() {
+    podcasts("p1")
+    reconcile()
+    server.books.getValue("p1").updatedAt = 5
+    server.episodeCounts["p1"] = null
+    api.requests.clear()
+
+    reconcile()
+    assertEquals(listOf("p1-e0", "p1-e1"), episodes("p1"))
+    assertEquals(DetailLevel.STALE, runBlocking { db.items().get("srv", "p1") }!!.detailLevel)
+
+    server.episodeCounts["p1"] = 0
+    reconcile()
+    assertEquals("the next pass asks again", listOf("p1", "p1"), itemFetches())
+    assertTrue(episodes("p1").isEmpty())
+    assertEquals(DetailLevel.EXPANDED, runBlocking { db.items().get("srv", "p1") }!!.detailLevel)
+  }
+
+  @Test
+  fun podcastGoneBetweenWalkAndFetchIsDeleted() {
+    podcasts("p1", "p2", "p3")
+    reconcile()
+    assertEquals(2, episodes("p2").size)
+    server.books.getValue("p2").updatedAt = 5
+    server.itemNotFound = setOf("p2")
+    topics.clear()
+
+    reconcile()
+
+    assertNull(runBlocking { db.items().get("srv", "p2") })
+    assertTrue(episodes("p2").isEmpty())
+    assertEquals(2, episodes("p1").size)
+    assertEquals(2, episodes("p3").size)
+    assertTrue(topics.contains("items:pods"))
+  }
+
+  @Test
+  fun failingPodcastDoesNotHoldTheLibrary() {
+    podcasts("p1", "p2", "p3")
+    server.itemFails = setOf("p2")
+
+    val result = reconcile()
+
+    assertEquals(emptyList<String>(), result.failedLibraries)
+    assertEquals(2, episodes("p1").size)
+    assertEquals(2, episodes("p3").size)
+    assertEquals(listOf("p2"), runBlocking { db.items().podcastsWithoutEpisodes("srv", "pods") })
+    assertEquals(1_000L, state("pods")!!.episodesReconciledAt)
+    assertEquals(2, topics.count { it == "episodes:pods" })
+    assertTrue("state comes after the episodes", topics.lastIndexOf("state:pods") > topics.lastIndexOf("episodes:pods"))
+
+    api.requests.clear()
+    reconcile()
+    assertEquals(listOf("p2"), itemFetches())
+  }
+
+  @Test
+  fun unreachableDuringEpisodesStopsAndResumesNextPass() {
+    podcasts("p1", "p2", "p3")
+    server.onItemFetch = { if (it == "p2") throw IOException("gone") }
+
+    val result = reconcile()
+
+    assertTrue(result.stoppedBy is HttpOutcome.Unreachable)
+    assertEquals(2, episodes("p1").size)
+    assertTrue(episodes("p3").isEmpty())
+    assertTrue(topics.contains("episodes:pods"))
+    assertTrue(replicaChanges > 0)
+    assertNull(state("pods")!!.episodesReconciledAt)
+
+    server.onItemFetch = {}
+    api.requests.clear()
+    reconcile()
+    assertEquals(listOf("p2", "p3"), itemFetches())
+    assertNotNull(state("pods")!!.episodesReconciledAt)
   }
 }

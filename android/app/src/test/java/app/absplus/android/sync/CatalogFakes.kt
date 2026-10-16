@@ -54,6 +54,13 @@ class FakeCatalogServer {
   var onAuthorsPage: (AuthorsPage) -> Unit = {}
   var legacyAuthors = false
   var notFound: Set<String> = emptySet()
+  /** Episodes `GET /api/items/{id}` gives a podcast (default 2); null: the answer has no `media.episodes`. */
+  val episodeCounts = HashMap<String, Int?>()
+  /** Item ids `GET /api/items/{id}` answers with 404, and with 500. */
+  var itemNotFound: Set<String> = emptySet()
+  var itemFails: Set<String> = emptySet()
+  /** Called with the id before `GET /api/items/{id}` answers; may throw IOException. */
+  var onItemFetch: (id: String) -> Unit = {}
   private val calls = HashMap<String, Int>()
   private val mapper = CatalogJson.mapper
 
@@ -132,9 +139,28 @@ class FakeCatalogServer {
   private fun params(query: String?): Map<String, String> =
           query.orEmpty().split('&').filter { it.contains('=') }.associate { it.substringBefore('=') to it.substringAfter('=') }
 
+  /** `GET /api/items/{id}?expanded=1` of a podcast: the list's shape plus `media.episodes`. */
+  private fun expandedItem(id: String): Pair<Int, String> {
+    onItemFetch(id)
+    val book = books[id]
+    if (book == null || id in itemNotFound) return 404 to "Not found"
+    if (id in itemFails) return 500 to "Internal Server Error"
+    val item = itemJson(book)
+    item.remove("rssFeed")
+    val count = if (episodeCounts.containsKey(id)) episodeCounts[id] else 2
+    if (count != null) {
+      val episodes = (item.path("media") as ObjectNode).putArray("episodes")
+      repeat(count) { i ->
+        episodes.add(episodeJson(id, "$id-e$i").put("addedAt", book.addedAt * 100 + i).put("publishedAt", book.addedAt * 100 + i).put("index", i + 1))
+      }
+    }
+    return 200 to mapper.writeValueAsString(item)
+  }
+
   fun handle(request: FakeRequest): Pair<Int, String> {
     val path = request.path
     val q = params(request.query)
+    if (request.method == "GET" && path.startsWith("/api/items/")) return expandedItem(path.removePrefix("/api/items/"))
     val segments = path.removePrefix("/api/libraries").trim('/').split('/').filter { it.isNotEmpty() }
     if (request.method != "GET" || !path.startsWith("/api/libraries")) return 404 to "Not found"
     if (segments.isEmpty()) {
