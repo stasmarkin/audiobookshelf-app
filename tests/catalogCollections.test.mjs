@@ -217,6 +217,37 @@ test('a collection that moves while it loads is read again once', async () => {
   assert.equal(await fetchCollectionBooks({ getCollectionBooks: async () => ({ serverConfigId: 'a', results: [], total: 0, found: false }) }, 'c1'), null)
 })
 
+test('a book removed or a source switched between pages reads the collection again', async () => {
+  const books = booksOf(150)
+  // Read 1: the first book leaves the collection after page 0, so page 1 starts one later and li100 would be lost
+  let reads = 0
+  const shrinking = {
+    getCollectionBooks: async ({ limit, page }) => {
+      if (page === 0) reads++
+      const now = reads === 1 && page === 1 ? books.slice(1) : books
+      return { serverConfigId: 'a', results: now.slice(page * limit, page * limit + limit), total: now.length, limit, page, found: true }
+    }
+  }
+  const read = await fetchCollectionBooks(shrinking, 'c1')
+  assert.equal(reads, 2)
+  assert.deepEqual(read.map((b) => b.id), books.map((b) => b.id), 'no book silently lost')
+
+  // The replica took over from the server between pages (its first reconcile finished)
+  reads = 0
+  const switching = {
+    getCollectionBooks: async ({ limit, page }) => {
+      if (page === 0) reads++
+      return { serverConfigId: 'a', results: books.slice(page * limit, page * limit + limit), total: 150, limit, page, found: true, ...(reads === 1 && page === 0 ? { fromServer: true } : {}) }
+    }
+  }
+  assert.equal((await fetchCollectionBooks(switching, 'c1')).length, 150)
+  assert.equal(reads, 2)
+
+  let count = 150
+  const alwaysShrinking = { getCollectionBooks: async ({ limit, page }) => ({ serverConfigId: 'a', results: books.slice(page * limit, page * limit + limit), total: count--, limit, page, found: true }) }
+  await assert.rejects(() => fetchCollectionBooks(alwaysShrinking, 'c1'), /changed while loading/)
+})
+
 test('never-reconciled collections read the server while online', async () => {
   const http = fakeHttp((path) => (path.startsWith('/api/collections/') ? serverCollection(7) : { results: [serverCollection(7)], total: 1, limit: '20', page: '1' }))
   const plugin = fakePlugin({ books: [], reconciledAt: null })
