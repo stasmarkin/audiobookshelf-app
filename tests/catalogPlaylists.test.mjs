@@ -15,7 +15,7 @@ const { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } = await impor
 const { trackCount, fetchPlaylistItems } = await importSource('../utils/catalogItem.js')
 const { queueItemPayload, resolveItemProgress } = await importSource('../utils/playbackQueue.js')
 const requiresServer = (await importSource('../mixins/requiresServer.js')).default
-const { leavesOnLibraryChange } = await importSource('../utils/libraryScope.js')
+const { leavesOnLibraryChange, copyLeavesOnLibraryChange } = await importSource('../utils/libraryScope.js')
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const replica = (reconciledAt = 5) => ({ reconciledAt, complete: reconciledAt != null })
 const flush = async (n = 30) => {
@@ -966,10 +966,10 @@ test('the collection and item pages leave only for another library or server', a
   assert.equal(replaced.length, 2)
 
   const itemSource = await read('../pages/item/_id/index.vue')
-  const itemDef = componentDef(itemSource, { leavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {} })
+  const itemDef = componentDef(itemSource, { leavesOnLibraryChange, copyLeavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {} })
   const itemState = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
   const left = []
-  const item = bind({ methods: { libraryChanged: itemDef.methods.libraryChanged } }, { libraryItem: { id: 'li1', libraryId: 'l1' }, loadedServerConfigId: 'a', $store: { state: itemState }, $router: { replace: (to) => left.push(to) } })
+  const item = bind({ methods: { libraryChanged: itemDef.methods.libraryChanged }, computed: { isLocal: itemDef.computed.isLocal } }, { libraryItem: { id: 'li1', libraryId: 'l1' }, loadedServerConfigId: 'a', $store: { state: itemState }, $router: { replace: (to) => left.push(to) } })
   item.libraryChanged()
   assert.deepEqual(left, [], 'a reconnect keeps the item page')
   itemState.libraries.currentLibraryId = 'l2'
@@ -1033,4 +1033,62 @@ test('the catalog-partial note stays pinned over every row', async () => {
   assert.doesNotMatch(rule, /(^|[^-])height:/, 'no fixed height: one screen of it left the sticky note behind after one screen of rows')
   assert.match(shelf, /<div id="bookshelf" class="w-full max-w-full min-h-full">/, 'the box grows with the rows')
   assert.match(modalSource, /<div v-if="!showPlaylistNameInput" class="[^"]*min-h-20 pt-2 pb-2[^"]*">/, 'the create button and its label are not cut off')
+})
+
+test('a downloaded copy\'s page stays on a reconnect and leaves only for another server', async () => {
+  const itemDef = componentDef(await read('../pages/item/_id/index.vue'), { leavesOnLibraryChange, copyLeavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {} })
+  const page = (copy) => {
+    const state = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
+    const left = []
+    // A downloaded copy has no libraryId
+    const view = bind({ methods: { libraryChanged: itemDef.methods.libraryChanged }, computed: { isLocal: itemDef.computed.isLocal } }, { libraryItem: copy, loadedServerConfigId: 'a', $store: { state }, $router: { replace: (to) => left.push(to) } })
+    return { view, state, left }
+  }
+  const own = page({ id: 'local_1', isLocal: true, libraryItemId: 'li1', serverConnectionConfigId: 'a' })
+  own.view.libraryChanged()
+  own.state.libraries.currentLibraryId = 'l2'
+  own.view.libraryChanged()
+  assert.deepEqual(own.left, [], 'a reconnect or another library: the copy plays from the device')
+  own.state.activeServerConfigId = 'b'
+  own.view.libraryChanged()
+  assert.deepEqual(own.left, ['/bookshelf'], "another server: the copy isn't its")
+
+  const fromB = page({ id: 'local_2', isLocal: true, libraryItemId: 'li2', serverConnectionConfigId: 'b' })
+  fromB.state.activeServerConfigId = 'b'
+  fromB.view.libraryChanged()
+  assert.deepEqual(fromB.left, [], "switched to the copy's own server")
+  const media = page({ id: 'local_3', isLocal: true })
+  media.state.activeServerConfigId = 'b'
+  media.view.libraryChanged()
+  assert.deepEqual(media.left, [], 'Local Media belongs to no server')
+
+  const forgotten = page({ id: 'local_4', isLocal: true, libraryItemId: 'li4', serverConnectionConfigId: 'a' })
+  forgotten.state.activeServerConfigId = null
+  forgotten.view.libraryChanged()
+  assert.deepEqual(forgotten.left, [], 'no active server: nothing to confuse the copy with')
+
+  // A copy of B opened while A is active: B is its own, then A again is not
+  const back = page({ id: 'local_5', isLocal: true, libraryItemId: 'li5', serverConnectionConfigId: 'b' })
+  back.state.activeServerConfigId = 'b'
+  back.view.libraryChanged()
+  assert.deepEqual(back.left, [])
+  back.state.activeServerConfigId = 'a'
+  back.view.libraryChanged()
+  assert.deepEqual(back.left, ['/bookshelf'], 'back to A after B: leaves')
+})
+
+test('a collection or playlist without a library id leaves for another library', async () => {
+  // The replica writes '' for a missing libraryId
+  const playlist = playlistPage({ absData: createDataService({ plugin: fakePlugin(), store: fakeStore() }) })
+  const view = await playlist.mount()
+  view.playlist = { ...view.playlist, libraryId: '' }
+  playlist.store.state.libraries.currentLibraryId = 'l2'
+  view.libraryChanged()
+  assert.deepEqual(playlist.replaced, ['/bookshelf/playlists'])
+  const collectionDef = componentDef(await read('../pages/collection/_id.vue'), { leavesOnLibraryChange, trackCount, createDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {} })
+  const replaced = []
+  const collection = bind(collectionDef, { collection: { id: 'c1', libraryId: '' }, $store: { state: { libraries: { currentLibraryId: 'l2' }, activeServerConfigId: 'a' } }, $router: { replace: (to) => replaced.push(to) }, $eventBus: { $on() {} }, $absData: { onDataChanged: () => () => {} } })
+  collectionDef.mounted.call(collection)
+  collection.libraryChanged()
+  assert.deepEqual(replaced, ['/bookshelf/collections'])
 })
