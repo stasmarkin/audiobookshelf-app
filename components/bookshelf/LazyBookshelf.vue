@@ -207,6 +207,8 @@ export default {
     },
     async fetchEntities(page) {
       const startIndex = page * this.booksPerFetch
+      // Pages load in parallel: one asked before a reset (another library or filter) must not land in the new shelf
+      const generation = this.resetGeneration
 
       this.isFetchingEntities = true
 
@@ -220,6 +222,7 @@ export default {
           console.error('failed to fetch books', error)
           return null
         })
+        if (generation !== this.resetGeneration) return
         if (payload && page === 0) {
           // An empty answer from a replica never reconciled is "not downloaded yet", not "no books"
           this.catalogNotLoaded = payload.replica?.reconciledAt == null && !payload.total && !payload.fromServer
@@ -237,6 +240,7 @@ export default {
           console.error('failed to fetch books', error)
           return null
         })
+        if (generation !== this.resetGeneration) return
       }
 
       this.isFetchingEntities = false

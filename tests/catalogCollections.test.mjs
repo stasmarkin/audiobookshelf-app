@@ -391,6 +391,38 @@ test('collections tab loads every page the first screen shows', async () => {
   }
 })
 
+test('a page that answers after a reset is dropped', async () => {
+  // Library l1 has 45 collections; page 1 of l1 is held until the shelf was reset to l2
+  const held = []
+  const answer = ({ libraryId, limit, page }) => {
+    const count = libraryId === 'l1' ? 45 : 3
+    const results = Array.from({ length: Math.max(0, Math.min(limit, count - page * limit)) }, (_, i) => ({ id: `${libraryId}-c${page * limit + i}`, books: [] }))
+    return { serverConfigId: 'a', results, total: count, limit, page, replica: replica() }
+  }
+  const shelf = await bookshelf({
+    realSize: true,
+    getCollections: (args) => (args.libraryId === 'l1' && args.page === 1 ? new Promise((resolve) => held.push(() => resolve(answer(args)))) : answer(args))
+  })
+  globalThis.document = { getElementById: (id) => (id === 'bookshelf' ? { clientHeight: 7000, clientWidth: 1600 } : null) }
+  globalThis.window = { innerWidth: 1600 }
+  try {
+    const initDone = shelf.view.init()
+    await flush()
+    assert.equal(held.length, 1, 'page 1 of l1 is in flight')
+    shelf.view.$store.state.libraries.currentLibraryId = 'l2'
+    await shelf.view.resetEntities()
+    assert.deepEqual(plain(shelf.view.entities.map((c) => c.id)), ['l2-c0', 'l2-c1', 'l2-c2'])
+    held.forEach((release) => release())
+    await initDone
+    await flush()
+    assert.equal(shelf.view.totalEntities, 3)
+    assert.deepEqual(plain(shelf.view.entities.map((c) => c.id)), ['l2-c0', 'l2-c1', 'l2-c2'], 'no collection of l1 in the l2 shelf')
+  } finally {
+    delete globalThis.document
+    delete globalThis.window
+  }
+})
+
 test('collection page re-reads on collections:<lib>', async () => {
   let books = booksOf(3)
   let collectionGone = false
