@@ -7,6 +7,15 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Collections offline:** the Collections tab and a collection's page read the same catalog copy, so they open
+  without the server with the last synced collections, each book in the collection's order (as arranged in the web
+  client). Play and the add-to-queue button of a collection work offline too: downloaded books play from the phone
+  and a book that is not downloaded waits for the server. A collection reordered, renamed, changed or deleted in the
+  web client follows on the phone within a few seconds while the app is connected, also on an open collection page;
+  a deleted collection goes back to the Collections tab. Books you can't access are left out, and a collection with
+  none left is hidden, as on the server. Offline, covers of books that are not downloaded show the title and author
+  placeholder. Until a library's collections have been copied once, both read the server as before; offline the tab
+  says the catalog isn't downloaded yet.
 - **Authors offline:** the Authors tab reads the same catalog copy, so it opens without the server with the last
   synced authors and their book counts, sorted by name (the server listed them in no set order). Tapping an author
   opens the Library tab filtered to their books, offline too, also for an author added on the server since the
@@ -31,7 +40,7 @@ Merged into `plus`, not yet in a published release.
   offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
   limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
   the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
-  the server (offline the tab says so). The Collections and Playlists tabs are unchanged.
+  the server (offline the tab says so). The Playlists tab is unchanged.
 - **Podcast library navigation:** every tab now shows both its icon and its label, selected or not: Home (house),
   Latest (clock), Library (stacked books) and Add (plus). Library no longer uses the microphone and Add no longer
   uses the broadcast symbol. Tabs keep equal widths, the labels name each destination for screen readers, and the

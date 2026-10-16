@@ -120,6 +120,11 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 40. **Many authors:** in a library with more than 100 authors, the Authors tab lists all of them, online and in airplane mode, and the count in the app bar matches.
 41. **Author changes while connected:** rename an author in the web client: the open Authors tab shows the new name within a few seconds, and tapping the author still filters the Library to their books. Add a book by a new author: the author appears; tap them in airplane mode afterwards: the Library shows that book. Remove the author's last book or delete the author: the count changes or the author disappears.
 42. **Authors before the first catalog copy:** on a fresh install that signed in once, the Authors tab online looks as before (read from the server); in airplane mode before the first copy finished it says "The catalog isn't downloaded yet".
+43. **Collections in airplane mode:** turn airplane mode on. The Collections tab shows every collection of the library with its cover; open one: its books are in the same order as in the server's web client, and books without a cover show the title and author placeholder.
+44. **Collection Play offline:** in airplane mode, Play a collection of three books with the first two downloaded (choose Play if "Download or stream" asks): the downloaded books play from the phone (Diagnostics: a local start) and the queue waits for the server on the third (as in 24). The add-to-queue button of the collection adds its unfinished books.
+45. **Large collection:** open a collection with more than 100 books, online and in airplane mode: the page lists all of them in order, and Play all queues all of them.
+46. **Collection changes while connected:** with a collection page open, reorder its books in the web client: the order on the phone follows within a few seconds without a restart. Rename the collection and add a book: the open Collections tab and the page follow. Delete the collection: the open page returns to the Collections tab.
+47. **Collections before the first catalog copy:** on a fresh install that signed in once, the Collections tab online looks as before (read from the server); in airplane mode before the first copy finished it says "The catalog isn't downloaded yet".
 
 ## Emulator baseline (for comparison)
 
