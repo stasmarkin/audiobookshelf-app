@@ -13,7 +13,9 @@ import app.absplus.android.data.Podcast
 import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.data.PodcastMetadata
 import app.absplus.android.db.userdata.MediaProgressEntity
+import app.absplus.android.managers.LocalItemLocks
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -44,6 +46,32 @@ class PlaybackSourceResolverTest {
 
   private fun resolver(vararg items: LocalLibraryItem, broken: Set<String> = emptySet(), cardOut: Set<String> = emptySet()) =
     PlaybackSourceResolver({ items.toList() }, { id -> items.find { it.id == id } }, { it.id !in cardOut }) { item, _ -> item.id !in broken && item.id !in cardOut }
+
+  @Test fun pinReadsTheCopyAgainAndPinsOnlyAPlayableOne() {
+    LocalItemLocks.clearPlaybackPin()
+    try {
+      val stale = book("local_1", "li1")
+      val fresh = book("local_1", "li1")
+      val pinned = pinLocalSource(PlaybackSource.Local(stale, null), { fresh }) { _, _ -> LocalAvailability.OK }
+      assertSame(fresh, (pinned as PlaybackSource.Local).item)
+      assertTrue(LocalItemLocks.isPinned("local_1"))
+
+      val other = book("local_2", "li2")
+      assertEquals(PlaybackSource.StorageUnavailable(other),
+        pinLocalSource(PlaybackSource.Local(other, null), { other }) { _, _ -> LocalAvailability.STORAGE_UNAVAILABLE })
+      assertEquals(PlaybackSource.LocalBroken(other),
+        pinLocalSource(PlaybackSource.Local(other, null), { other }) { _, _ -> LocalAvailability.NO_FILES })
+      assertTrue(pinLocalSource(PlaybackSource.Local(other, null), { null }) { _, _ -> LocalAvailability.OK } is PlaybackSource.NotFound)
+      val e1 = episode("local_e1", "e1")
+      assertTrue(pinLocalSource(PlaybackSource.Local(podcast("local_p", "p", e1), e1), { podcast("local_p", "p") }) { _, _ -> LocalAvailability.OK }
+        is PlaybackSource.NotFound)
+      // A copy that cannot play leaves the previous pin
+      assertTrue(LocalItemLocks.isPinned("local_1"))
+      assertFalse(LocalItemLocks.isPinned("local_2"))
+    } finally {
+      LocalItemLocks.clearPlaybackPin()
+    }
+  }
 
   @Test fun copyOnMissingCardIsUnavailableNotBrokenOrStreamed() {
     val copy = book("local_1", "li1")
