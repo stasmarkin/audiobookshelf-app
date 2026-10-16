@@ -224,6 +224,7 @@ export default {
     libraryChanged(libraryId) {
       // A collection belongs to a single library, so leave this page when a different library is
       // selected rather than showing a collection that is not in the current library
+      // A sign-in or reconnect re-announces the same library (with its id)
       if (!libraryId || libraryId !== this.collection.libraryId) {
         this.$router.replace('/bookshelf/collections')
       }

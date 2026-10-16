@@ -206,7 +206,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     if (!canDispatch()) return
     await store.dispatch('libraries/load', { force: true })
     if (currentLibraryId()) await store.dispatch('libraries/fetch', currentLibraryId())
-    eventBus?.$emit('library-changed')
+    eventBus?.$emit('library-changed', currentLibraryId())
   }
 
   const catalogChanged = async (ids) => {
@@ -217,7 +217,7 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
       // The current library went away: filterdata, issues and playlists of the new one, and pages follow it
       if (currentLibraryId() && currentLibraryId() !== before) {
         await store.dispatch('libraries/fetch', currentLibraryId())
-        eventBus?.$emit('library-changed')
+        eventBus?.$emit('library-changed', currentLibraryId())
         return
       }
     }

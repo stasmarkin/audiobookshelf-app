@@ -42,8 +42,9 @@
     <div v-if="!showPlaylistNameInput" class="flex flex-col items-stretch h-20 pt-2 absolute bottom-0 left-0 w-full">
       <ui-btn :loading="processing" :disabled="!isServerOnline" color="success" class="w-full h-14 flex items-center justify-center" @click.stop="createPlaylist">
         <p class="text-base">{{ $strings.ButtonCreateNewPlaylist }}</p>
-        <p v-if="!isServerOnline" class="requires-server-label text-xs">{{ requiresServerLabel() }}</p>
       </ui-btn>
+      <!-- Under the button: inside it the label ran into the button text -->
+      <p v-if="!isServerOnline" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
     </div>
   </modals-fullscreen-modal>
 </template>

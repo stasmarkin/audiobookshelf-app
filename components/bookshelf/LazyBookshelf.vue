@@ -1,6 +1,7 @@
 <template>
-  <!-- As tall as its rows (at least the view): the sticky note stays pinned over all of them, not only the first screen -->
-  <div id="bookshelf" class="w-full max-w-full min-h-full">
+  <!-- As tall as its rows (at least the view): the sticky note stays pinned over all of them, not only the first screen.
+       The inline height overrides the one-screen height of #bookshelf in assets/app.css -->
+  <div id="bookshelf" class="w-full max-w-full min-h-full" style="height: auto">
     <!-- Before the rows, pinned at the top; the rows start below it (shelfScrollTop) -->
     <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px">{{ $strings.MessageCatalogPartial }}</div>
     <template v-for="shelf in totalShelves">

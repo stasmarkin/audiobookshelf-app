@@ -115,7 +115,7 @@ function playlistPage({ absData, localItems = {}, activeServerConfigId = 'a', us
   const fakeDebouncer = (options) => createDebouncer({ ...options, setTimer: (fn, ms) => (timers.push({ fn, ms }), timers.at(-1)), clearTimer: (t) => timers.includes(t) && timers.splice(timers.indexOf(t), 1) })
   const component = componentDef(pageSource, { trackCount, fetchPlaylistItems, createDebouncer: fakeDebouncer, downloadMissingItems() {}, queueItemPayload, resolveItemProgress })
   const store = {
-    state: { activeServerConfigId, user: { user }, playerIsPlaying: false, playerIsStartingPlayback: false },
+    state: { activeServerConfigId, user: { user }, playerIsPlaying: false, playerIsStartingPlayback: false, libraries: { currentLibraryId: 'l1' } },
     getters: {
       getIsMediaStreaming: () => false,
       getAskBeforeStreamingIncomplete: false,
@@ -153,7 +153,7 @@ function playlistPage({ absData, localItems = {}, activeServerConfigId = 'a', us
     component.mounted.call(view)
     return view
   }
-  return { component, asyncData, mount, timers, replaced, emitted, localCalls, dataListeners, send: (change) => dataListeners.forEach((cb) => cb(change)), destroy: (view) => component.beforeDestroy.call(view) }
+  return { component, store, asyncData, mount, timers, replaced, emitted, localCalls, dataListeners, send: (change) => dataListeners.forEach((cb) => cb(change)), destroy: (view) => component.beforeDestroy.call(view) }
 }
 
 const episodeCopy = (id, serverConnectionConfigId) => ({ id, libraryItemId: 'pod1', serverConnectionConfigId, mediaType: 'podcast', media: { episodes: [{ id: `${id}_ep1`, serverEpisodeId: 'ep1' }] } })
@@ -926,4 +926,38 @@ test('a removed item and a playlist gone meanwhile leave for the tab', async () 
   page.timers.shift().fn()
   await flush()
   assert.deepEqual(page.replaced, ['/bookshelf/playlists'])
+})
+
+test('a sign-in or reconnect does not take the playlist page away', async () => {
+  const page = playlistPage({ absData: createDataService({ plugin: fakePlugin(), store: fakeStore() }) })
+  const view = await page.mount()
+  view.libraryChanged('l1')
+  view.libraryChanged()
+  assert.deepEqual(page.replaced, [], 'the same library announced again')
+  page.store.state.libraries.currentLibraryId = 'l2'
+  view.libraryChanged('l2')
+  assert.deepEqual(page.replaced, ['/bookshelf/playlists'], 'another library picked')
+  const layout = await read('../layouts/default.vue')
+  assert.match(layout, /this\.\$eventBus\.\$emit\('library-changed', this\.currentLibraryId\)/, 'the layout names the library')
+  const data = await read('../utils/dataService.js')
+  assert.equal(data.match(/eventBus\?\.\$emit\('library-changed', currentLibraryId\(\)\)/g)?.length, 2)
+  // The collection and item pages compare that id with their own library
+  assert.match(await read('../pages/collection/_id.vue'), /if \(!libraryId \|\| libraryId !== this\.collection\.libraryId\)/)
+  assert.match(await read('../pages/item/_id/index.vue'), /if \(this\.libraryItem\.libraryId !== libraryId\)/)
+})
+
+test('the offline label of the create button is its own line and a disabled row button looks disabled', async () => {
+  const create = modalSource.slice(modalSource.indexOf('<!-- create playlist btn -->'), modalSource.indexOf('</modals-fullscreen-modal>'))
+  const button = create.slice(create.indexOf('<ui-btn'), create.indexOf('</ui-btn>'))
+  assert.doesNotMatch(button, /requires-server-label/, 'not inside the button, where it ran into its text')
+  assert.match(create.slice(create.indexOf('</ui-btn>')), /<p v-if="!isServerOnline" class="requires-server-label[^"]*text-center[^"]*">/)
+  const row = await read('../components/modals/playlists/PlaylistRow.vue')
+  assert.equal(row.match(/:disabled="disabled" class="w-full" :class="disabled \? 'opacity-50' : ''"/g)?.length, 2)
+})
+
+test('the catalog-partial note stays pinned over every row', async () => {
+  const shelf = await read('../components/bookshelf/LazyBookshelf.vue')
+  // assets/app.css gives #bookshelf one screen of height: the sticky note left with it after one screen of rows
+  assert.match(await read('../assets/app.css'), /#bookshelf \{\s*height: calc\(100% - 48px\);/)
+  assert.match(shelf, /<div id="bookshelf" class="w-full max-w-full min-h-full" style="height: auto">/, 'the box grows with the rows')
 })

@@ -8,8 +8,8 @@
       <p class="px-2 truncate text-sm">{{ playlist.name }}</p>
     </div>
     <div class="w-24 min-w-[96px] px-1">
-      <ui-btn v-if="inPlaylist" small :disabled="disabled" class="w-full" @click.stop="click">{{ $strings.ButtonRemove }}</ui-btn>
-      <ui-btn v-else small :disabled="disabled" class="w-full" @click.stop="click">{{ $strings.ButtonAdd }}</ui-btn>
+      <ui-btn v-if="inPlaylist" small :disabled="disabled" class="w-full" :class="disabled ? 'opacity-50' : ''" @click.stop="click">{{ $strings.ButtonRemove }}</ui-btn>
+      <ui-btn v-else small :disabled="disabled" class="w-full" :class="disabled ? 'opacity-50' : ''" @click.stop="click">{{ $strings.ButtonAdd }}</ui-btn>
       <p v-if="disabled" class="requires-server-label text-xxs text-fg-muted text-center truncate">{{ $strings.LabelRequiresServer }}</p>
     </div>
   </div>

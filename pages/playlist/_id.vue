@@ -236,13 +236,16 @@ export default {
       }
       this.showItems(playlist)
     },
-    libraryChanged() {
-      // Playlist contents are shown in the context of the selected library, so leave this page
-      // when the library changes rather than showing stale items
+    libraryChanged(libraryId) {
+      // Playlist contents are shown in the context of the selected library, so leave this page when another library
+      // is selected; a sign-in or reconnect re-announces the same one
+      const current = libraryId || this.$store.state.libraries?.currentLibraryId
+      if (current && current === this.libraryIdShown) return
       this.$router.replace('/bookshelf/playlists')
     }
   },
   mounted() {
+    this.libraryIdShown = this.$store.state.libraries?.currentLibraryId || null
     this.$eventBus.$on('library-changed', this.libraryChanged)
     this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },
