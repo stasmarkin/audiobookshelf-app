@@ -88,6 +88,8 @@ export default {
   data() {
     return {
       readGeneration: 0,
+      /** Items removed here, by key, until the replica stops listing them. */
+      removedKeys: [],
       showMoreMenu: false,
       processing: false,
       selectedLibraryItem: null,
@@ -195,11 +197,18 @@ export default {
     },
     /** Removed on the server: gone from the page at once; the server deletes a playlist left empty. */
     itemRemoved({ libraryItemId, episodeId }) {
-      // A read running or due now may still see the item in the replica; the catalog notice reads again after it
-      this.readGeneration++
-      if (this.refreshDebouncer) this.refreshDebouncer.cancel()
-      this.playlist = { ...this.playlist, items: this.playlistItems.filter((i) => !(i.libraryItemId === libraryItemId && (i.episodeId || null) === (episodeId || null))) }
-      if (!this.playlist.items.length) this.$router.replace('/bookshelf/playlists')
+      // A read running or due now may still see it in the replica
+      this.removedKeys = [...this.removedKeys, `${libraryItemId}|${episodeId || ''}`]
+      this.showItems(this.playlist)
+    },
+    /** [playlist] without the items removed here; one left empty was deleted by the server. */
+    showItems(playlist) {
+      const key = (i) => `${i.libraryItemId}|${i.episodeId || ''}`
+      const listed = new Set((playlist.items || []).map(key))
+      this.removedKeys = this.removedKeys.filter((k) => listed.has(k))
+      const items = (playlist.items || []).filter((i) => !this.removedKeys.includes(key(i)))
+      this.playlist = { ...playlist, items }
+      if (!items.length) this.$router.replace('/bookshelf/playlists')
     },
     /** Native changed this library's playlists or items: read the playlist again (debounced). */
     dataChanged(change) {
@@ -225,7 +234,7 @@ export default {
         this.$router.replace('/bookshelf/playlists')
         return
       }
-      this.playlist = playlist
+      this.showItems(playlist)
     },
     libraryChanged() {
       // Playlist contents are shown in the context of the selected library, so leave this page

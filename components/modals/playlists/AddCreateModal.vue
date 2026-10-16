@@ -68,12 +68,15 @@ export default {
       playlists: [],
       processing: false,
       loading: false,
-      loadGeneration: 0
+      loadGeneration: 0,
+      /** Playlists the server answered a write with, by id (null: deleted), until a list read shows the same. */
+      writes: {}
     }
   },
   watch: {
     show(newVal) {
       if (newVal) {
+        this.writes = {}
         this.setListeners()
         this.showPlaylistNameInput = false
         this.newPlaylistName = ''
@@ -134,7 +137,7 @@ export default {
           results.forEach((playlist) => collected.set(playlist.id, playlist))
           if (!results.length || (page + 1) * PLAYLISTS_PAGE >= (answer?.total || 0)) break
         }
-        this.playlists = [...collected.values()]
+        this.playlists = this.withWrites([...collected.values()], true)
       } catch (error) {
         if (generation !== this.loadGeneration) return
         console.error('Failed', error)
@@ -234,18 +237,27 @@ export default {
      */
     applyServerPlaylist(playlist) {
       if (!playlist?.id) return
-      // A list read still running started before the write: its answer would put the old playlist back
-      this.loadGeneration++
-      this.loading = false
       const entry = playlistListEntry(playlist)
-      const index = this.playlists.findIndex((p) => p.id === entry.id)
-      if (!entry.numItems) {
-        if (index >= 0) this.playlists.splice(index, 1)
-      } else if (index >= 0) {
-        this.playlists.splice(index, 1, entry)
-      } else {
-        this.playlists.push(entry)
+      // A read that started before the write (or before the replica took it) would put the old playlist back
+      this.writes = { ...this.writes, [entry.id]: entry.numItems ? entry : null }
+      this.playlists = this.withWrites(this.playlists)
+    },
+    /** [list] with the writes over it; a list read ([fromRead]) that already shows a write ends it. */
+    withWrites(list, fromRead = false) {
+      const same = (a, b) => !!a && a.name === b.name && JSON.stringify(a.itemKeys) === JSON.stringify(b.itemKeys)
+      const out = [...list]
+      const pending = {}
+      for (const [id, written] of Object.entries(this.writes)) {
+        const index = out.findIndex((p) => p.id === id)
+        const shown = index >= 0 ? out[index] : null
+        if (written ? same(shown, written) : !shown) continue
+        pending[id] = written
+        if (!written) out.splice(index, 1)
+        else if (index >= 0) out.splice(index, 1, written)
+        else out.push(written)
       }
+      if (fromRead) this.writes = pending
+      return out
     },
     /** Native changed this library's playlists (an add, a remove, a new one): read the list again while open. */
     dataChanged(change) {

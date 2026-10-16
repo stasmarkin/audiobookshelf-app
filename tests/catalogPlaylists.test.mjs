@@ -821,18 +821,61 @@ test('a write in the add-to-playlist list is not undone by an older list read', 
     getPlaylists: (args) => new Promise((resolve) => held.push(() => resolve(playlistsAnswer(args)))),
     answer: () => expanded('p49', ['other0', 'li9'])
   })
+  // The list is open; a re-read on a catalog notice starts before the write and answers after it
+  const first = modal.view.loadPlaylists()
+  for (let i = 0; i < 3; i++) {
+    await flush()
+    held.shift()()
+  }
+  await first
   const load = modal.view.loadPlaylists()
   await flush()
-  assert.equal(modal.view.loading, true)
   await modal.view.addToPlaylist({ id: 'p49' })
   await flush()
-  assert.equal(modal.view.loading, false)
-  held.shift()()
+  while (held.length) {
+    held.shift()()
+    await flush()
+  }
   await load
   await flush()
   const p49 = modal.view.sortedPlaylists.find((p) => p.id === 'p49')
   assert.equal(p49.isItemIncluded, true, 'the write stays')
+  assert.equal(modal.view.playlists.length, 50)
   assert.equal(modal.view.loading, false)
+  // That read still showed the old items: the write still holds
+  assert.ok(Object.keys(modal.view.writes).includes('p49'))
+})
+
+test('a playlist created while the list still loads joins the whole list', async () => {
+  const held = []
+  const modal = addCreateModal({
+    getPlaylists: (args) => new Promise((resolve) => held.push(() => resolve(playlistsAnswer(args)))),
+    answer: (path, body) => ({ ...expanded('new', ['li9']), name: body.name })
+  })
+  const load = modal.view.loadPlaylists()
+  await flush()
+  modal.view.createPlaylist()
+  modal.view.newPlaylistName = 'Новый'
+  await modal.view.submitCreatePlaylist()
+  await flush()
+  assert.deepEqual(plain(modal.view.playlists.map((p) => p.id)), ['new'])
+  while (held.length) {
+    held.shift()()
+    await flush()
+  }
+  await load
+  assert.equal(modal.view.playlists.length, 51, 'the 50 read and the new one')
+  assert.equal(modal.view.sortedPlaylists.find((p) => p.id === 'new').isItemIncluded, true)
+  assert.equal(modal.view.loading, false)
+  // A read that shows it ends the write
+  const later = addCreateModal({ getPlaylists: async (args) => playlistsAnswer(args) })
+  later.view.applyServerPlaylist(expanded('p1', ['other0']))
+  assert.ok('p1' in later.view.writes)
+  await later.view.loadPlaylists()
+  assert.equal('p1' in later.view.writes, true, 'the read still has the old items')
+  later.view.writes = { p0: playlistsAnswer({ limit: 20, page: 0 }).results[0] }
+  await later.view.loadPlaylists()
+  assert.equal('p0' in later.view.writes, false, 'shown as written: dropped')
 })
 
 test('a removed item is not brought back by a read of the replica that has not caught up', async () => {
@@ -852,10 +895,35 @@ test('a removed item is not brought back by a read of the replica that has not c
   const running = view.reload()
   await flush()
   page.send({ scope: 'catalog', ids: ['items:l1'] })
-  assert.equal(page.timers.length, 1)
   view.itemRemoved({ libraryItemId: 'li0', episodeId: null })
-  assert.equal(page.timers.length, 0, 'a due re-read is dropped')
+  assert.deepEqual(view.playlist.items.map((i) => i.libraryItemId), ['li1'])
   pending.shift()()
   await running
-  assert.deepEqual(view.playlist.items.map((i) => i.libraryItemId), ['li1'], 'the running read lands nowhere')
+  assert.deepEqual(view.playlist.items.map((i) => i.libraryItemId), ['li1'], 'a read of the old replica does not bring it back')
+  hold = false
+  page.timers.shift().fn()
+  await flush()
+  assert.deepEqual(view.playlist.items.map((i) => i.libraryItemId), ['li1'], 'nor the due one, which still runs')
+  items = [items[1]]
+  await view.reload()
+  assert.deepEqual(plain(view.removedKeys), [], 'the replica caught up: nothing left to hide')
+})
+
+test('a removed item and a playlist gone meanwhile leave for the tab', async () => {
+  let gone = false
+  const items = [entry(book('li0')), entry(book('li1'))]
+  const absData = {
+    getPlaylist: async ({ id }) => ({ serverConfigId: 'a', playlist: gone ? null : { id, libraryId: 'l1', name: 'Мой', numItems: 2 }, replica: replica() }),
+    getPlaylistItems: async ({ limit, page }) => ({ serverConfigId: 'a', results: items, total: 2, limit, page, found: !gone, replica: replica() })
+  }
+  const page = playlistPage({ absData })
+  const view = await page.mount()
+  // The notice of the playlist's deletion elsewhere arrives just before the answer to this removal
+  gone = true
+  page.send({ scope: 'catalog', ids: ['playlists:l1'] })
+  view.itemRemoved({ libraryItemId: 'li0', episodeId: null })
+  assert.equal(page.timers.length, 1, 'the notice still reads again')
+  page.timers.shift().fn()
+  await flush()
+  assert.deepEqual(page.replaced, ['/bookshelf/playlists'])
 })
