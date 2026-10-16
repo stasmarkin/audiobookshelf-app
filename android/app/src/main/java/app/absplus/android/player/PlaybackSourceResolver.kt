@@ -14,6 +14,8 @@ sealed interface PlaybackSource {
   data class Stream(val libraryItemId: String, val episodeId: String?) : PlaybackSource
   /** A copy whose files are gone: never streamed instead, the user downloads it again. */
   data class LocalBroken(val item: LocalLibraryItem) : PlaybackSource
+  /** A copy on an SD card that is out: neither deleted nor streamed instead, it plays once the card is back. */
+  data class StorageUnavailable(val item: LocalLibraryItem) : PlaybackSource
   /** A `local_*` id (or its episode) that is not on the device: there is no server id to stream. */
   data class NotFound(val message: String) : PlaybackSource
 }
@@ -22,6 +24,7 @@ class PlaybackSourceResolver(
         private val localItems: () -> List<LocalLibraryItem>,
         /** One copy by its device id, without reading every copy. */
         private val localItem: (String) -> LocalLibraryItem?,
+        private val storageAvailable: (LocalLibraryItem) -> Boolean = { true },
         private val hasTracks: (LocalLibraryItem, PodcastEpisode?) -> Boolean
 ) {
   /**
@@ -61,8 +64,11 @@ class PlaybackSourceResolver(
   }
 
   private fun localOrBroken(candidates: List<Pair<LocalLibraryItem, PodcastEpisode?>>): PlaybackSource {
-    val playable = candidates.firstOrNull { (item, episode) -> !item.isInvalid && hasTracks(item, episode) }
-            ?: return PlaybackSource.LocalBroken(candidates.first().first)
+    val (onStorage, storageOut) = candidates.partition { (item, _) -> storageAvailable(item) }
+    // Files on a removed card look missing: such a copy is not reported as broken
+    val playable = onStorage.firstOrNull { (item, episode) -> !item.isInvalid && hasTracks(item, episode) }
+            ?: return storageOut.firstOrNull()?.let { PlaybackSource.StorageUnavailable(it.first) }
+                    ?: PlaybackSource.LocalBroken(candidates.first().first)
     return PlaybackSource.Local(playable.first, playable.second)
   }
 

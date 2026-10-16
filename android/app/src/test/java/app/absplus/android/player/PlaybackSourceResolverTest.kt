@@ -42,8 +42,17 @@ class PlaybackSourceResolverTest {
     mutableListOf(), null, null, true, "a", null, null, serverId, null
   )
 
-  private fun resolver(vararg items: LocalLibraryItem, broken: Set<String> = emptySet()) =
-    PlaybackSourceResolver({ items.toList() }, { id -> items.find { it.id == id } }) { item, _ -> item.id !in broken }
+  private fun resolver(vararg items: LocalLibraryItem, broken: Set<String> = emptySet(), cardOut: Set<String> = emptySet()) =
+    PlaybackSourceResolver({ items.toList() }, { id -> items.find { it.id == id } }, { it.id !in cardOut }) { item, _ -> item.id !in broken && item.id !in cardOut }
+
+  @Test fun copyOnMissingCardIsUnavailableNotBrokenOrStreamed() {
+    val copy = book("local_1", "li1")
+    assertEquals(PlaybackSource.StorageUnavailable(copy), resolver(copy, cardOut = setOf("local_1")).resolve("a", "li1", null))
+    assertEquals(PlaybackSource.StorageUnavailable(copy), resolver(copy, cardOut = setOf("local_1")).resolve("a", "local_1", null))
+    // A playable copy elsewhere still wins
+    val other = book("local_2", "li1")
+    assertSame(other, (resolver(copy, other, cardOut = setOf("local_1")).resolve("a", "li1", null) as PlaybackSource.Local).item)
+  }
 
   @Test fun downloadedBookIsAlwaysLocal() {
     val copy = book("local_1", "li1")

@@ -79,7 +79,12 @@ class TokenRefresher(
       complete(RefreshResult.Transient)
       return
     }
-    client.newCall(request).enqueue(object : Callback {
+    // OkHttp drops Authorization across origins, but retains custom headers such as x-refresh-token.
+    // Only the saved connection's original endpoint is approved. Never follow Location, even on
+    // the same origin: a proxy's redirect is not authority to send a rotating secret elsewhere.
+    // Derive a refresh-only client so normal API/download redirect behavior remains unchanged.
+    val refreshClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    refreshClient.newCall(request).enqueue(object : Callback {
       override fun onFailure(call: Call, e: IOException) {
         log("Token refresh failed (${e.javaClass.simpleName})")
         complete(RefreshResult.Transient)
@@ -97,6 +102,10 @@ class TokenRefresher(
   }
 
   private fun handleResponse(serverConnectionId: String, sentRefreshToken: String, response: Response): RefreshResult {
+    if (response.code in 300..399) {
+      log("Token refresh redirect blocked; configure the direct server address and retry (credentials retained)")
+      return RefreshResult.Transient
+    }
     if (!response.isSuccessful) {
       log("Token refresh returned ${response.code}")
       if (response.code != 401 && response.code != 403) return RefreshResult.Transient

@@ -17,11 +17,11 @@
 
       <ul ref="menu" v-show="showMenu" class="absolute z-50 mt-1 w-full bg-bg border border-gray-600 shadow-lg max-h-56 rounded-md py-1 ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none text-sm" role="listbox" aria-labelledby="listbox-label">
         <template v-for="item in itemsToShow">
-          <li :key="item" class="text-gray-50 select-none relative py-2 pr-9 cursor-pointer" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
+          <li :key="item" class="text-fg select-none relative py-2 pr-9 cursor-pointer" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
             <div class="flex items-center">
               <span class="font-normal ml-3 block truncate">{{ item }}</span>
             </div>
-            <span v-if="selected.includes(item)" class="text-yellow-400 absolute inset-y-0 right-0 flex items-center pr-4">
+            <span v-if="selected.includes(item)" class="selection-mark text-yellow-400 absolute inset-y-0 right-0 flex items-center pr-4">
               <span class="material-symbols text-xl">checkmark</span>
             </span>
           </li>

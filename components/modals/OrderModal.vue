@@ -7,7 +7,7 @@
             <div class="flex items-center">
               <span class="font-normal ml-3 block truncate text-lg">{{ item.text }}</span>
             </div>
-            <span v-if="item.value === selected" class="text-yellow-300 absolute inset-y-0 right-0 flex items-center pr-4">
+            <span v-if="item.value === selected" class="selection-mark text-yellow-300 absolute inset-y-0 right-0 flex items-center pr-4">
               <span class="material-symbols text-3xl">{{ descending === null ? 'swap_vert' : descending ? 'south' : 'north' }}</span>
             </span>
           </li>
