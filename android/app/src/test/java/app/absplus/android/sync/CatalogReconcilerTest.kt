@@ -1110,4 +1110,32 @@ class CatalogReconcilerTest {
     assertTrue(result.stoppedBy is HttpOutcome.Unreachable)
     assertNotNull("playlists were read before the episodes", state("pods")!!.playlistsReconciledAt)
   }
+
+  @Test
+  fun failingPlaylistsDoNotHoldTheEpisodes() {
+    podcasts("p1", "p2")
+    runBlocking { db.items().upsertAll(listOf(itemEntity("srv", "old", "pods", mediaType = "podcast"))) }
+    server.failingLists = setOf("playlists")
+
+    val result = reconcile()
+
+    assertEquals("the pass still fails the library", listOf("pods"), result.failedLibraries)
+    assertEquals(2, episodes("p1").size)
+    assertEquals(1_000L, state("pods")!!.episodesReconciledAt)
+    assertNotNull(state("pods")!!.lastError)
+  }
+
+  @Test
+  fun failingAuthorsDoNotHoldTheSearchKeys() {
+    server.library("lib1")
+    server.book("b1")
+    reconcile()
+    runBlocking { db.items().setSearchKey("srv", "b1", "") }
+    server.failingLists = setOf("authors")
+
+    val result = reconcile()
+
+    assertEquals(listOf("lib1"), result.failedLibraries)
+    assertTrue(runBlocking { db.items().get("srv", "b1") }!!.searchKey.startsWith("1\u0001"))
+  }
 }

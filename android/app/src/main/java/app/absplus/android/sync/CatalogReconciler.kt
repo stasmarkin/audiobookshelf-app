@@ -178,14 +178,21 @@ class CatalogReconciler(
     reconcileItems(config, id, idsByName)
     if (book) runPointQueries(config, id)
     // Last: a failed authors, collections or playlists read skips the library only after its items are in
-    if (book) reconcileAuthors(config, id)
-    if (book) reconcileCollections(config, id)
-    reconcilePlaylists(config, id)
+    val skipped = try {
+      if (book) reconcileAuthors(config, id)
+      if (book) reconcileCollections(config, id)
+      reconcilePlaylists(config, id)
+      null
+    } catch (skip: Skip) {
+      // Kept for the end: episodes and search keys do not depend on these lists and must not wait for them
+      skip
+    }
     // After the cheap passes: a stop among a podcast's requests must not hold back playlists
     if (library.mediaType == "podcast") reconcileEpisodes(config, id)
     // Here and not on the first search: on 10 000 rows it takes seconds on a phone
     val backfilled = backfillSearchKeys(db, sc, id)
     if (backfilled > 0) log("Catalog $sc library $id: $backfilled search keys recomputed")
+    if (skipped != null) throw skipped
     updateState(sc, id) { it.copy(lastError = null) }
   }
 
