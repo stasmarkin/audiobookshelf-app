@@ -7,6 +7,9 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Catalog copy keeps podcast episodes (schema 2):** updating keeps the offline catalog. Going back to a version
+  before this one empties the offline catalog until the next sync with the server; downloads, progress and bookmarks
+  are not affected.
 - **Playlists offline (all five catalog tabs now open offline):** the Playlists tab, a playlist's page and the
   "Add to playlist" list read the same catalog copy, so they open without the server with your last synced
   playlists, books and podcast episodes in the playlist's order. Play and the add-to-queue button of a playlist work

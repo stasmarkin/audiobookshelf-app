@@ -253,7 +253,7 @@ object SyncEngine {
     private val reconciler = UserDataReconciler(deps.http, store, deps.db, deps.clock, deps.paperImport)
     val catalogReader: CatalogReader? = deps.catalog?.let { catalog ->
       CatalogReader(catalog.db, { deps.db.mediaProgress().getAll(it) }, { sc, ids -> deps.db.mediaProgress().getForItems(sc, ids) },
-              { notifier.version("progress") + notifier.version("playback") }, deps.clock)
+              { notifier.version("progress") + notifier.version("playback") }, deps.clock, store::userJson)
     }
     private val catalogReconciler = deps.catalog?.let { catalog ->
       CatalogReconciler(catalog.db, catalog.http ?: deps.http, deps.clock, { notifier.notify("catalog", it) }, { catalogReader?.onReplicaChanged() }, deps.log)

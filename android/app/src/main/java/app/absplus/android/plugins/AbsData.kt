@@ -1,6 +1,10 @@
 package app.absplus.android.plugins
 
 import android.content.Context
+import app.absplus.android.db.replica.DEFAULT_SEARCH_LIMIT
+import app.absplus.android.db.replica.DEFAULT_SHELF_LIMIT
+import app.absplus.android.db.replica.MAX_SEARCH_LIMIT
+import app.absplus.android.db.replica.MAX_SHELF_LIMIT
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CatalogPrefs
@@ -11,8 +15,10 @@ import app.absplus.android.sync.MAX_COLLECTIONS_LIMIT
 import app.absplus.android.sync.ItemsRequest
 import app.absplus.android.sync.MAX_PLAYLISTS_LIMIT
 import app.absplus.android.sync.MAX_READ_LIMIT
+import app.absplus.android.sync.PersonalizedRequest
 import app.absplus.android.sync.PlaylistItemsRequest
 import app.absplus.android.sync.PlaylistsRequest
+import app.absplus.android.sync.SearchRequest
 import app.absplus.android.sync.SeriesRequest
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
@@ -94,6 +100,26 @@ internal fun playlistsRequest(data: JSONObject): PlaylistsRequest {
 internal fun playlistItemsRequest(data: JSONObject): PlaylistItemsRequest {
   val (id, limit, page) = pageArguments(data, MAX_READ_LIMIT, idKey = "id")
   return PlaylistItemsRequest(id, limit, page)
+}
+
+private fun limitArgument(data: JSONObject, default: Int, max: Int): Int {
+  if (!data.has("limit") || data.isNull("limit")) return default
+  val limit = (data.opt("limit") as? Number)?.toInt() ?: data.optString("limit").toIntOrNull()
+  if (limit == null || limit !in 1..max) throw IllegalArgumentException("limit must be 1..$max")
+  return limit
+}
+
+/** `getPersonalized` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun personalizedRequest(data: JSONObject): PersonalizedRequest {
+  val libraryId = data.optString("libraryId").takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("libraryId is required")
+  return PersonalizedRequest(libraryId, limitArgument(data, DEFAULT_SHELF_LIMIT, MAX_SHELF_LIMIT))
+}
+
+/** `search` arguments: `q` must be given, but may be blank (an empty answer). */
+internal fun searchRequest(data: JSONObject): SearchRequest {
+  val libraryId = data.optString("libraryId").takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("libraryId is required")
+  val q = data.opt("q") as? String ?: throw IllegalArgumentException("q is required")
+  return SearchRequest(libraryId, q, limitArgument(data, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT))
 }
 
 private fun text(data: JSONObject, key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
@@ -452,6 +478,40 @@ class AbsData : Plugin() {
       JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
               .put("replica", emptyReplica())
     }) { reader, sc -> reader.items(sc, request) }
+  }
+
+  /**
+   * `GET /api/libraries/:id/personalized` from the replica: `{ serverConfigId, libraryId, shelves, replica }`; `limit`
+   * (per shelf) 1..25, default 10. Books of series come whole: the answer may carry more than 100 items.
+   */
+  @PluginMethod
+  fun getPersonalized(call: PluginCall) {
+    val request = try {
+      personalizedRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, { JSONObject().put("libraryId", request.libraryId).put("shelves", JSONArray()).put("replica", emptyReplica()) }) { reader, sc ->
+      reader.personalized(sc, request)
+    }
+  }
+
+  /**
+   * `GET /api/libraries/:id/search` from the replica: `{ serverConfigId, libraryId, q, results, replica }`; `q` is
+   * required, `limit` (per group) 1..25, default 12.
+   */
+  @PluginMethod
+  fun search(call: PluginCall) {
+    val request = try {
+      searchRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      val results = JSONObject()
+      listOf("book", "podcast", "episodes", "series", "authors", "narrators", "tags", "genres").forEach { results.put(it, JSONArray()) }
+      JSONObject().put("libraryId", request.libraryId).put("q", request.q).put("results", results).put("replica", emptyReplica())
+    }) { reader, sc -> reader.search(sc, request) }
   }
 
   /** A page of `GET /api/libraries/:id/series` from the replica, books included; `limit` must be 1..100. */

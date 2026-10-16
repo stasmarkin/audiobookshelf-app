@@ -3,6 +3,17 @@ package app.absplus.android.sync
 import androidx.room.withTransaction
 import app.absplus.android.db.replica.CollectionCounts
 import app.absplus.android.db.replica.CollectionEntity
+import app.absplus.android.db.replica.DEFAULT_SEARCH_LIMIT
+import app.absplus.android.db.replica.DEFAULT_SHELF_LIMIT
+import app.absplus.android.db.replica.MAX_SEARCH_LIMIT
+import app.absplus.android.db.replica.MAX_SHELF_LIMIT
+import app.absplus.android.db.replica.SearchInput
+import app.absplus.android.db.replica.Shelf
+import app.absplus.android.db.replica.ShelfEntity
+import app.absplus.android.db.replica.ShelvesInput
+import app.absplus.android.db.replica.personalizedShelves
+import app.absplus.android.db.replica.searchPattern
+import app.absplus.android.db.replica.searchReplica
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
@@ -69,6 +80,15 @@ data class PlaylistsRequest(val libraryId: String, val limit: Int, val page: Int
 /** A page of the items of a playlist. */
 data class PlaylistItemsRequest(val id: String, val limit: Int, val page: Int)
 
+/** `GET /api/libraries/:id/personalized`: [limit] entities per shelf, 1..[MAX_SHELF_LIMIT] (default [DEFAULT_SHELF_LIMIT]). */
+data class PersonalizedRequest(val libraryId: String, val limit: Int)
+
+/** `GET /api/libraries/:id/search`: [limit] entries per group, 1..[MAX_SEARCH_LIMIT] (default [DEFAULT_SEARCH_LIMIT]). */
+data class SearchRequest(val libraryId: String, val q: String, val limit: Int)
+
+/** The home is computed again at least this often: "recent" moves with the clock, without any write. */
+const val HOME_CACHE_BUCKET_MS = 60L * 60 * 1000
+
 /**
  * Reads the catalog replica in the shape of the server's answers. The ordered ids of the last items query are kept,
  * so the pages of one list are slices of one order; any replica write ([onReplicaChanged]) and, for queries that
@@ -79,18 +99,24 @@ class CatalogReader(
         private val progress: suspend (serverConfigId: String) -> List<MediaProgressEntity>,
         private val progressFor: suspend (serverConfigId: String, ids: List<String>) -> List<MediaProgressEntity>,
         private val progressVersion: () -> Long,
-        private val clock: () -> Long
+        private val clock: () -> Long,
+        /** The cached user object of the server (its `seriesHideFromContinueListening`). */
+        private val userJson: suspend (serverConfigId: String) -> String? = { null }
 ) {
   @Volatile private var generation = 0L
   private val lock = Any()
   private var cached: Pair<Any, List<QueryEntry>>? = null
   private var cachedSeries: Pair<Any, List<Pair<SeriesEntity, List<SeriesItemEntity>>>>? = null
+  private var cachedHome: Pair<Any, JSONArray>? = null
+  /** Discover is random per process, as the server's is per 30-minute cache: a playback tick does not reshuffle it. */
+  private val processSeed = Random.nextLong()
 
   fun onReplicaChanged() {
     synchronized(lock) {
       generation++
       cached = null
       cachedSeries = null
+      cachedHome = null
     }
   }
 
@@ -517,5 +543,180 @@ class CatalogReader(
       out.put(item)
     }
     return out
+  }
+
+  /**
+   * Home and search read items, series and authors (a podcast library: items and episodes); `itemsReconciledAt` is set
+   * before the series point queries and authors of a pass, so each domain counts. Pending point queries do not.
+   */
+  private fun homeReconciledAt(state: LibraryStateEntity?, mediaType: String): Long? {
+    state ?: return null
+    val times = if (mediaType == "podcast") listOf(state.itemsReconciledAt, state.episodesReconciledAt)
+    else listOf(state.itemsReconciledAt, state.seriesReconciledAt, state.authorsReconciledAt)
+    return if (times.any { it == null }) null else times.filterNotNull().min()
+  }
+
+  private fun hiddenSeriesIds(userJson: String?): Set<String> {
+    val list = userJson?.let { runCatching { JSONObject(it) }.getOrNull() }?.optJSONArray("seriesHideFromContinueListening") ?: return emptySet()
+    return (0 until list.length()).mapNotNull { list.optString(it).takeIf(String::isNotEmpty) }.toSet()
+  }
+
+  private fun setting(library: LibraryEntity?, key: String) =
+          library?.let { JSONObject(it.json).optJSONObject("settings")?.optBoolean(key) } ?: false
+
+  /**
+   * `GET /api/libraries/:id/personalized` from the replica and the progress: `{ shelves, replica }`. Books of series
+   * come whole, so an answer may carry more than [MAX_READ_LIMIT] items: the one bridge call above that limit.
+   */
+  suspend fun personalized(sc: String, req: PersonalizedRequest): JSONObject {
+    require(req.limit in 1..MAX_SHELF_LIMIT) { "limit must be 1..$MAX_SHELF_LIMIT" }
+    val library = db.libraries().get(sc, req.libraryId)
+    val mediaType = library?.mediaType ?: "book"
+    val state = db.libraryState().get(sc, req.libraryId)
+    val hidden = hiddenSeriesIds(userJson(sc))
+    val now = clock()
+    val key = listOf(sc, req.libraryId, req.limit, progressVersion(), hidden, now / HOME_CACHE_BUCKET_MS)
+    val generationAtStart: Long
+    val hit = synchronized(lock) {
+      generationAtStart = generation
+      cachedHome?.takeIf { it.first == key }?.second
+    }
+    val shelves = hit ?: run {
+      val rows = db.items().rows(sc, req.libraryId)
+      val book = mediaType != "podcast"
+      val input = ShelvesInput(
+              mediaType = mediaType, now = now, limit = req.limit, rows = rows, progress = progress(sc),
+              series = if (book) SeriesIndex.of(db.series().forLibrary(sc, req.libraryId), db.series().members(sc, req.libraryId)) else SeriesIndex.EMPTY,
+              hiddenSeriesIds = hidden,
+              onlyLaterBooksInContinueSeries = setting(library, "onlyShowLaterBooksInContinueSeries"),
+              hideSingleBookSeries = setting(library, "hideSingleBookSeries"),
+              authors = if (book) db.authors().forLibrary(sc, req.libraryId) else emptyList(),
+              episodes = if (book) emptyList() else db.episodes().keys(sc, req.libraryId),
+              discoverSeed = (sc + req.libraryId).hashCode().toLong() xor processSeed)
+      shelvesJson(sc, personalizedShelves(input), mediaType).also { json ->
+        synchronized(lock) { if (generation == generationAtStart) cachedHome = key to json }
+      }
+    }
+    return JSONObject().put("serverConfigId", sc).put("libraryId", req.libraryId).put("shelves", shelves)
+            .put("replica", replica(homeReconciledAt(state, mediaType), state?.itemsComplete ?: false))
+  }
+
+  private suspend fun shelvesJson(sc: String, shelves: List<Shelf>, mediaType: String): JSONArray {
+    val itemIds = shelves.flatMap { shelf ->
+      shelf.entities.flatMap { e ->
+        when (e) {
+          is ShelfEntity.Item -> listOf(e.itemId)
+          is ShelfEntity.Series -> e.bookIds
+          is ShelfEntity.Author -> emptyList()
+        }
+      }
+    }.distinct()
+    val items = db.items().json(sc, itemIds).associateBy { it.id }
+    val episodeIds = shelves.flatMap { s -> s.entities.mapNotNull { (it as? ShelfEntity.Item)?.episodeId } }.distinct()
+    val episodes = db.episodes().byIds(sc, episodeIds).associateBy { it.id }
+    val seriesIds = shelves.flatMap { s -> s.entities.mapNotNull { (it as? ShelfEntity.Series)?.seriesId ?: (it as? ShelfEntity.Item)?.seriesMember?.seriesId } }
+    val series = seriesIds.distinct().mapNotNull { db.series().get(sc, it) }.associateBy { it.id }
+    val authors = shelves.flatMap { s -> s.entities.mapNotNull { (it as? ShelfEntity.Author)?.authorId } }.distinct()
+            .mapNotNull { db.authors().get(sc, it) }.associateBy { it.id }
+    val podcastIds = shelves.filter { it.type == "podcast" }.flatMap { s -> s.entities.mapNotNull { (it as? ShelfEntity.Item)?.itemId } }
+    val finishedEpisodes = if (mediaType == "podcast" && podcastIds.isNotEmpty()) {
+      progressFor(sc, podcastIds).filter { it.episodeId.isNotEmpty() && it.isFinished }.groupingBy { it.libraryItemId }.eachCount()
+    } else emptyMap()
+
+    val out = JSONArray()
+    for (shelf in shelves) {
+      val entities = JSONArray()
+      for (e in shelf.entities) {
+        when (e) {
+          is ShelfEntity.Item -> {
+            val row = items[e.itemId] ?: continue
+            val item = JSONObject(row.json)
+            if (e.episodeId != null) {
+              item.put("recentEpisode", JSONObject(episodes[e.episodeId]?.json ?: continue))
+            } else {
+              row.rssFeedJson?.let { item.put("rssFeed", JSONObject(it)) }
+            }
+            e.seriesMember?.let { m ->
+              item.optJSONObject("media")?.optJSONObject("metadata")?.put("series", JSONObject().put("id", m.seriesId)
+                      .put("name", series[m.seriesId]?.name ?: JSONObject.NULL).put("sequence", m.sequence ?: JSONObject.NULL))
+            }
+            if (shelf.type == "podcast") {
+              val numEpisodes = item.optJSONObject("media")?.optInt("numEpisodes") ?: 0
+              val incomplete = numEpisodes - (finishedEpisodes[e.itemId] ?: 0)
+              if (incomplete != 0) item.put("numEpisodesIncomplete", incomplete)
+            }
+            entities.put(item)
+          }
+          is ShelfEntity.Series -> {
+            val s = series[e.seriesId] ?: continue
+            val books = JSONArray()
+            e.bookIds.forEach { id -> items[id]?.let { books.put(JSONObject(it.json)) } }
+            entities.put(seriesJson(s).put("books", books))
+          }
+          is ShelfEntity.Author -> entities.put(JSONObject((authors[e.authorId] ?: continue).json))
+        }
+      }
+      out.put(JSONObject().put("id", shelf.id).put("label", shelf.label).put("labelStringKey", shelf.labelStringKey)
+              .put("type", shelf.type).put("entities", entities).put("total", shelf.total))
+    }
+    return out
+  }
+
+  /**
+   * `GET /api/libraries/:id/search` from the replica: `{ q, results, replica }` with every group of the server (empty
+   * ones too); items minified. Keys of rows written before the current key version are recomputed first.
+   */
+  suspend fun search(sc: String, req: SearchRequest): JSONObject {
+    require(req.limit in 1..MAX_SEARCH_LIMIT) { "limit must be 1..$MAX_SEARCH_LIMIT" }
+    val library = db.libraries().get(sc, req.libraryId)
+    val mediaType = library?.mediaType ?: "book"
+    val state = db.libraryState().get(sc, req.libraryId)
+    val groups = listOf("book", "podcast", "episodes", "series", "authors", "narrators", "tags", "genres")
+    val results = JSONObject().apply { groups.forEach { put(it, JSONArray()) } }
+    val answer = JSONObject().put("serverConfigId", sc).put("libraryId", req.libraryId).put("q", req.q).put("results", results)
+            .put("replica", replica(homeReconciledAt(state, mediaType), state?.itemsComplete ?: false))
+    // Nothing left after normalizing (spaces, a lone accent): nothing is searched, but the replica state is still true
+    val pattern = searchPattern(req.q) ?: return answer
+    backfillSearchKeys(db, sc, req.libraryId)
+    val book = mediaType != "podcast"
+    val series = if (book) SeriesIndex.of(db.series().forLibrary(sc, req.libraryId), db.series().members(sc, req.libraryId)) else SeriesIndex.EMPTY
+    val narrators = if (book) {
+      library?.filterDataJson?.let { json -> JSONObject(json).optJSONArray("narrators") }?.let { list ->
+        (0 until list.length()).mapNotNull { list.optString(it, null) }
+      } ?: emptyList()
+    } else emptyList()
+    val matchedEpisodes = if (book) emptyList() else db.episodes().searchByTitle(sc, req.libraryId, pattern, req.limit)
+    val found = searchReplica(SearchInput(
+            mediaType = mediaType, query = CatalogJson.normalizeForSearch(req.q.trim()), limit = req.limit,
+            matchedItemIds = db.items().searchCandidates(sc, req.libraryId, pattern, req.limit).map { it.id },
+            rows = db.items().rows(sc, req.libraryId), series = series,
+            authors = if (book) db.authors().forLibrary(sc, req.libraryId) else emptyList(),
+            narratorNames = narrators, matchedEpisodes = matchedEpisodes))
+
+    val items = db.items().json(sc, (found.books + found.podcasts + found.episodes.map { it.first } + found.series.flatMap { it.second }).distinct())
+            .associateBy { it.id }
+    val episodes = db.episodes().byIds(sc, found.episodes.map { it.second }).associateBy { it.id }
+    fun item(id: String) = items[id]?.let { JSONObject(it.json) }
+    fun wrapped(ids: List<String>) = JSONArray().apply { ids.forEach { id -> item(id)?.let { put(JSONObject().put("libraryItem", it)) } } }
+    results.put("book", wrapped(found.books)).put("podcast", wrapped(found.podcasts))
+    results.put("episodes", JSONArray().apply {
+      found.episodes.forEach { (podcastId, episodeId) ->
+        val podcast = item(podcastId) ?: return@forEach
+        val episode = episodes[episodeId] ?: return@forEach
+        put(JSONObject().put("libraryItem", podcast.put("recentEpisode", JSONObject(episode.json))))
+      }
+    })
+    results.put("series", JSONArray().apply {
+      found.series.forEach { (seriesId, bookIds) ->
+        val s = series.series[seriesId] ?: return@forEach
+        put(JSONObject().put("series", seriesJson(s)).put("books", JSONArray().apply { bookIds.forEach { id -> item(id)?.let { put(it) } } }))
+      }
+    })
+    val authors = found.authors.mapNotNull { db.authors().get(sc, it) }
+    results.put("authors", JSONArray().apply { authors.forEach { put(JSONObject(it.json)) } })
+    results.put("narrators", JSONArray().apply { found.narrators.forEach { (name, n) -> put(JSONObject().put("name", name).put("numBooks", n)) } })
+    results.put("tags", JSONArray().apply { found.tags.forEach { (name, n) -> put(JSONObject().put("name", name).put("numItems", n)) } })
+    results.put("genres", JSONArray().apply { found.genres.forEach { (name, n) -> put(JSONObject().put("name", name).put("numItems", n)) } })
+    return answer
   }
 }

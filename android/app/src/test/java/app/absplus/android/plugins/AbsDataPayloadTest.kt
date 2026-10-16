@@ -4,6 +4,8 @@ import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CollectionBooksRequest
 import app.absplus.android.sync.CollectionsRequest
 import app.absplus.android.sync.ItemsRequest
+import app.absplus.android.sync.PersonalizedRequest
+import app.absplus.android.sync.SearchRequest
 import app.absplus.android.sync.PlaylistItemsRequest
 import app.absplus.android.sync.PlaylistsRequest
 import app.absplus.android.sync.SeriesRequest
@@ -132,6 +134,31 @@ class AbsDataPayloadTest {
       fail("no id")
     } catch (expected: IllegalArgumentException) {
       assertEquals("id is required", expected.message)
+    }
+  }
+
+  @Test
+  fun homeAndSearchArgumentsAreValidated() {
+    assertEquals(PersonalizedRequest("lib1", 10), personalizedRequest(JSONObject().put("libraryId", "lib1")))
+    assertEquals(PersonalizedRequest("lib1", 25), personalizedRequest(JSONObject().put("libraryId", "lib1").put("limit", 25)))
+    assertEquals(SearchRequest("lib1", "abc", 12), searchRequest(JSONObject().put("libraryId", "lib1").put("q", "abc")))
+    assertEquals("a blank query is allowed: an empty answer", SearchRequest("lib1", "  ", 3),
+            searchRequest(JSONObject().put("libraryId", "lib1").put("q", "  ").put("limit", "3")))
+    val rejected = listOf<Pair<String, () -> Unit>>(
+            "limit must be 1..25" to { personalizedRequest(JSONObject().put("libraryId", "lib1").put("limit", 0)) },
+            "limit must be 1..25" to { personalizedRequest(JSONObject().put("libraryId", "lib1").put("limit", 26)) },
+            "limit must be 1..25" to { searchRequest(JSONObject().put("libraryId", "lib1").put("q", "a").put("limit", 26)) },
+            "limit must be 1..25" to { searchRequest(JSONObject().put("libraryId", "lib1").put("q", "a").put("limit", 0)) },
+            "q is required" to { searchRequest(JSONObject().put("libraryId", "lib1")) },
+            "libraryId is required" to { personalizedRequest(JSONObject()) },
+            "libraryId is required" to { searchRequest(JSONObject().put("q", "a")) })
+    for ((message, call) in rejected) {
+      try {
+        call()
+        fail(message)
+      } catch (expected: IllegalArgumentException) {
+        assertEquals(message, expected.message)
+      }
     }
   }
 }
