@@ -7,6 +7,7 @@ import app.absplus.android.data.PlaybackSession
 import app.absplus.android.data.Podcast
 import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.db.userdata.MediaProgressEntity
+import app.absplus.android.managers.LocalItemLocks
 
 /** Where an item plays from: a downloaded copy always wins, the server stream is the fallback. */
 sealed interface PlaybackSource {
@@ -14,6 +15,8 @@ sealed interface PlaybackSource {
   data class Stream(val libraryItemId: String, val episodeId: String?) : PlaybackSource
   /** A copy whose files are gone: never streamed instead, the user downloads it again. */
   data class LocalBroken(val item: LocalLibraryItem) : PlaybackSource
+  /** A copy on an SD card that is out: neither deleted nor streamed instead, it plays once the card is back. */
+  data class StorageUnavailable(val item: LocalLibraryItem) : PlaybackSource
   /** A `local_*` id (or its episode) that is not on the device: there is no server id to stream. */
   data class NotFound(val message: String) : PlaybackSource
 }
@@ -22,6 +25,7 @@ class PlaybackSourceResolver(
         private val localItems: () -> List<LocalLibraryItem>,
         /** One copy by its device id, without reading every copy. */
         private val localItem: (String) -> LocalLibraryItem?,
+        private val storageAvailable: (LocalLibraryItem) -> Boolean = { true },
         private val hasTracks: (LocalLibraryItem, PodcastEpisode?) -> Boolean
 ) {
   /**
@@ -61,8 +65,11 @@ class PlaybackSourceResolver(
   }
 
   private fun localOrBroken(candidates: List<Pair<LocalLibraryItem, PodcastEpisode?>>): PlaybackSource {
-    val playable = candidates.firstOrNull { (item, episode) -> !item.isInvalid && hasTracks(item, episode) }
-            ?: return PlaybackSource.LocalBroken(candidates.first().first)
+    val (onStorage, storageOut) = candidates.partition { (item, _) -> storageAvailable(item) }
+    // Files on a removed card look missing: such a copy is not reported as broken
+    val playable = onStorage.firstOrNull { (item, episode) -> !item.isInvalid && hasTracks(item, episode) }
+            ?: return storageOut.firstOrNull()?.let { PlaybackSource.StorageUnavailable(it.first) }
+                    ?: PlaybackSource.LocalBroken(candidates.first().first)
     return PlaybackSource.Local(playable.first, playable.second)
   }
 
@@ -117,6 +124,32 @@ fun planStart(request: StartRequest, activeServerConfigId: String?, resolver: Pl
             ?.let { PlaybackSource.Stream(it, source.episode?.serverEpisodeId) } ?: source
     else -> source
   }
+}
+
+/**
+ * [plan]'s copy read again under its item lock and pinned for playback when it can play; otherwise why it cannot, and
+ * the previous pin stays.
+ */
+fun pinLocalSource(
+        plan: PlaybackSource.Local,
+        read: (String) -> LocalLibraryItem?,
+        availability: (LocalLibraryItem, PodcastEpisode?) -> LocalAvailability
+): PlaybackSource {
+  var source: PlaybackSource = PlaybackSource.NotFound("Local library item not found")
+  LocalItemLocks.readForPlayback(plan.item.id, { read(plan.item.id) }) { item ->
+    val episode = plan.episode?.let { wanted -> (item.media as? Podcast)?.episodes?.find { it.id == wanted.id } }
+    source = if (plan.episode != null && episode == null) {
+      PlaybackSource.NotFound("Podcast episode not found")
+    } else {
+      when (availability(item, episode)) {
+        LocalAvailability.OK -> PlaybackSource.Local(item, episode)
+        LocalAvailability.STORAGE_UNAVAILABLE -> PlaybackSource.StorageUnavailable(item)
+        LocalAvailability.NO_FILES -> PlaybackSource.LocalBroken(item)
+      }
+    }
+    source is PlaybackSource.Local
+  }
+  return source
 }
 
 /** A position with the time it was written, from the Paper copy or the server. */

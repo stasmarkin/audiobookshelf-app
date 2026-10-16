@@ -2,18 +2,28 @@ package app.absplus.android.plugins
 
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.util.Log
 import app.absplus.android.MainActivity
 import app.absplus.android.data.*
+import app.absplus.android.device.AndroidVolumeProbe
+import app.absplus.android.device.AppStorage
+import app.absplus.android.device.VolumeRegistry
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.device.DownloadStorageSetting
+import app.absplus.android.device.DownloadStorageSpace
+import app.absplus.android.device.StorageTarget
 import app.absplus.android.media.MediaEventManager
 import app.absplus.android.server.ApiHandler
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.LocalSessionsCleanup
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.server.RefreshResult
+import app.absplus.android.managers.ItemUpdate
 import app.absplus.android.managers.SecureStorage
 import app.absplus.android.widget.WidgetRenderer
+import app.absplus.android.managers.AutoDownloadScheduler
+import app.absplus.android.services.StorageMoveService
 import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -41,11 +51,13 @@ class AbsDatabase : Plugin() {
     mainActivity = (activity as MainActivity)
     apiHandler = ApiHandler(mainActivity)
     ApiHandler.absDatabaseNotifyListeners = ::notifyListeners
+    StorageMoveService.statusListener = { notifyListeners("onDownloadStorageStatus", it) }
 
     secureStorage = SecureStorage(mainActivity)
 
-    DeviceManager.dbManager.cleanLocalMediaProgress()
+    // Items first: progress of episodes whose files were found missing now is then cleaned in the same start
     DeviceManager.dbManager.cleanLocalLibraryItems(mainActivity)
+    DeviceManager.dbManager.cleanLocalMediaProgress()
   }
 
   /**
@@ -427,40 +439,41 @@ class AbsDatabase : Plugin() {
   @PluginMethod
   fun updateLocalTrackOrder(call:PluginCall) {
     val localLibraryItemId = call.getString("localLibraryItemId", "") ?: ""
-    val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItem(localLibraryItemId)
-    if (localLibraryItem == null) {
-      call.resolve()
-      return
-    }
-
-    val audioTracks = localLibraryItem.media.getAudioTracks() as MutableList
-
     val tracks:JSArray = call.getArray("tracks") ?: JSArray()
     Log.d(tag, "updateLocalTrackOrder $tracks")
 
-    var index = 1
-    var hasUpdates = false
-    for (i in 0 until tracks.length()) {
-      val track = tracks.getJSONObject(i)
-      val localFileId = track.getString("localFileId")
+    val result = DeviceManager.dbManager.updateLocalLibraryItem(localLibraryItemId) { localLibraryItem ->
+      val audioTracks = localLibraryItem.media.getAudioTracks() as MutableList
 
-      val existingTrack = audioTracks.find{ it.localFileId == localFileId }
-      if (existingTrack != null) {
-        Log.d(tag, "Found existing track ${existingTrack.localFileId} that has index ${existingTrack.index} should be index $index")
-        if (existingTrack.index != index) hasUpdates = true
-        existingTrack.index = index++
+      var index = 1
+      var hasUpdates = false
+      for (i in 0 until tracks.length()) {
+        val track = tracks.getJSONObject(i)
+        val localFileId = track.getString("localFileId")
+
+        val existingTrack = audioTracks.find{ it.localFileId == localFileId }
+        if (existingTrack != null) {
+          Log.d(tag, "Found existing track ${existingTrack.localFileId} that has index ${existingTrack.index} should be index $index")
+          if (existingTrack.index != index) hasUpdates = true
+          existingTrack.index = index++
+        } else {
+          Log.e(tag, "Audio track with local file id not found")
+        }
+      }
+
+      if (hasUpdates) {
+        Log.d(tag, "Save library item track orders")
+        localLibraryItem.media.setAudioTracks(audioTracks)
+        ItemUpdate.Save(localLibraryItem)
       } else {
-        Log.e(tag, "Audio track with local file id not found")
+        Log.d(tag, "No tracks need to be updated")
+        ItemUpdate.Keep
       }
     }
 
-    if (hasUpdates) {
-      Log.d(tag, "Save library item track orders")
-      localLibraryItem.media.setAudioTracks(audioTracks)
-      DeviceManager.dbManager.saveLocalLibraryItem(localLibraryItem)
-      call.resolve(JSObject(jacksonMapper.writeValueAsString(localLibraryItem)))
+    if (result is ItemUpdate.Save) {
+      call.resolve(JSObject(jacksonMapper.writeValueAsString(result.item)))
     } else {
-      Log.d(tag, "No tracks need to be updated")
       call.resolve()
     }
   }
@@ -471,8 +484,18 @@ class AbsDatabase : Plugin() {
     val newDeviceSettings = jacksonMapper.readValue<DeviceSettings>(call.data.toString())
 
     Handler(Looper.getMainLooper()).post {
+      // Written only by setDownloadStorage; otherwise any settings save from JS would reset it
+      newDeviceSettings.downloadStorage = DeviceManager.deviceData.deviceSettings?.downloadStorage ?: "internal"
       DeviceManager.deviceData.deviceSettings = newDeviceSettings
       DeviceManager.dbManager.saveDeviceData(DeviceManager.deviceData)
+
+      GlobalScope.launch(Dispatchers.IO) {
+        try {
+          AutoDownloadScheduler.reschedule(mainActivity)
+        } catch (e: Exception) {
+          Log.e(tag, "Failed to reschedule auto download", e)
+        }
+      }
 
       // Updates playback actions for media notification (handles media control seek locking setting)
       if (mainActivity.isPlayerNotificationServiceInitialized()) {
@@ -480,6 +503,86 @@ class AbsDatabase : Plugin() {
       }
 
       call.resolve(JSObject(jacksonMapper.writeValueAsString(DeviceManager.deviceData)))
+    }
+  }
+
+  /** [target] is "internal" or "sd"; refuses with errorCode noSdCard / noSpace when the downloads would not fit. */
+  @PluginMethod
+  fun setDownloadStorage(call:PluginCall) {
+    val requested = call.getString("target")
+    if (requested != "internal" && requested != "sd") {
+      call.reject("Invalid download storage target")
+      return
+    }
+
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        val target: StorageTarget
+        val freeBytes: Long
+        if (requested == "internal") {
+          target = StorageTarget.Internal
+          freeBytes = StatFs(context.filesDir.path).availableBytes
+        } else {
+          val volume = AppStorage.removableVolume(AndroidVolumeProbe(context))
+          val uuid = volume?.uuid
+          // The card is bound to the app (marker + token) before it becomes a download target, so a different card
+          // under the same UUID is never mistaken for it later
+          if (volume == null || uuid == null || !VolumeRegistry.ensureRegistered(volume)) {
+            call.resolve(downloadStorageRefusal("SD card not available", "noSdCard", 0L, 0L))
+            return@launch
+          }
+          target = StorageTarget.Sd(uuid)
+          freeBytes = StatFs(volume.filesDir.path).availableBytes
+        }
+
+        val requiredBytes =
+                DownloadStorageSpace.bytesToMove(DeviceManager.dbManager.getLocalLibraryItems(), target) +
+                        DownloadStorageSpace.MOVE_SPACE_MARGIN_BYTES
+        if (requiredBytes > freeBytes) {
+          call.resolve(downloadStorageRefusal("Not enough space", "noSpace", requiredBytes, freeBytes))
+          return@launch
+        }
+
+        val setting = DownloadStorageSetting.format(target)
+        // Same thread as updateDeviceSettings, so the two never overwrite each other's device data
+        Handler(Looper.getMainLooper()).post {
+          try {
+            val deviceData = DeviceManager.deviceData
+            val settings = deviceData.deviceSettings ?: DeviceSettings.default().also { deviceData.deviceSettings = it }
+            settings.downloadStorage = setting
+            deviceData.reconcileNeeded = true
+            DeviceManager.dbManager.saveDeviceData(deviceData)
+            StorageMoveService.startIfNeeded(context)
+            call.resolve(JSObject().apply { put("downloadStorage", setting) })
+          } catch (e: Exception) {
+            Log.e(tag, "setDownloadStorage: failed to save setting", e)
+            call.reject(e.message ?: "Failed to save download storage")
+          }
+        }
+      } catch (e: Exception) {
+        Log.e(tag, "setDownloadStorage: failed for target $requested", e)
+        call.reject(e.message ?: "Failed to set download storage")
+      }
+    }
+  }
+
+  private fun downloadStorageRefusal(error: String, errorCode: String, requiredBytes: Long, freeBytes: Long) =
+          JSObject().apply {
+            put("error", error)
+            put("errorCode", errorCode)
+            put("requiredBytes", requiredBytes)
+            put("freeBytes", freeBytes)
+          }
+
+  @PluginMethod
+  fun getDownloadStorageStatus(call:PluginCall) {
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        call.resolve(StorageMoveService.statusJson(context, StorageMoveService.currentMoveStatus(context)))
+      } catch (e: Exception) {
+        Log.e(tag, "getDownloadStorageStatus failed", e)
+        call.reject(e.message ?: "Failed to read download storage status")
+      }
     }
   }
 

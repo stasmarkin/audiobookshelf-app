@@ -16,7 +16,7 @@
  */
 const { blend, isDark, contrast } = require('./color')
 const { repairColor, thresholds, evaluateContrast, WHITE, BLACK } = require('./contrast')
-const { DEFAULT_APPEARANCE, deepFreeze } = require('./schema')
+const { DEFAULT_APPEARANCE, BASE_IDS, deepFreeze } = require('./schema')
 
 const MAPPING_VERSION = 1
 
@@ -137,7 +137,9 @@ function snapshotFromTheme(theme) {
   }
   tokens['presentation.finish'] = isLlama ? 'equipment' : 'standard'
   tokens['presentation.cover-color'] = 'theme'
-  const snapshot = { baseId: theme.id, colorScheme: theme.colorScheme, tokens, appearance: { ...DEFAULT_APPEARANCE } }
+  // A built-in without its own base (E-ink) is copied as colors on the standard base of its scheme
+  const baseId = BASE_IDS.includes(theme.id) ? theme.id : theme.colorScheme === 'light' ? 'light' : 'dark'
+  const snapshot = { baseId, colorScheme: theme.colorScheme, tokens, appearance: { ...DEFAULT_APPEARANCE } }
   const adjustments = []
   const min = thresholds(false)
   const fix = (token, constraints) => {

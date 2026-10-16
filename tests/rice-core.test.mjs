@@ -75,6 +75,22 @@ test('LLAMA copies keep the frozen recipe: geometry and type options are locked'
   assert.equal(S.validateSnapshot(changed).ok, false)
 })
 
+test('E-ink copies keep its colors exactly on the Light base; E-ink stays a selectable built-in', () => {
+  const eink = engine.getTheme('eink')
+  const { snapshot, adjustments } = snapshotFromTheme(eink)
+  assert.equal(snapshot.baseId, 'light')
+  assert.equal(snapshot.tokens['presentation.finish'], 'standard', 'the paint-only finish is not a custom option')
+  assert.deepEqual(adjustments, [], 'E-ink passes the RICE contrast graph as it is')
+  for (const name of ['surface.base', 'text.primary', 'text.muted', 'border.default', 'accent.primary', 'progress.played', 'progress.track', 'state.error', 'state.success-action']) {
+    assert.deepEqual(snapshot.tokens[name], eink.tokens[name], name)
+  }
+  assert.ok(S.validateSnapshot(snapshot).ok)
+  assert.ok(evaluateContrast(snapshot).ok)
+  assert.ok(S.validateSelection({ kind: 'builtin', id: 'eink' }).ok)
+  assert.ok(S.validateSource({ kind: 'builtin', id: 'eink' }).ok)
+  assert.ok(!S.BASE_IDS.includes('eink'))
+})
+
 test('preset, selection and envelope validation', () => {
   const preset = { format: S.PRESET_FORMAT, schemaVersion: 1, tokenSchemaVersion: 1, id: 'p-0123456789abcdef01234567', name: 'My theme', createdAt: '2026-10-12T00:00:00.000Z', updatedAt: '2026-10-12T00:00:00.000Z', snapshot: validSnapshot(), reset: validSnapshot(), source: { kind: 'starter', id: 'catppuccin-mocha' } }
   assert.ok(S.validatePreset(preset).ok)
@@ -201,7 +217,7 @@ test('starter catalog: ten pinned, attributable, contrast-passing adaptations ke
     S.STARTER_IDS
   )
   assert.equal(STARTERS.length, 10)
-  assert.equal(engine.THEMES.length, 4, 'starters are not built-in themes')
+  for (const s of STARTERS) assert.ok(!engine.THEMES.some((t) => t.id === s.id), `${s.id}: starters are not built-in themes`)
   for (const s of STARTERS) {
     assert.ok(S.validateSnapshot(s.snapshot).ok, s.id)
     assert.ok(evaluateContrast(s.snapshot).ok, s.id)
