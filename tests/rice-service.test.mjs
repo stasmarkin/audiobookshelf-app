@@ -148,7 +148,7 @@ test('selecting a starter applies one scoped style node, the base anchor and a v
 test('every built-in afterwards removes all RICE traces and is exactly the original theme', async () => {
   const { doc, service, rice, appearance } = await setup()
   await rice.setRiceEnabled(true)
-  for (const id of ['dark', 'black', 'light', 'llama']) {
+  for (const { id } of engine.THEMES) {
     await rice.select({ kind: 'starter', id: 'dracula' })
     assert.equal(marker(doc), 'active')
     // The existing Settings picker: same call as before RICE
@@ -161,6 +161,17 @@ test('every built-in afterwards removes all RICE traces and is exactly the origi
     assert.equal(rice.envelope.widget, null)
     assert.deepEqual(rice.envelope.selection, { kind: 'builtin', id })
   }
+})
+
+test('E-ink: a saved E-ink choice survives a cold start, before and after the first RICE commit', async () => {
+  const { doc, service, rice, prefs } = await setup({ prefs: fakePrefs({ theme: 'eink' }) })
+  assert.equal(service.id, 'eink', 'RICE startup keeps the legacy E-ink choice')
+  assert.equal(doc.documentElement.dataset.theme, 'eink')
+  await rice.setRiceEnabled(true)
+  assert.equal(rice.envelope.lastBuiltin, 'eink')
+  const reopened = await setup({ prefs: fakePrefs(prefs.data) })
+  assert.equal(reopened.service.id, 'eink', 'the committed store restores E-ink')
+  assert.equal(reopened.doc.documentElement.dataset.theme, 'eink')
 })
 
 test('turning RICE off restores the last built-in and keeps presets; "use last" brings the custom choice back', async () => {

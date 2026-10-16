@@ -6,6 +6,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import app.absplus.android.device.AndroidVolumeProbe
+import app.absplus.android.device.AppStorage
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.models.DownloadItem
 import app.absplus.android.plugins.AbsLogger
@@ -38,13 +40,13 @@ object IncompleteDownloadCleanup {
   fun cleanupExpired(context: Context) {
     val now = System.currentTimeMillis()
     DeviceManager.dbManager.getDownloadItems()
-            .filter { item -> isEligible(item, now) }
+            .filter { item -> isEligible(item, now, context) }
             .forEach { item ->
               deleteItem(context, item)
             }
   }
 
-  private fun isEligible(item: DownloadItem, now: Long): Boolean {
+  private fun isEligible(item: DownloadItem, now: Long, context: Context): Boolean {
     // An authorization hold is not permission to discard the owner's partial media. This also
     // covers already-scheduled cleanup that runs before the download service restores its queue.
     val saved = DeviceManager.getServerConnectionConfig(item.serverConnectionConfigId)?.copy()
@@ -54,6 +56,8 @@ object IncompleteDownloadCleanup {
                   saved?.id, saved?.address, saved?.userId, saved?.token,
                   "${item.serverAddress}${part.serverPath}") == null
         }) return false
+    // Staging on an SD card that is out or not the registered card is left as it is, with its pending state (H02)
+    if (item.localFolder.id.startsWith(AppStorage.APPSD_PREFIX) && !AppStorage.isVerified(item.localFolder.id, AndroidVolumeProbe(context))) return false
     val failedAt = item.terminalFailureAt ?: return false
     if (item.stagingCleanupAt != null) return false
     if (now - failedAt < RETENTION_MS) return false
@@ -63,12 +67,23 @@ object IncompleteDownloadCleanup {
   }
 
   private fun deleteItem(context: Context, item: DownloadItem) {
+    val appRoots = AppStorage.appOwnedRoots(AndroidVolumeProbe(context))
+    var allDeleted = true
     item.downloadItemParts.forEach { part ->
-      deleteAppOwnedFile(context, File(part.destinationPath))
+      if (!deleteAppOwnedFile(File(part.destinationPath), appRoots)) {
+        allDeleted = false
+        return@forEach
+      }
       if (!part.moved) {
         part.bytesDownloaded = 0L
         part.completed = false
       }
+    }
+    // Cleanup is recorded only when it happened; otherwise the item stays pending for the next run
+    if (!allDeleted) {
+      DeviceManager.dbManager.saveDownloadItem(item)
+      AbsLogger.error(tag, "Staging files of ${item.id} could not all be deleted; tried again later")
+      return
     }
     item.stagingCleanupAt = System.currentTimeMillis()
     DeviceManager.dbManager.saveDownloadItem(item)
@@ -76,15 +91,19 @@ object IncompleteDownloadCleanup {
     AbsLogger.info(tag, "Deleted staging files for terminally failed download item ${item.id}")
   }
 
-  private fun deleteAppOwnedFile(context: Context, file: File) {
+  /** True when the file is gone afterwards (or never existed). */
+  private fun deleteAppOwnedFile(file: File, appRoots: List<File>): Boolean {
     val path = file.absolutePath
-    val internal = context.filesDir.absolutePath
-    val external = context.getExternalFilesDir(null)?.absolutePath
-    if (path.startsWith(internal) || (external != null && path.startsWith(external))) {
-      if (file.exists() && !file.delete()) AbsLogger.error(tag, "Could not delete expired staging file $path")
+    if (appRoots.any { AppStorage.isUnder(file, it) }) {
+      if (file.exists() && !file.delete()) {
+        AbsLogger.error(tag, "Could not delete expired staging file $path")
+        return false
+      }
       file.parentFile?.takeIf { it.isDirectory && it.list()?.isEmpty() == true }?.delete()
+      return true
     } else {
       AbsLogger.error(tag, "Refusing to delete non-app-owned path $path")
+      return false
     }
   }
 }

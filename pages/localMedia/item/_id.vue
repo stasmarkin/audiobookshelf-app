@@ -134,6 +134,7 @@ import draggable from 'vuedraggable'
 import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem } from '@/plugins/capacitor'
+import { isAppStorageFolderId } from '@/utils/appStorage'
 
 export default {
   components: {
@@ -162,7 +163,8 @@ export default {
       showDialog: false,
       selectedAudioTrack: null,
       selectedEpisode: null,
-      orderChanged: false
+      orderChanged: false,
+      itemMovedListener: null
     }
   },
   computed: {
@@ -191,8 +193,8 @@ export default {
     folderName() {
       return this.folder?.name
     },
-    isInternalStorage() {
-      return this.folderId?.startsWith('internal-')
+    isAppStorage() {
+      return isAppStorageFolderId(this.folderId)
     },
     mediaType() {
       return this.localLibraryItem?.mediaType
@@ -374,7 +376,7 @@ export default {
         message: confirmMessage
       })
       if (value) {
-        var res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItem.id, trackLocalFileId: localFile.id, trackContentUrl: this.selectedEpisode.audioTrack.contentUrl })
+        var res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItem.id, trackLocalFileId: localFile.id, trackContentUrl: this.selectedEpisode.audioTrack.contentUrl, localEpisodeId: this.selectedEpisode.id })
         if (res && res.id) {
           this.$toast.success('Deleted track successfully')
           this.localLibraryItem = res
@@ -421,7 +423,8 @@ export default {
         if (res && res.success) {
           this.$toast.success('Deleted Successfully')
           this.$router.replace(this.isIos ? '/downloads' : `/localMedia/folders/${this.folderId}`)
-        } else this.$toast.error('Failed to delete')
+        } else if (res?.reason === 'storageUnavailable') this.$toast.error(this.$strings.LabelDownloadStorageUnavailable)
+        else this.$toast.error('Failed to delete')
       }
     },
     async init() {
@@ -437,10 +440,34 @@ export default {
 
       this.folderId = this.localLibraryItem.folderId
       this.folder = await this.$db.getLocalFolder(this.folderId)
+    },
+    async onLocalLibraryItemMoved(item) {
+      if (!this.localLibraryItem || item.id !== this.localLibraryItem.id) return
+      this.localLibraryItem = item
+      if (!this.orderChanged) {
+        this.audioTracksCopy = this.audioTracks.map((at) => ({ ...at }))
+      } else {
+        // Keep the unsaved order, only swap in the tracks' new paths
+        this.audioTracksCopy = this.audioTracksCopy.map((copy) => ({ ...(this.audioTracks.find((at) => at.localFileId === copy.localFileId) || copy) }))
+      }
+      if (this.selectedAudioTrack) this.selectedAudioTrack = this.audioTracksCopy.find((at) => at.localFileId === this.selectedAudioTrack.localFileId) || null
+      if (this.selectedEpisode) this.selectedEpisode = this.episodes.find((ep) => ep.id === this.selectedEpisode.id) || null
+      this.folderId = item.folderId
+      this.folder = await this.$db.getLocalFolder(this.folderId)
     }
   },
-  mounted() {
+  async mounted() {
     this.init()
+    const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
+    // Left the page before the listener was registered
+    if (this._isDestroyed) {
+      listener?.remove()
+      return
+    }
+    this.itemMovedListener = listener
+  },
+  beforeDestroy() {
+    this.itemMovedListener?.remove()
   }
 }
 </script>

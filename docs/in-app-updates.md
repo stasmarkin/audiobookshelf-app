@@ -1,7 +1,8 @@
 # In-app updates (Settings → Updates)
 
-**Status:** released in Audiobookshelf+ v0.17.0 (versionCode 133). Updating a production installation through the
-updater is first possible from v0.17.0 to a later release and has not been verified yet.
+**Status:** released in Audiobookshelf+ v0.17.0 (versionCode 133). Production self-updates through Settings → Updates
+have been verified on real devices, most recently from the published v0.18.2 to v0.19.0 (see "Verified production
+updates" under Testing).
 
 The GitHub-distributed Audiobookshelf+ app can check the official GitHub releases, download the latest stable release
 APK, verify it and hand it to Android's own installer. Every step starts from a button in Settings. Nothing downloads or
@@ -171,4 +172,24 @@ no analytics.
   - `AbsUpdater.setTestSource` (debug builds only) points the updater at it, trusting only the fixture certificate. A test
     source may not target the production package or the app itself, nor trust the production certificate.
   - These tests exercise Android's real installer with the fixture package. They do not exercise the production signing
-    path end to end; that happens with the first release that contains the updater, installed over the previous one.
+    path end to end; that is covered by updating one published release to the next.
+
+### Verified production updates
+
+Published, release-signed builds updated in place through Settings → Updates, with Android's own confirmation each time:
+
+- v0.17.0 → v0.18.0 (Galaxy S26 Ultra, 2026-10-12), v0.17.0 → v0.18.1 and v0.18.1 → v0.18.2 (Galaxy S22 Ultra).
+- **v0.18.2 → v0.19.0** (Galaxy S22 Ultra, 2026-10-15, after publication). The installed v0.18.2:
+  1. discovered the published v0.19.0 release;
+  2. downloaded its signed APK;
+  3. verified it (size, digests, package, version code, signing certificate);
+  4. asked for Android's "Install unknown apps" permission (a fresh install had not granted it yet);
+  5. opened Android's standard installer;
+  6. installed v0.19.0 in place (installer: the app itself; first-install time unchanged; installed APK byte-identical
+     to the release asset);
+  7. kept sign-in, settings and the downloaded book;
+  8. reported "Audiobookshelf+ v0.19.0 (137)" and "up to date" on the next check.
+
+  Google Play Protect showed "App scan recommended" for the newly published APK before Android's installer continued;
+  that prompt comes from Play Protect for APKs it has not seen before, not from the updater ("More details → Install
+  without scanning" or "Scan app" continue the installation).

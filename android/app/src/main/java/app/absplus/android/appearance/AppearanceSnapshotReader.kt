@@ -18,11 +18,12 @@ object AppearanceSnapshotReader {
   private const val KEY_HEAD = "rice.v1.head"
   private const val KEY_LEGACY = "theme"
   private const val MAX_SLOT_CHARS = 1024 * 1024
-  private val BASE_IDS = setOf("dark", "black", "light", "llama")
+  // Every selectable built-in (theme/rice/schema.js BUILTIN_IDS), not only the custom-snapshot bases
+  private val BUILTIN_IDS = setOf("dark", "black", "light", "llama", "eink")
   private val ROLES = listOf("background", "surface", "text", "muted", "icon", "track", "played")
 
   sealed interface Committed {
-    /** A built-in theme id (dark, black, light, llama), or null when nothing valid is saved */
+    /** A built-in theme id (dark, black, light, llama, eink), or null when nothing valid is saved */
     data class Builtin(val themeId: String?) : Committed
 
     data class Rice(val family: String, val palette: WidgetPalette, val deviceMode: String?) : Committed
@@ -30,7 +31,7 @@ object AppearanceSnapshotReader {
 
   fun read(context: Context): Committed {
     val prefs = runCatching { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }.getOrNull() ?: return Committed.Builtin(null)
-    val legacy = runCatching { prefs.getString(KEY_LEGACY, null) }.getOrNull()?.takeIf { it in BASE_IDS }
+    val legacy = runCatching { prefs.getString(KEY_LEGACY, null) }.getOrNull()?.takeIf { it in BUILTIN_IDS }
     val headText = runCatching { prefs.getString(KEY_HEAD, null) }.getOrNull() ?: return Committed.Builtin(legacy)
     return runCatching { fromHead(headText) { key -> prefs.getString(key, null) } }.getOrNull() ?: Committed.Builtin(legacy)
   }
@@ -47,12 +48,12 @@ object AppearanceSnapshotReader {
     if (text.length > MAX_SLOT_CHARS || sha256(text) != digest) return null
     val envelope = JSONObject(text)
     if (envelope.optString("format") != "absplus-rice-store" || envelope.optInt("schemaVersion") != 1 || envelope.optLong("revision") != revision) return null
-    val lastBuiltin = envelope.optString("lastBuiltin").takeIf { it in BASE_IDS } ?: return null
+    val lastBuiltin = envelope.optString("lastBuiltin").takeIf { it in BUILTIN_IDS } ?: return null
     val selection = envelope.getJSONObject("selection")
     val riceEnabled = envelope.optBoolean("riceEnabled", false)
     val widget = envelope.opt("widget")
     if (!riceEnabled || widget !is JSONObject) {
-      val id = if (selection.optString("kind") == "builtin") selection.optString("id").takeIf { it in BASE_IDS } else null
+      val id = if (selection.optString("kind") == "builtin") selection.optString("id").takeIf { it in BUILTIN_IDS } else null
       return Committed.Builtin(id ?: lastBuiltin)
     }
     return projection(widget, revision) ?: Committed.Builtin(lastBuiltin)

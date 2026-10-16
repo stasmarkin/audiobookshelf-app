@@ -65,9 +65,10 @@ The CSS is therefore present at first paint and costs nothing at runtime. The pe
 Phase 2 adds one semantic color and two validated policies.
 
 - **`surface.recessed`**: sunken display/readout wells. Dark, Black and Light carry their `surface.base` value for schema completeness. Nothing in the standard themes consumes it, so their appearance is unchanged; the only change to their compiled CSS is the one new variable.
-- **`presentation.finish`** (`standard` | `equipment`) selects a **fixed, repository-owned recipe** in `theme/presets.js`.
+- **`presentation.finish`** (`standard` | `equipment` | `eink`) selects a **fixed, repository-owned recipe** in `theme/presets.js`.
   - `standard` produces no rules at all.
   - `equipment` is a fixed set of rules, emitted at build time under the theme's own `html[data-theme='<id>']` root.
+  - `eink` is the same kind of fixed set with the opposite purpose: it removes shadows, gradients and translucency (see [E-ink](#e-ink-built-in)).
   - Selectors and property names live in code. Values reference only token variables, plus two edge colors (`--color-edge-light`, `--color-edge-dark`) derived from validated surfaces with fixed blend factors.
   - Theme data cannot supply selectors, properties, shadows, gradients, dimensions, URLs, paths or blend factors.
 - **`presentation.cover-color`** (`legacy` | `theme`):
@@ -829,6 +830,26 @@ Shared fixes made alongside, in every theme:
 - grid titles under the cover (`utils/textScale.js`; the WebView scales font sizes but not px, em or rem lengths).
 
 They are listed in `CHANGELOG.md`.
+
+## E-ink (built-in)
+
+A light theme for e-paper readers (tested target: Boox Note Air 5C, a color Kaleido panel). E-paper renders mid-tones, tints and translucency as dither, smears soft shadows and gradients, and ghosts whatever changes, so the theme is paper and ink with as little in between as possible. Cover art keeps its colors.
+
+- It is a built-in like the others (`id: 'eink'`, label `LabelThemeEink`, `colorScheme: 'light'`, `eink` + `theme`), listed last in Settings. The non-EPUB reader uses the light shell.
+- **Palette** (`theme/builtins.js`): paper `255 255 255` for every surface and the overlays (all `solid`), ink `0 0 0` for text, borders, the played line, the accent and every `state.*`, and two grays only: `204 204 204` for tracks, selected rows and selected toggle segments, `85 85 85` for secondary text (7.5:1 on paper). States are ink because colored fills dither on e-paper; they read by icon, label and shape. This makes E-ink the one theme where `state.success` and `state.success-action` are not the shared values (white on ink is 21:1).
+- **`presentation.cover-color: 'theme'`**: the player and item header are paper instead of the cover's average color.
+- **The `eink` recipe** (`EINK_RULES` in `theme/presets.js`, emitted only under `html[data-theme='eink']`) is paint-only: `background-color`, `background-image: none`, `box-shadow`, `border-color` and `color`, with values that reference token variables only. Lines are hard box-shadows (1px, no blur, inside the box or a ring around it), so no size or position changes. Tests reject gradients, translucent values, soft shadows and any other property.
+  - shadows off: `box-shadow-book`, `box-shadow-md`, `box-shadow-progressbar`, Tailwind `shadow`, `shadow-sm`, `shadow-md`, `shadow-lg`;
+  - gradients and textures off: the modal's top fade, the card play corner (solid ink), the wooden shelf (paper, ink divider, paper placards with ink frame);
+  - lines: under the app bar and the bookshelf navigation, above the mini-player, on the drawer's page edge; 1px ink frames around card and player artwork, dialog panels and the library selector; the current navigation tab is inverted (ink with paper text);
+  - modals: an opaque paper backdrop instead of a 75% one, so the titles and close glyph (white over the old dark fade) are ink; the selected option is a solid gray row instead of a translucent success wash; the drawer has no dimming backdrop;
+  - progress: the seek channels are solid gray in an ink outline; the played line is ink in the settled and the pending seek state and on cover, list and chapter bars (finished bars are the ink success color), with a paper line separating cover bars from the art; the play button is a paper key with a 2px ink ring and ink glyph (its theme fill is paper);
+  - toggle switches: ink outline and thumb edge (on is ink, off is paper).
+  - visibility on paper: foregrounds the components hardcode for dark themes become ink (`text-gray-50`, yellow check and folder marks, the read-status key's white glyph, white borders, timestamp links, now underlined) or the secondary gray (`text-gray-200/300/400`, a finished episode's play control); they stay paper on dark boxes (author name overlay, card play corner). Borderless text fields get an ink outline, checkboxes an ink edge and mark, and buttons and icon keys on the ink state fills (`bg-error`, `bg-info`, `bg-warning`) a paper label.
+- Geometry, layout and behavior are unchanged; `playerLayout` treats E-ink as standard. The home-screen widget has no E-ink palette: `WidgetTheme.fromThemeId` maps `eink` to the standard widget, which already draws a static snapshot.
+- Animations are not part of the theme. The app honors the system "remove animations" setting for every theme (`prefers-reduced-motion`, `assets/app.css` and `utils/reducedMotion.js`), which Boox turns on. Spinners keep turning and the toast timer bar keeps running (its end closes the toast); pulsing and bouncing state indicators (a download in progress) become static, since their icon already says what is happening.
+- Redraw frequency is not part of the theme either. The player menu's **Update once a minute** (`playerSettings.updateEveryMinute`, off by default) keeps polling the native position every second, since bookmarks and the refocus checks read it, but draws times as H:MM, the seek bars in minute steps and the sleep timer in minutes, and writes to the page only when one of those values changes (`utils/playerClock.js`). A step is a minute of what the elapsed readout shows (listening time when it is scaled by speed, media time otherwise; the buffered bar always steps by a minute of media), counted from the chapter start on the chapter track; the end of the book is drawn exactly. A drag is drawn exactly while the finger is down; a seek or a released drag is drawn at once, already at the coarse position playback will then report, so the bar and elapsed time are not redrawn a second later (the remaining time follows on the next poll).
+- Not covered yet (no e-ink-specific rule): the remaining translucent tints (`bg-*/10` notices, `bg-black/…` badges on cards, `bg-fg/10` count badges), the podcast "new episodes" yellow badge and the stats chart. They are small; check them on the device.
 
 ## Content-derived color (intentionally not tokens)
 
