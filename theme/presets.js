@@ -6,6 +6,8 @@
  *   names and structure live here, in code. Theme data only chooses the recipe and supplies validated
  *   colors: rules reference token variables, and the derived edge colors below are computed from
  *   validated channels with fixed blend factors that theme data cannot influence.
+ * - 'eink' is a repository-owned, paint-only recipe that removes shadows, gradients and translucency and draws 1px
+ *   ink lines instead (see EINK_RULES). Its values reference only token variables.
  *
  * Selectors are built only from validated built-in theme ids (engine.themeSelector).
  * CommonJS on purpose: used by tailwind.config.js at build time.
@@ -1116,17 +1118,146 @@ const EQUIPMENT_RULES = [
   [':focus-visible', { outline: '2px solid rgb(var(--color-accent))', 'outline-offset': '2px' }]
 ]
 
+// --- E-ink finish ---
+// The equipment recipe's opposite: e-paper dithers soft shadows, gradients and translucent fills into gray noise and
+// ghosts them on every refresh, so this recipe removes them and separates surfaces with 1px ink lines instead. Paint
+// only: lines are hard, unblurred box-shadows (inside the box or a ring around it), so no size or position changes.
+const INK = 'rgb(var(--color-fg))'
+const PAPER = 'rgb(var(--color-bg))'
+const MUTED = 'rgb(var(--color-fg-muted))'
+const EINK_FRAME = `0 0 0 1px ${INK}`
+const EINK_FRAME_INSIDE = `inset 0 0 0 1px ${INK}`
+const EINK_RULE_BELOW = `inset 0 -1px 0 ${INK}`
+const EINK_RULE_ABOVE = `inset 0 1px 0 ${INK}`
+const NO_SHADOW = Object.freeze({ 'box-shadow': 'none' })
+const PAPER_LABEL = Object.freeze({ 'background-color': PAPER, 'background-image': 'none', 'border-color': INK, color: INK })
+
+// Order matters where two rules share an element at equal specificity: shadow removal first, frames and lines after it
+const EINK_RULES = [
+  // Drop shadows (app.css utilities and Tailwind's)
+  ['.box-shadow-book', NO_SHADOW],
+  ['.box-shadow-md', NO_SHADOW],
+  ['.box-shadow-progressbar', NO_SHADOW],
+  ['.shadow', NO_SHADOW],
+  ['.shadow-sm', NO_SHADOW],
+  ['.shadow-md', NO_SHADOW],
+  ['.shadow-lg', NO_SHADOW],
+
+  // Gradients and photo textures: the modal's top fade, the card play corner, the wooden shelf and its placards
+  ['.modal > .bg-gradient-to-b', { 'background-image': 'none' }],
+  ['.bg-gradient-to-r.to-black', { 'background-image': 'none', 'background-color': INK }],
+  ['.bookshelfRow', { 'background-image': 'none' }],
+  ['.bookshelfDivider', { 'background-color': INK, 'background-image': 'none', 'box-shadow': 'none' }],
+  ['.shinyBlack', PAPER_LABEL],
+  ['.altBookshelfLabel', PAPER_LABEL],
+
+  // Chrome: lines under the app bar and the bookshelf navigation; the current tab is inverted (it also keeps its label)
+  ['#appbar', { 'box-shadow': EINK_RULE_BELOW }],
+  ['#bookshelf-navbar', { 'box-shadow': EINK_RULE_BELOW }],
+  ['#bookshelf-navbar a.bg-primary', { 'background-color': INK, color: PAPER }],
+  ['.library-selector', { 'background-color': PAPER, 'box-shadow': EINK_FRAME_INSIDE }],
+
+  // Modals: an opaque paper backdrop instead of a translucent one, so titles and the close glyph (white over the old
+  // dark fade) become ink, and panels are framed
+  ['.modal.modal-bg', { 'background-color': 'rgb(var(--color-primary))' }],
+  ['.modal > .z-40.text-white', { color: INK }],
+  ['.modal > .z-40 .text-white', { color: INK }],
+  ['.modal .rounded-lg.bg-primary', { 'box-shadow': EINK_FRAME }],
+  ['.modal .chapters-panel.bg-secondary', { 'box-shadow': EINK_FRAME }],
+  ['.dialog-panel', { 'border-color': INK }],
+  // Selected option: a solid gray row instead of a translucent success wash
+  ['.option-selected', { 'background-color': 'rgb(var(--color-bg-hover))' }],
+
+  // Side drawer: no dimming backdrop; a line on the drawer's page edge
+  ['.layout-wrapper > .bg-black.bg-opacity-60', { 'background-color': 'transparent' }],
+  ['.layout-wrapper .w-64.bg-bg', { 'box-shadow': `inset 1px 0 0 ${INK}` }],
+
+  // Toggle switch: ink outline and thumb edge (on is the ink success fill, off is paper)
+  ['.w-10.rounded-full.border-gray-400', { 'border-color': INK }],
+  ['.w-10.rounded-full.border-gray-400 > span.bg-white', { 'border-color': INK }],
+  ['.w-10.rounded-full.border-gray-400 > span.bg-gray-300', { 'background-color': 'rgb(var(--color-bg-hover))', 'border-color': INK }],
+
+  // Artwork keeps its colors inside a 1px ink frame
+  ['.card-artwork', { 'box-shadow': EINK_FRAME }],
+  ['.cover-wrapper', { 'box-shadow': EINK_FRAME }],
+  // Playback progress on covers: solid ink (finished bars are the ink success color), set off from the art by a paper line
+  ['.absolute.bottom-0.left-0.z-10.bg-yellow-400', { 'background-color': 'rgb(var(--color-track-cursor))', 'box-shadow': `0 -1px 0 ${PAPER}` }],
+  ['.absolute.bottom-0.left-0.z-10.bg-success', { 'box-shadow': `0 -1px 0 ${PAPER}` }],
+  ['.modal .chapters-panel li > .bg-yellow-400', { 'background-color': 'rgb(var(--color-track-cursor))' }],
+  // List-row play button: paper with an ink ring instead of translucent gray, so its white glyph becomes ink
+  ['.list-play-key', { 'background-color': PAPER, 'box-shadow': EINK_FRAME_INSIDE }],
+  ['.list-play-key > .material-symbols', { color: INK }],
+  ['.list-play-key > div.rounded-full', { 'background-color': PAPER }],
+
+  // Player: seek channels are solid gray in an ink outline; the played line is ink in every seek state (settled and
+  // pending), and the thumb keeps a paper ring so it reads over the played line
+  ['#playerTrack div.relative.rounded-full', { 'background-color': 'rgb(var(--color-track))', 'box-shadow': EINK_FRAME_INSIDE }],
+  ['.total-track div.relative.rounded-full', { 'background-color': 'rgb(var(--color-track))', 'box-shadow': EINK_FRAME_INSIDE }],
+  ['#playerTrack .bg-track-cursor.bg-gray-200', { 'background-color': 'rgb(var(--color-track-cursor))' }],
+  ['#playerTrack .bg-track-cursor.bg-yellow-300', { 'background-color': 'rgb(var(--color-track-cursor))' }],
+  ['#playerTrack .pointer-events-auto > .bg-track-cursor', { 'box-shadow': `0 0 0 1px ${PAPER}` }],
+  // Mini-player: a line above it instead of its upward shadow (the full player keeps its own none)
+  ['#streamContainer:not(.fullscreen) #playerContent', { 'box-shadow': EINK_RULE_ABOVE }],
+  // Play/Pause: a paper key with an ink ring and ink glyph (its theme fill is paper, and its glyph would be paper too)
+  ['.play-btn', { color: INK, 'box-shadow': `inset 0 0 0 2px ${INK}` }],
+
+  // Visibility on paper: foregrounds hardcoded for the dark themes (white, light grays, yellow and blue accents) would
+  // vanish on paper, so they become ink or the secondary gray. Where they sit on a dark box, they stay paper
+  ['.text-gray-50', { color: INK }],
+  ['.text-gray-200', { color: MUTED }],
+  ['.text-gray-300', { color: MUTED }],
+  ['.text-gray-400', { color: MUTED }],
+  ['.bg-black .text-gray-200', { color: PAPER }],
+  ['.bg-gradient-to-r.to-black .text-gray-200', { color: PAPER }],
+  ['.text-yellow-300', { color: INK }],
+  ['.text-yellow-400', { color: INK }],
+  // Timestamp links in episode descriptions: ink, so they keep an underline to read as links
+  ['.text-blue-400', { color: INK, 'text-decoration-line': 'underline' }],
+  ['.border-white', { 'border-color': INK }],
+  // Read-status ("mark as finished") key: its outline glyph is white
+  ['.icon-btn > div.text-white', { color: INK }],
+  // A finished episode's play control: dimmed white (or 40% ink, under 3:1) becomes the secondary gray
+  ['.episode-play-control.text-white', { color: MUTED }],
+  ['.episode-play-control.text-opacity-40', { color: MUTED }],
+  // Chip actions shown over a paper chip
+  ['.bg-opacity-75 > .material-symbols.text-white', { color: INK }],
+  ['.row-play-btn', { 'border-color': INK }],
+  // Episode number, season and type chips: half-transparent paper on paper, so they get an outline
+  ['.rounded-full.bg-primary.bg-opacity-50', { 'box-shadow': EINK_FRAME_INSIDE }],
+  // Text fields without a border (search) would be invisible on paper
+  ['input.outline-none:not(.border)', { 'box-shadow': EINK_FRAME_INSIDE }],
+  ['.checkbox-box', { 'border-color': INK }],
+  ['.checkbox-box .checkbox-mark', { color: INK }],
+  // Ink fills whose label inherits ink: buttons and icon keys in the state colors get a paper label
+  ['.btn.bg-error', { color: PAPER }],
+  ['.btn.bg-info', { color: PAPER }],
+  ['.btn.bg-warning', { color: PAPER }],
+  // ui/Btn's loading spinner is ink (text-fg) over the button: on the ink fills it would vanish
+  ['.btn.bg-success-action > div.text-fg', { color: PAPER }],
+  ['.btn.bg-error > div.text-fg', { color: PAPER }],
+  ['.btn.bg-info > div.text-fg', { color: PAPER }],
+  ['.btn.bg-warning > div.text-fg', { color: PAPER }],
+  ['.icon-btn.bg-error > .material-symbols', { color: PAPER }],
+  ['.bg-black\\/80.text-fg', { color: PAPER }],
+  ['.bg-black\\/75 svg.animate-spin', { color: PAPER }],
+  // Unavailable player keys: 10% ink is nearly blank on e-paper; the light gray still shows the key, clearly dimmed
+  ['#playerContent .key-disabled', { color: 'rgb(var(--color-bg-hover))' }]
+]
+
+const rootedRules = (theme, entries, base = {}) => {
+  const root = engine.themeSelector(theme.id)
+  const rules = Object.keys(base).length ? { [root]: base } : {}
+  for (const [suffix, declarations] of entries) {
+    const selector = suffix ? `${root} ${suffix}` : root
+    rules[selector] = { ...(rules[selector] || {}), ...declarations }
+  }
+  return rules
+}
+
 const RECIPES = {
   standard: () => ({}),
-  equipment: (theme) => {
-    const root = engine.themeSelector(theme.id)
-    const rules = { [root]: equipmentDerivedDeclarations(theme.tokens) }
-    for (const [suffix, declarations] of EQUIPMENT_RULES) {
-      const selector = suffix ? `${root} ${suffix}` : root
-      rules[selector] = { ...(rules[selector] || {}), ...declarations }
-    }
-    return rules
-  }
+  equipment: (theme) => rootedRules(theme, EQUIPMENT_RULES, equipmentDerivedDeclarations(theme.tokens)),
+  eink: (theme) => rootedRules(theme, EINK_RULES)
 }
 
 /** Fixed presentation rules for the given validated themes ({ selector: declarations }). */
@@ -1168,4 +1299,4 @@ function presentationMediaRules(themes) {
 
 const builtinPresentationMediaRules = () => presentationMediaRules(engine.THEMES)
 
-module.exports = { presentationRules, builtinPresentationRules, presentationMediaRules, builtinPresentationMediaRules, equipmentDerivedDeclarations, EQUIPMENT_RULES, EQUIPMENT_MEDIA_RULES, PRIMITIVES }
+module.exports = { presentationRules, builtinPresentationRules, presentationMediaRules, builtinPresentationMediaRules, equipmentDerivedDeclarations, EQUIPMENT_RULES, EQUIPMENT_MEDIA_RULES, EINK_RULES, PRIMITIVES }

@@ -1,15 +1,18 @@
 package app.absplus.android.plugins
 
-import android.os.Environment
 import app.absplus.android.MainActivity
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.models.DownloadItem
 import app.absplus.android.models.DownloadItemPart
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.managers.AutoDownloadManager
+import app.absplus.android.managers.AutoDownloadStore
 import app.absplus.android.managers.DownloadItemManager
 import app.absplus.android.managers.DownloadIdentifiers
+import app.absplus.android.managers.LibraryItemDownloadStarter
 import app.absplus.android.services.DownloadServiceHost
+import app.absplus.android.managers.AutoDownloadScheduler
 import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.getcapacitor.JSArray
@@ -18,7 +21,11 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
-import java.io.File
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 @CapacitorPlugin(name = "AbsDownloader")
 class AbsDownloader : Plugin() {
@@ -49,6 +56,15 @@ class AbsDownloader : Plugin() {
     apiHandler = ApiHandler(mainActivity)
     downloadItemManager = DownloadServiceHost.ensure(mainActivity)
     DownloadServiceHost.attachBridge(mainActivity, clientEventEmitter)
+
+    @OptIn(DelicateCoroutinesApi::class)
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        AutoDownloadScheduler.reschedule(mainActivity)
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "Failed to schedule auto download: ${e.message}")
+      }
+    }
   }
 
   override fun handleOnDestroy() {
@@ -64,16 +80,22 @@ class AbsDownloader : Plugin() {
             call.getString("downloadingFile") ?: "Downloading {0}",
             call.getString("waitingForStorage") ?: "Waiting for available storage",
             call.getString("downloads") ?: "Downloads",
-            call.getString("cancel") ?: "Cancel")
+            call.getString("cancel") ?: "Cancel",
+            call.getString("moveToSd") ?: DownloadServiceHost.DEFAULT_MOVE_TO_SD,
+            call.getString("moveToInternal") ?: DownloadServiceHost.DEFAULT_MOVE_TO_INTERNAL)
     call.resolve()
   }
 
   /** The download queue (active, queued and failed items) for the Downloads screen. */
   @PluginMethod
   fun getDownloadQueue(call: PluginCall) {
-    DownloadServiceHost.snapshot(mainActivity) { items ->
+    DownloadServiceHost.statusSnapshot(mainActivity) { statuses ->
       val array = JSArray()
-      items.forEach { array.put(JSObject(jacksonMapper.writeValueAsString(it))) }
+      statuses.forEach { status ->
+        array.put(JSObject(jacksonMapper.writeValueAsString(status.item))
+                .put("waitingFor", status.waitingFor ?: JSONObject.NULL)
+                .put("isAuto", status.isAuto))
+      }
       call.resolve(JSObject().put("items", array))
     }
   }
@@ -90,7 +112,9 @@ class AbsDownloader : Plugin() {
                 DownloadServiceHost.ExistingDownloadResult.NOT_FOUND -> "notFound"
                 DownloadServiceHost.ExistingDownloadResult.ACTIVE -> "active"
                 DownloadServiceHost.ExistingDownloadResult.FOLDER_ACCESS -> "folderAccess"
+                DownloadServiceHost.ExistingDownloadResult.STORAGE_UNAVAILABLE -> "storageUnavailable"
                 DownloadServiceHost.ExistingDownloadResult.SERVICE_START_FAILED -> "service"
+                DownloadServiceHost.ExistingDownloadResult.HELD -> "held"
               }
       call.resolve(if (errorCode == null) JSObject() else JSObject().put("errorCode", errorCode))
     }
@@ -138,8 +162,18 @@ class AbsDownloader : Plugin() {
       resolveDownloadCall(call, "Invalid download identifier")
       return
     }
-    var localFolderId = call.data.getString("localFolderId", "").toString()
+    val localFolderId = call.data.getString("localFolderId", "").toString()
     AbsLogger.info(tag, "Requested download for item $libraryItemId${if (episodeId.isEmpty()) "" else " / episode $episodeId"}")
+    // A request from the user makes the episode the user's own, also when auto download already queued or started
+    // it: automatic retention never removes it and the auto download network rules no longer hold it back
+    val activeServerId = DeviceManager.serverConnectionConfig?.id
+    if (episodeId.isNotEmpty() && !activeServerId.isNullOrBlank()) {
+      try {
+        AutoDownloadStore.claimManual(activeServerId, libraryItemId, episodeId)
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "Could not record the manual download of $episodeId (${e.javaClass.simpleName}: ${e.message})")
+      }
+    }
 
     val downloadId = if (episodeId.isEmpty()) libraryItemId else "$libraryItemId-$episodeId"
     DownloadServiceHost.retryExisting(mainActivity, downloadId) { result ->
@@ -150,9 +184,13 @@ class AbsDownloader : Plugin() {
           call.resolve(JSObject("{\"error\":\"Download already started for this media entity\"}"))
         }
         DownloadServiceHost.ExistingDownloadResult.SERVICE_START_FAILED ->
-                call.resolve(JSObject("{\"error\":\"Unable to start the Android download service\"}"))
+                call.resolve(JSObject().put("error", DownloadServiceHost.SERVICE_START_FAILED_MESSAGE))
         DownloadServiceHost.ExistingDownloadResult.FOLDER_ACCESS ->
                 call.resolve(JSObject().put("error", "Folder access lost: re-select the download folder to retry").put("errorCode", "folderAccess"))
+        DownloadServiceHost.ExistingDownloadResult.STORAGE_UNAVAILABLE ->
+                call.resolve(JSObject().put("error", LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE).put("errorCode", "storageUnavailable"))
+        DownloadServiceHost.ExistingDownloadResult.HELD ->
+                call.resolve(JSObject().put("error", "Download authorization changed: reconnect the original server before retrying").put("errorCode", "held"))
         DownloadServiceHost.ExistingDownloadResult.NOT_FOUND -> {
           apiHandler.getLibraryItemWithProgress(libraryItemId, episodeId) { libraryItem ->
             if (libraryItem == null) {
@@ -163,17 +201,8 @@ class AbsDownloader : Plugin() {
             } else {
               AbsLogger.info(tag, "Preparing download for ${libraryItem.id}")
 
-              if (localFolderId == "") localFolderId = "internal-${libraryItem.mediaType}"
-              var localFolder = DeviceManager.dbManager.getLocalFolder(localFolderId)
-              if (localFolder == null && localFolderId.startsWith("internal-")) {
-                AbsLogger.info(tag, "Creating internal download folder $localFolderId")
-                localFolder = LocalFolder(localFolderId, "Internal App Storage", "", "", "", "internal", libraryItem.mediaType)
-                DeviceManager.dbManager.saveLocalFolder(localFolder)
-              }
-
-              if (localFolder == null) {
-                call.resolve(JSObject("{\"error\":\"Local Folder Not Found\"}"))
-              } else if (episodeId.isNotEmpty() && libraryItem.mediaType != "podcast") {
+              val explicitFolderId = localFolderId.takeUnless { it.isEmpty() || it == "null" }
+              if (episodeId.isNotEmpty() && libraryItem.mediaType != "podcast") {
                 call.resolve(JSObject("{\"error\":\"Invalid library item not a podcast\"}"))
               } else if (episodeId.isNotEmpty()) {
                 val podcast = libraryItem.media as Podcast
@@ -181,10 +210,10 @@ class AbsDownloader : Plugin() {
                 if (episode == null) {
                   call.resolve(JSObject("{\"error\":\"Invalid podcast episode not found\"}"))
                 } else {
-                  startLibraryItemDownload(libraryItem, localFolder, episode) { error -> resolveDownloadCall(call, error) }
+                  LibraryItemDownloadStarter.startLibraryItemDownload(mainActivity, libraryItem, explicitFolderId, episode) { error -> resolveDownloadCall(call, error) }
                 }
               } else {
-                startLibraryItemDownload(libraryItem, localFolder, null) { error -> resolveDownloadCall(call, error) }
+                LibraryItemDownloadStarter.startLibraryItemDownload(mainActivity, libraryItem, explicitFolderId, null) { error -> resolveDownloadCall(call, error) }
               }
             }
           }
@@ -193,146 +222,106 @@ class AbsDownloader : Plugin() {
     }
   }
 
+  @OptIn(DelicateCoroutinesApi::class)
+  @PluginMethod
+  fun checkAutoDownloads(call: PluginCall) {
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        // The app is in foreground now, so work a background worker could not start can run
+        DownloadServiceHost.startServiceIfIdle(mainActivity)
+        val status = AutoDownloadManager.startCheck(mainActivity, AutoDownloadManager.Trigger.APP)
+        call.resolve(JSObject().put("status", status.jsValue))
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "checkAutoDownloads failed (${e.javaClass.simpleName}: ${e.message})")
+        call.reject(e.message ?: "checkAutoDownloads failed")
+      }
+    }
+  }
+
+  @OptIn(DelicateCoroutinesApi::class)
+  @PluginMethod
+  fun getPodcastAutoDownload(call: PluginCall) {
+    val libraryItemId = call.getString("libraryItemId")
+    if (libraryItemId.isNullOrBlank()) return call.reject("libraryItemId is required")
+    val serverConfigId = DeviceManager.serverConnectionConfig?.id ?: return call.reject("No active server connection")
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        val entry = AutoDownloadStore.get(serverConfigId, libraryItemId)
+        call.resolve(JSObject().put("enabled", entry.enabled).put("keepCount", entry.keepCount ?: JSONObject.NULL).put("retention", entry.retention))
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "getPodcastAutoDownload failed (${e.javaClass.simpleName}: ${e.message})")
+        call.reject(e.message ?: "getPodcastAutoDownload failed")
+      }
+    }
+  }
+
+  /** Episode ids of the podcast that auto download fetched for the current server, to mark them in the episode list. */
+  @OptIn(DelicateCoroutinesApi::class)
+  @PluginMethod
+  fun getAutoDownloadedEpisodes(call: PluginCall) {
+    val libraryItemId = call.getString("libraryItemId")
+    if (libraryItemId.isNullOrBlank()) return call.reject("libraryItemId is required")
+    val serverConfigId = DeviceManager.serverConnectionConfig?.id ?: return call.resolve(JSObject().put("episodeIds", JSArray()))
+    GlobalScope.launch(Dispatchers.IO) {
+      val ids = try {
+        AutoDownloadStore.get(serverConfigId, libraryItemId).autoDownloadedEpisodeIds.toList()
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "getAutoDownloadedEpisodes failed (${e.javaClass.simpleName}: ${e.message})")
+        emptyList()
+      }
+      call.resolve(JSObject().put("episodeIds", JSArray(ids)))
+    }
+  }
+
+  @OptIn(DelicateCoroutinesApi::class)
+  @PluginMethod
+  fun setPodcastAutoDownload(call: PluginCall) {
+    val libraryItemId = call.getString("libraryItemId")
+    if (libraryItemId.isNullOrBlank()) return call.reject("libraryItemId is required")
+    val enabled = call.getString("enabled")
+    if (enabled != PodcastAutoDownloadEntry.ENABLED_DEFAULT && enabled != PodcastAutoDownloadEntry.ENABLED_ON && enabled != PodcastAutoDownloadEntry.ENABLED_OFF) {
+      return call.reject("enabled must be DEFAULT, ON or OFF")
+    }
+    // Absent keeps the saved choice (older callers); anything else must be one of the two modes
+    val retention = call.getString("retention")
+    if (retention != null && retention != PodcastAutoDownloadEntry.RETENTION_AUTO && retention != PodcastAutoDownloadEntry.RETENTION_KEEP_ALL) {
+      return call.reject("retention must be AUTO or KEEP_ALL")
+    }
+    val rawKeepCount = call.data.opt("keepCount")
+    val keepCount: Int? = when {
+      rawKeepCount == null || rawKeepCount == JSONObject.NULL -> null
+      rawKeepCount !is Number -> return call.reject("keepCount must be a number or null")
+      rawKeepCount.toDouble() != Math.rint(rawKeepCount.toDouble()) -> return call.reject("keepCount must be an integer")
+      rawKeepCount.toDouble() < 0 || rawKeepCount.toDouble() > 999 -> return call.reject("keepCount must be between 0 and 999")
+      else -> rawKeepCount.toInt()
+    }
+    val serverConfigId = DeviceManager.serverConnectionConfig?.id ?: return call.reject("No active server connection")
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        AutoDownloadStore.setSettings(serverConfigId, libraryItemId, enabled, keepCount, retention)
+        call.resolve()
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "setPodcastAutoDownload failed (${e.javaClass.simpleName}: ${e.message})")
+        call.reject(e.message ?: "setPodcastAutoDownload failed")
+        return@launch
+      }
+      try {
+        val settings = DeviceManager.deviceData.deviceSettings ?: DeviceSettings.default()
+        val applies = enabled == PodcastAutoDownloadEntry.ENABLED_ON ||
+                (enabled == PodcastAutoDownloadEntry.ENABLED_DEFAULT && settings.autoDownloadAllPodcasts)
+        if (settings.autoDownloadEnabled && applies) {
+          // Queues newly selected episodes only; removals wait for the next regular check
+          val status = AutoDownloadManager.startCheck(mainActivity, AutoDownloadManager.Trigger.SETTINGS)
+          android.util.Log.d(tag, "Auto download check after settings change: ${status.jsValue}")
+        }
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "Auto download check after settings change failed (${e.javaClass.simpleName}: ${e.message})")
+      }
+    }
+  }
+
   private fun resolveDownloadCall(call: PluginCall, error: String?) {
     if (error == null) call.resolve()
     else call.resolve(JSObject().put("error", error))
-  }
-
-  // Item filenames could be the same if they are in sub-folders, this will make them unique
-  private fun getFilenameFromRelPath(relPath: String): String {
-    var cleanedRelPath = relPath.replace("\\", "_").replace("/", "_")
-    cleanedRelPath = cleanStringForFileSystem(cleanedRelPath)
-    return if (cleanedRelPath.startsWith("_")) cleanedRelPath.substring(1) else cleanedRelPath
-  }
-
-  // Replace characters that cant be used in the file system
-  // Reserved characters: ?:\"*|/\\<>
-  private fun cleanStringForFileSystem(str:String):String {
-    val reservedCharacters = listOf("?", "\"", "*", "|", "/", "\\", "<", ">")
-    var newTitle = str
-    newTitle = newTitle.replace(":", " -") // Special case replace : with -
-
-    reservedCharacters.forEach {
-      newTitle = newTitle.replace(it, "")
-    }
-    return newTitle
-  }
-
-  private fun startLibraryItemDownload(
-          libraryItem: LibraryItem,
-          localFolder: LocalFolder,
-          episode: PodcastEpisode?,
-          callback: (String?) -> Unit
-  ) {
-    if (!DownloadIdentifiers.isSafe(libraryItem.id) ||
-            (episode != null && !DownloadIdentifiers.isSafe(episode.id))) {
-      callback("Invalid download identifier")
-      return
-    }
-    val isInternal = localFolder.id.startsWith("internal-")
-
-    val finalInternalFolderPath = "${mainActivity.filesDir}/downloads/${libraryItem.id}"
-    val tempFolderPath =
-            if (isInternal) {
-              "${mainActivity.filesDir}/download-staging/${libraryItem.id}"
-            } else {
-              "${mainActivity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: mainActivity.filesDir}/download-staging/${libraryItem.id}"
-            }
-
-
-    if (libraryItem.mediaType == "book") {
-      val bookTitle = cleanStringForFileSystem(libraryItem.media.metadata.title)
-      val bookAuthor = cleanStringForFileSystem(libraryItem.media.metadata.getAuthorDisplayName())
-
-      val tracks = libraryItem.media.getAudioTracks()
-      AbsLogger.info(tag, "Queueing library item download with ${tracks.size} files")
-      val itemSubfolder = "$bookAuthor/$bookTitle"
-      val itemFolderPath = if (isInternal) finalInternalFolderPath else "${localFolder.absolutePath}/$itemSubfolder"
-      val downloadItem = DownloadItem(libraryItem.id, libraryItem.id, null, libraryItem.userMediaProgress,DeviceManager.serverConnectionConfig?.id ?: "", DeviceManager.serverAddress, DeviceManager.serverUserId, libraryItem.mediaType, itemFolderPath, localFolder, bookTitle, itemSubfolder, libraryItem.media, mutableListOf(), libraryItem.ino)
-
-      val book = libraryItem.media as Book
-      book.ebookFile?.let { ebookFile ->
-        val fileSize = ebookFile.metadata?.size ?: 0
-        val serverPath = "/api/items/${libraryItem.id}/file/${ebookFile.ino}/download"
-        val destinationFilename = getFilenameFromRelPath(ebookFile.metadata?.relPath ?: "")
-        val finalDestinationFile = File("$itemFolderPath/$destinationFilename")
-        val destinationFile = File("$tempFolderPath/$destinationFilename.part")
-
-        val downloadItemPart = DownloadItemPart.make(downloadItem.id, destinationFilename, fileSize, destinationFile,finalDestinationFile,itemSubfolder,serverPath,localFolder,ebookFile,null,null)
-        downloadItem.downloadItemParts.add(downloadItemPart)
-      }
-
-      // Create download item part for each audio track
-      val audioFiles = (libraryItem.media as Book).audioFiles ?: mutableListOf()
-      tracks.forEach { audioTrack ->
-        val fileSize = audioTrack.metadata?.size ?: 0
-
-        // TODO: Currently file ino is only stored on AudioFile. This should be updated server side to be in FileMetadata or on the AudioTrack
-        val audioFileIno = audioFiles.find { it.metadata.path == audioTrack.metadata?.path }?.ino
-
-        val serverPath = "/api/items/${libraryItem.id}/file/${audioFileIno}/download"
-        val destinationFilename = getFilenameFromRelPath(audioTrack.relPath)
-
-        val finalDestinationFile = File("$itemFolderPath/$destinationFilename")
-        val destinationFile = File("$tempFolderPath/$destinationFilename.part")
-
-        val downloadItemPart = DownloadItemPart.make(downloadItem.id, destinationFilename, fileSize, destinationFile,finalDestinationFile,itemSubfolder,serverPath,localFolder,null,audioTrack,null)
-        downloadItem.downloadItemParts.add(downloadItemPart)
-      }
-
-      if (downloadItem.downloadItemParts.isNotEmpty()) {
-        // Add cover download item
-        if (libraryItem.media.coverPath != null && libraryItem.media.coverPath?.isNotEmpty() == true) {
-          val coverLibraryFile = libraryItem.libraryFiles?.find { it.metadata.path == libraryItem.media.coverPath }
-          val coverFileSize = coverLibraryFile?.metadata?.size ?: 0
-
-          val serverPath = "/api/items/${libraryItem.id}/cover"
-          val destinationFilename = "cover-${libraryItem.id}.jpg"
-          val destinationFile = File("$tempFolderPath/$destinationFilename.part")
-          val finalDestinationFile = File("$itemFolderPath/$destinationFilename")
-
-          val downloadItemPart = DownloadItemPart.make(downloadItem.id, destinationFilename, coverFileSize,  destinationFile,finalDestinationFile,itemSubfolder,serverPath,localFolder,null,null,null)
-          downloadItem.downloadItemParts.add(downloadItemPart)
-        }
-
-        DownloadServiceHost.enqueue(mainActivity, downloadItem, callback)
-      } else callback("No downloadable files found")
-    } else {
-      // Podcast episode download
-      val podcastTitle = cleanStringForFileSystem(libraryItem.media.metadata.title)
-
-      val audioTrack = episode?.audioTrack
-      val audioFileIno = episode?.audioFile?.ino
-      val fileSize = audioTrack?.metadata?.size ?: 0
-
-      AbsLogger.info(tag, "Queueing podcast episode download")
-      val itemFolderPath = if (isInternal) finalInternalFolderPath else "${localFolder.absolutePath}/$podcastTitle"
-      val downloadItemId = "${libraryItem.id}-${episode?.id}"
-      val downloadItem = DownloadItem(downloadItemId, libraryItem.id, episode?.id, libraryItem.userMediaProgress, DeviceManager.serverConnectionConfig?.id ?: "", DeviceManager.serverAddress, DeviceManager.serverUserId, libraryItem.mediaType, itemFolderPath, localFolder, podcastTitle, podcastTitle, libraryItem.media, mutableListOf(), libraryItem.ino)
-
-      var serverPath = "/api/items/${libraryItem.id}/file/${audioFileIno}/download"
-      var destinationFilename = getFilenameFromRelPath(audioTrack?.relPath ?: "")
-
-      var destinationFile = File("$tempFolderPath/$destinationFilename.part")
-      var finalDestinationFile = File("$itemFolderPath/$destinationFilename")
-      var downloadItemPart = DownloadItemPart.make(downloadItem.id, destinationFilename,fileSize, destinationFile,finalDestinationFile,podcastTitle,serverPath,localFolder,null,audioTrack,episode)
-      downloadItem.downloadItemParts.add(downloadItemPart)
-
-      if (libraryItem.media.coverPath != null && libraryItem.media.coverPath?.isNotEmpty() == true) {
-        val coverLibraryFile = libraryItem.libraryFiles?.find { it.metadata.path == libraryItem.media.coverPath }
-        val coverFileSize = coverLibraryFile?.metadata?.size ?: 0
-
-        serverPath = "/api/items/${libraryItem.id}/cover"
-        destinationFilename = "cover.jpg"
-
-        destinationFile = File("$tempFolderPath/$destinationFilename.part")
-        finalDestinationFile = File("$itemFolderPath/$destinationFilename")
-
-        downloadItemPart = DownloadItemPart.make(downloadItem.id, destinationFilename,coverFileSize,destinationFile,finalDestinationFile,podcastTitle,serverPath,localFolder,null,null,null)
-        downloadItem.downloadItemParts.add(downloadItemPart)
-      }
-
-        DownloadServiceHost.enqueue(mainActivity, downloadItem, callback)
-    }
   }
 }

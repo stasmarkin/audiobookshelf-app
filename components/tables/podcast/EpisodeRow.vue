@@ -51,10 +51,16 @@
         <!-- Download Section -->
         <div v-if="userCanDownload" class="flex items-center">
           <span v-if="isLocal" class="material-symbols px-2 text-success text-2xl leading-none">audio_file</span>
-          <span v-else-if="!localEpisode" class="material-symbols mx-1.5 text-2xl leading-none" :class="downloadItem || startingDownload ? 'animate-bounce text-warning text-opacity-75' : ''" @click.stop="downloadClick">
-            {{ downloadItem || startingDownload ? 'downloading' : 'download' }}
-          </span>
-          <span v-else class="material-symbols px-2 text-success text-2xl leading-none">download_done</span>
+          <template v-else-if="!localEpisode">
+            <span class="material-symbols mx-1.5 text-2xl leading-none" :class="downloadWaitingText ? 'text-fg-muted' : downloadItem || startingDownload ? 'animate-bounce text-warning text-opacity-75' : ''" @click.stop="downloadClick">
+              {{ downloadWaitingText ? 'schedule' : downloadItem || startingDownload ? 'downloading' : 'download' }}
+            </span>
+            <span v-if="downloadWaitingText" class="text-xs text-fg-muted">{{ downloadWaitingText }}</span>
+          </template>
+          <template v-else>
+            <span class="material-symbols px-2 text-success text-2xl leading-none">download_done</span>
+            <span v-if="autoDownloaded" class="text-xs text-fg-muted">{{ $strings.LabelDownloadAuto }}</span>
+          </template>
         </div>
 
         <!-- Spacer to push elements left -->
@@ -73,6 +79,8 @@
 <script>
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
+import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
+import { WAITING_LABEL_KEYS } from '@/utils/downloadState'
 
 export default {
   props: {
@@ -90,7 +98,8 @@ export default {
     // For a downloaded podcast (isLocal): its server item and saved server, so "finished" reaches that server
     serverLibraryItemId: String,
     serverConfigId: String,
-    sortKey: String
+    sortKey: String,
+    autoDownloaded: Boolean
   },
   mixins: [cellularPermissionHelpers],
   data() {
@@ -185,6 +194,11 @@ export default {
     downloadItem() {
       return this.$store.getters['globals/getDownloadItem'](this.libraryItemId, this.episode.id)
     },
+    // A queued download that waits for a condition (Wi-Fi, charging, network, SD card) says which, instead of bouncing
+    downloadWaitingText() {
+      const key = WAITING_LABEL_KEYS[this.downloadItem?.waitingFor]
+      return key ? this.$strings[key] : null
+    },
     localEpisodeId() {
       return this.localEpisode?.id || null
     }
@@ -225,22 +239,9 @@ export default {
     async download(selectedLocalFolder = null) {
       let localFolder = selectedLocalFolder
       if (!localFolder) {
-        const localFolders = (await this.$db.getLocalFolders()) || []
-        console.log('Local folders loaded', localFolders.length)
-        const foldersWithMediaType = localFolders.filter((lf) => {
-          console.log('Checking local folder', lf.mediaType)
-          return lf.mediaType == this.mediaType
-        })
-        console.log('Folders with media type', this.mediaType, foldersWithMediaType.length)
-        const internalStorageFolder = foldersWithMediaType.find((f) => f.id === `internal-${this.mediaType}`)
-        if (!foldersWithMediaType.length) {
-          localFolder = {
-            id: `internal-${this.mediaType}`,
-            name: 'Internal App Storage',
-            mediaType: this.mediaType
-          }
-        } else if (foldersWithMediaType.length === 1 && internalStorageFolder) {
-          localFolder = internalStorageFolder
+        const saf = safFoldersFor((await this.$db.getLocalFolders()) || [], this.mediaType)
+        if (!saf.length) {
+          localFolder = await appStorageFolderFor(this, this.mediaType)
         } else {
           this.$store.commit('globals/showSelectLocalFolderModal', {
             mediaType: this.mediaType,
@@ -251,8 +252,6 @@ export default {
           return
         }
       }
-
-      console.log('Local folder', JSON.stringify(localFolder))
 
       this.startDownload(localFolder)
     },

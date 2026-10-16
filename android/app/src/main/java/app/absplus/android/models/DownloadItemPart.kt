@@ -6,6 +6,7 @@ import app.absplus.android.data.AudioTrack
 import app.absplus.android.data.EBookFile
 import app.absplus.android.data.LocalFolder
 import app.absplus.android.data.PodcastEpisode
+import app.absplus.android.device.AppStorage
 import app.absplus.android.device.DeviceManager
 import com.fasterxml.jackson.annotation.JsonIgnore
 import java.io.File
@@ -30,6 +31,7 @@ data class DownloadItemPart(
   var failed:Boolean,
   var failureReason: String? = null,
   var permissionLost: Boolean = false,
+  var storageUnavailable: Boolean = false,
   @JsonIgnore val uri: Uri,
   @JsonIgnore val destinationUri: Uri,
   @JsonIgnore val finalDestinationUri: Uri,
@@ -42,7 +44,11 @@ data class DownloadItemPart(
   @JsonIgnore var retryCount: Int = 0,
   @JsonIgnore var authRetryCount: Int = 0,
   var waitingForSpace: Boolean = false,
-  @JsonIgnore var reusedExistingFile: Boolean = false
+  @JsonIgnore var reusedExistingFile: Boolean = false,
+  /** ETag or Last-Modified of the response the staged bytes came from; only with it are they resumed after a restart */
+  @JsonIgnore var resumeValidator: String? = null,
+  /** Held: the saved server no longer matches the one this download was started for; nothing transfers or is deleted */
+  var authorizationHold: Boolean = false
 ) {
   companion object {
     fun make(downloadItemId:String, filename:String, fileSize: Long, destinationFile: File, finalDestinationFile: File, subfolder:String, serverPath:String, localFolder: LocalFolder, ebookFile: EBookFile?, audioTrack: AudioTrack?, episode: PodcastEpisode?) :DownloadItemPart {
@@ -85,6 +91,6 @@ data class DownloadItemPart(
   }
 
   @get:JsonIgnore
-  val isInternalStorage get() = localFolderId.startsWith("internal-")
+  val isAppStorage get() = AppStorage.isAppStorage(localFolderId)
 
 }

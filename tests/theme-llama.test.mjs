@@ -14,6 +14,8 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s)
 
 const llama = () => engine.getTheme('llama')
 const playerLayoutTiers = require('../theme/playerLayout.js').TIERS
+// The E-ink finish (tests/theme-eink.test.mjs) also styles the mini-player and the bookshelf navigation
+const EINK_ROOT = "html[data-theme='eink']"
 
 // WCAG relative luminance / contrast ratio
 const luminance = ([r, g, b]) => {
@@ -1954,7 +1956,7 @@ test('Phase 7B rejects Candidate C: no mini plate, well, bay or decorative eleme
   assert.match(player, /#playerTrack \{[^}]*bottom: 35px;/)
 })
 
-test('Phase 7B rules compile through Tailwind under the LLAMA root only; Dark, Black and Light get nothing', async () => {
+test('Phase 7B rules compile through Tailwind under the LLAMA root only (E-ink draws its own line); Dark, Black and Light get nothing', async () => {
   const postcss = require('postcss')
   const tailwind = require('tailwindcss')
   const config = require('../tailwind.config.js')
@@ -1963,7 +1965,7 @@ test('Phase 7B rules compile through Tailwind under the LLAMA root only; Dark, B
   const { css } = await postcss([tailwind({ ...config, content })]).process(source, { from: undefined })
   const root = "html[data-theme='llama']"
   for (const m of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)) {
-    for (const selector of m[1].split(',')) if (selector.includes('#streamContainer:not(.fullscreen)')) assert.ok(selector.trim().startsWith(`${root} `), selector.trim())
+    for (const selector of m[1].split(',')) if (selector.includes('#streamContainer:not(.fullscreen)')) assert.ok(selector.trim().startsWith(`${root} `) || selector.trim().startsWith(`${EINK_ROOT} `), selector.trim())
   }
   const block = (selector) => {
     const i = css.indexOf(`${selector} {`)
@@ -2120,7 +2122,7 @@ test('Faithful pass browsing chrome: steel app bar plate, glass library display,
   assert.ok(!Object.keys(rules).some((s) => /bg-success(?!-action)/.test(s)))
 })
 
-test('Phase 8B rules compile through Tailwind under the LLAMA root only', async () => {
+test('Phase 8B rules compile through Tailwind under the LLAMA root only (E-ink draws its own lines)', async () => {
   const postcss = require('postcss')
   const tailwind = require('tailwindcss')
   const config = require('../tailwind.config.js')
@@ -2129,7 +2131,7 @@ test('Phase 8B rules compile through Tailwind under the LLAMA root only', async 
   const { css } = await postcss([tailwind({ ...config, content })]).process(source, { from: undefined })
   const root = "html[data-theme='llama']"
   for (const m of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)) {
-    for (const selector of m[1].split(',')) if (HOOKS_8B.test(selector) || selector.includes('#bookshelf-navbar')) assert.ok(selector.trim().startsWith(`${root} `), selector.trim())
+    for (const selector of m[1].split(',')) if (HOOKS_8B.test(selector) || selector.includes('#bookshelf-navbar')) assert.ok(selector.trim().startsWith(`${root} `) || selector.trim().startsWith(`${EINK_ROOT} `), selector.trim())
   }
   const block = (selector) => {
     const i = css.indexOf(`${selector} {`)
