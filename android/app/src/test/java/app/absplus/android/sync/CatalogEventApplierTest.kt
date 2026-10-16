@@ -406,7 +406,11 @@ class CatalogEventApplierTest {
     assertEquals(setOf("playlists:lib1", "library:lib1"), topics.toSet())
     topics.clear()
     assertEquals("an unknown playlist", CatalogEventResult.IGNORED, apply("playlist_removed", json("""{"id":"pl1","libraryId":"lib1"}""")))
-    assertTrue(topics.isEmpty())
+    assertEquals("a page that read it from the server leaves", setOf("playlists:lib1"), topics.toSet())
+    topics.clear()
+    apply("playlist_removed", json("""{"id":"pl1","libraryId":"nowhere"}"""))
+    apply("playlist_removed", json("""{"id":"pl1"}"""))
+    assertTrue("no library, no notice", topics.isEmpty())
     assertTrue(CATALOG_EVENTS.containsAll(listOf("playlist_added", "playlist_updated", "playlist_removed")))
   }
 }

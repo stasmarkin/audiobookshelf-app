@@ -1176,8 +1176,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         // Without an active server there is nothing to wait for: the start fails as before
         val queued = ActiveServer.current()?.let { queueItemToAwait(request, plan, playlistQueue, playlistQueueIndex, ServerReachability.state.value) }
         if (queued != null) {
-          awaitQueueStart(ticket, queued)
-          onResult(StartResult.AwaitingServer)
+          onResult(if (awaitQueueStart(ticket, queued)) StartResult.AwaitingServer else StartResult.Replaced)
           return@launch
         }
         val payload = getPlayItemRequestPayload(false)
@@ -1201,10 +1200,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
   }
 
-  /** The app started the queue on an item it cannot stream now: what plays stops, the queue waits on the item. */
-  private fun awaitQueueStart(ticket: StartGate.Ticket, item: PlaylistQueueItem) {
+  /**
+   * The app started the queue on an item it cannot stream now: what plays stops, the queue waits on the item. False
+   * when another start, Close or a server switch replaced this one.
+   */
+  private fun awaitQueueStart(ticket: StartGate.Ticket, item: PlaylistQueueItem): Boolean {
     // Read before the pause below, which would turn the intent of this start into a paused one
-    val playWhenReady = startGate.admit(ticket) ?: return
+    val playWhenReady = startGate.admit(ticket) ?: return false
     if (currentPlayer.playWhenReady) {
       pauseOrigin.beforeSelfPause(true)
       currentPlayer.pause()
@@ -1214,6 +1216,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     PlayerListener.lazyIsPlaying = false
     clientEventEmitter?.onPlayingUpdate(false)
     blockQueue(item, playWhenReady)
+    return true
   }
 
   private fun prepareAdmitted(ticket: StartGate.Ticket, session: PlaybackSession, request: StartRequest) {

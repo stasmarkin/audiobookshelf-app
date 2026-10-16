@@ -290,16 +290,24 @@ class AwaitingServerTest {
 
   @Test fun queueStartOnAnUndownloadedBookOfflineWaitsForTheServer() {
     val queue = listOf(PlaylistQueueItem("li0", null), PlaylistQueueItem("li1", null, expectedTracks = 3), PlaylistQueueItem("pod", "ep1"))
-    for (state in listOf(ServerState.OFFLINE, ServerState.UNKNOWN, ServerState.UNAUTHORIZED)) {
+    for (state in listOf(ServerState.OFFLINE, ServerState.UNKNOWN)) {
       assertEquals("$state: the queue waits on the item it starts", queue[1], queueStart(PlaybackSource.Stream("li1", null), queue, 1, state))
     }
     assertEquals("an episode too", queue[2], queueStart(PlaybackSource.Stream("pod", "ep1"), queue, 2, ServerState.OFFLINE))
     // As before
     assertNull("online it streams", queueStart(PlaybackSource.Stream("li1", null), queue, 1, ServerState.ONLINE))
+    assertNull("a refused sign-in fails as before", queueStart(PlaybackSource.Stream("li1", null), queue, 1, ServerState.UNAUTHORIZED))
     assertNull("a single Play outside the queue", queueStart(PlaybackSource.Stream("li1", null), emptyList(), -1, ServerState.OFFLINE))
     assertNull("an item the queue is not at", queueStart(PlaybackSource.Stream("li1", null), queue, 0, ServerState.OFFLINE))
     assertNull("another episode of the podcast", queueStart(PlaybackSource.Stream("pod", "ep2"), queue, 2, ServerState.OFFLINE))
     assertNull("a cast start", queueStart(PlaybackSource.Stream("li1", null), queue, 1, ServerState.OFFLINE, forceStream = true))
     assertNull("a downloaded copy plays", queueItemToAwait(StartRequest("li0", null, playWhenReady = true), PlaybackSource.NotFound("x"), queue, 0, ServerState.OFFLINE))
+  }
+
+  /** runStart is not unit-tested (a service); its source shows a replaced start is not reported as waiting. */
+  @Test fun aReplacedQueueStartIsNotReportedAsWaiting() {
+    val source = java.io.File("src/main/java/app/absplus/android/player/PlayerNotificationService.kt").readText()
+    assertTrue(source.contains("onResult(if (awaitQueueStart(ticket, queued)) StartResult.AwaitingServer else StartResult.Replaced)"))
+    assertTrue(Regex("""private fun awaitQueueStart\(ticket: StartGate.Ticket, item: PlaylistQueueItem\): Boolean \{[^}]*startGate.admit\(ticket\) \?: return false""").containsMatchIn(source))
   }
 }

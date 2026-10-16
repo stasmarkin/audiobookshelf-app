@@ -296,7 +296,13 @@ class CatalogEventApplier(
 
   private suspend fun removePlaylist(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
     val id = payload.text("id") ?: return CatalogEventResult.IGNORED
-    val old = db.playlists().get(sc, id) ?: return CatalogEventResult.IGNORED
+    val old = db.playlists().get(sc, id)
+    if (old == null) {
+      // Not in the replica yet (made since the last pass): a page that read it from the server still has to leave
+      val libraryId = payload.text("libraryId")
+      if (libraryId != null && db.libraries().get(sc, libraryId) != null) topics += "playlists:$libraryId"
+      return CatalogEventResult.IGNORED
+    }
     db.playlists().deleteByIds(sc, listOf(id))
     topics += "playlists:${old.libraryId}"
     topics += "library:${old.libraryId}"

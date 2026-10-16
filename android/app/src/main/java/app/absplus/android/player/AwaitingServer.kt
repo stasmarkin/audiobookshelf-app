@@ -60,10 +60,11 @@ sealed interface AwaitingAction {
 /**
  * A start of the item the queue is at that could only stream while the server is away: the queue waits on it, as when
  * it reaches that item by itself, instead of failing the start and losing the queue. Null: start as usual (a single
- * Play outside the queue, a downloaded copy, a cast start, the server online).
+ * Play outside the queue, a downloaded copy, a cast start, the server online or refusing the sign-in).
  */
 fun queueItemToAwait(request: StartRequest, plan: PlaybackSource, queue: List<PlaylistQueueItem>, index: Int, state: ServerState): PlaylistQueueItem? {
-  if (plan !is PlaybackSource.Stream || request.forceStream || state == ServerState.ONLINE) return null
+  // A server that refuses the sign-in answers: the start fails as before and the user signs in again
+  if (plan !is PlaybackSource.Stream || request.forceStream || state == ServerState.ONLINE || state == ServerState.UNAUTHORIZED) return null
   val item = queue.getOrNull(index) ?: return null
   return item.takeIf { it.libraryItemId == plan.libraryItemId && it.episodeId.orEmpty() == plan.episodeId.orEmpty() }
 }
