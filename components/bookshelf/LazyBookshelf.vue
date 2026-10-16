@@ -1,7 +1,8 @@
 <template>
-  <div id="bookshelf" class="w-full max-w-full h-full">
-    <!-- Before the rows, sticky over the first one: its negative margin keeps the rows where the scroll maths expect them -->
-    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px; margin-bottom: -24px">{{ $strings.MessageCatalogPartial }}</div>
+  <!-- As tall as its rows (at least the view): the sticky note stays pinned over all of them, not only the first screen -->
+  <div id="bookshelf" class="w-full max-w-full min-h-full">
+    <!-- Before the rows, pinned at the top; the rows start below it (shelfScrollTop) -->
+    <div v-if="showCatalogPartial" class="catalog-partial sticky top-0 z-40 w-full px-3 text-center text-xs text-warning bg-bg/90" style="height: 24px; line-height: 24px">{{ $strings.MessageCatalogPartial }}</div>
     <template v-for="shelf in totalShelves">
       <div :key="shelf" class="w-full px-2 relative" :class="showBookshelfListView || altViewEnabled ? '' : 'bookshelfRow'" :id="`shelf-${shelf - 1}`" :style="{ height: shelfHeight + 'px' }">
         <div v-if="!showBookshelfListView && !altViewEnabled" class="w-full absolute bottom-0 left-0 z-30 bookshelfDivider" style="min-height: 16px" :class="`h-${shelfDividerHeightIndex}`" />
@@ -27,6 +28,8 @@ import { createPageRetry } from '@/utils/pageRetry'
 import { textScale } from '@/utils/textScale'
 import { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
 
+/** The height of the "catalog partially downloaded" note above the rows. */
+const CATALOG_PARTIAL_HEIGHT = 24
 /** Reads from the bridge are capped at 100 entities a call. */
 const MAX_PAGE_SIZE = 100
 /** Each collection or playlist brings up to 4 items for its cover: 20 of them stay within 100 items. */
@@ -336,8 +339,13 @@ export default {
         }
       }
     },
-    handleScroll(scrollTop) {
-      this.currScrollTop = scrollTop
+    /** The scroll position over the rows: the partial note above them shifts them down. */
+    shelfScrollTop(scrollTop) {
+      return Math.max(0, scrollTop - (this.showCatalogPartial ? CATALOG_PARTIAL_HEIGHT : 0))
+    },
+    handleScroll(wrapperScrollTop) {
+      this.currScrollTop = wrapperScrollTop
+      const scrollTop = this.shelfScrollTop(wrapperScrollTop)
       var firstShelfIndex = Math.floor(scrollTop / this.shelfHeight)
       var lastShelfIndex = Math.ceil((scrollTop + this.bookshelfHeight) / this.shelfHeight)
       lastShelfIndex = Math.min(this.totalShelves - 1, lastShelfIndex)

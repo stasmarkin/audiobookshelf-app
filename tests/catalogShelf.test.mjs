@@ -524,7 +524,15 @@ test('a library whose reconcile did not finish says so while offline', async () 
   assert.match(template, /v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}/)
   // Sticky only lifts it within its place in the flow: it has to come before the rows to show at the top
   assert.ok(template.indexOf('class="catalog-partial') < template.indexOf('<template v-for="shelf in totalShelves">'), 'the note precedes the rows')
-  assert.match(template, /class="catalog-partial sticky top-0[^"]*"[^>]*style="height: 24px; line-height: 24px; margin-bottom: -24px"/)
+  // Pinned over every row, not only the first screen, and over none of the cards
+  assert.match(template, /class="catalog-partial sticky top-0[^"]*"[^>]*style="height: 24px; line-height: 24px">/)
+  assert.match(template, /<div id="bookshelf" class="w-full max-w-full min-h-full">/, 'the sticky box spans all rows (h-full ended it after one screen)')
+  const shelf = await bookshelf({ answer: { results: [{ id: 'a' }], total: 500, replica: { reconciledAt: 9, complete: false } } })
+  shelf.store.state.serverState = 'offline'
+  await shelf.view.init()
+  assert.deepEqual([0, 10, 24, 324].map((top) => shelf.view.shelfScrollTop(top)), [0, 0, 0, 300], 'the rows start below the note')
+  shelf.store.state.serverState = 'online'
+  assert.equal(shelf.view.shelfScrollTop(324), 324)
 })
 
 test('no book count over "the catalog isn\'t downloaded yet"', async () => {

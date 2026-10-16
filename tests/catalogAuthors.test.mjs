@@ -317,8 +317,7 @@ test('a partly read authors list says so while offline, like the Library tab', a
   const shelf = await read('../components/bookshelf/LazyBookshelf.vue')
   const note = (text) => text.match(/<div v-if="showCatalogPartial"[^>]*>\{\{ \$strings\.MessageCatalogPartial \}\}<\/div>/)?.[0]
   assert.ok(note(source), 'the note is there')
-  const withoutOverlap = (markup) => markup.replace(/; margin-bottom: -24px/, '')
-  assert.equal(note(source), withoutOverlap(note(shelf)), "the Library tab's note, without the overlap its fixed-height rows allow")
+  assert.equal(note(source), note(shelf), "the Library tab's note, pinned the same way")
   // #bookshelf-wrapper of the parent page scrolls; an overflow container in between would carry the sticky note away
   const template = source.match(/<template>([\s\S]*)<\/template>/)[1]
   const scroller = template.indexOf('<div id="bookshelf"')
