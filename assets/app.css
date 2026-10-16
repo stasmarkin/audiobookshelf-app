@@ -171,3 +171,35 @@ Bookshelf Label
   padding: 4px 8px;
   font-size: 0.75rem;
 }
+
+/* Selected-option marks (sort direction, multi-select check) are Tailwind yellow, chosen for dark surfaces, where they
+   stand out; on a light surface they are about 1.3:1. Light-based themes (Light, and RICE themes built on it) draw them in
+   the theme's text color. E-ink maps them to ink in its own recipe; dark-based themes are unchanged. */
+html[data-theme='light'] .selection-mark {
+  color: rgb(var(--color-fg));
+}
+
+/* System "remove animations" (Android animator scale 0, e.g. e-ink devices). Near-zero rather than none, so code waiting
+   for transitionend/animationend (Vue transitions) still completes. Kept: loading spinners (a stopped one reads as a hang)
+   and the toast timer bar, whose animationend is what closes the toast */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+  /* Its own rule: a WebView without complex :not() (before Chromium 88) drops only this one */
+  *:not(.Vue-Toastification__progress-bar):not(.animate-spin):not(.la-ball-spin-clockwise > div):not(.loader-dots > div) {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -173,7 +173,17 @@ data class DeviceSettings(
         var streamingUsingCellular: StreamingUsingCellularSetting,
         var androidAutoBrowseLimitForGrouping: Int,
         var androidAutoBrowseSeriesSequenceOrder: AndroidAutoBrowseSeriesSequenceOrderSetting,
-        var askBeforeStreamingIncomplete: Boolean = false
+        var askBeforeStreamingIncomplete: Boolean = false,
+        // Defaults cover JS payloads without these keys; Paper skips the constructor, see DeviceManager backfill
+        var autoDownloadEnabled: Boolean = false,
+        var autoDownloadAllPodcasts: Boolean = false,
+        var autoDownloadKeepCount: Int = 3,
+        var autoDownloadWifiOnly: Boolean = true,
+        var autoDownloadChargingOnly: Boolean = false,
+        var autoDownloadIntervalHours: Int = 6,
+        var downloadStorage: String = "internal",
+        // Nullable for old Paper records, which bypass Kotlin constructor defaults.
+        var externalMediaNavigation: String? = "time"
 ) {
   companion object {
     // Static method to get default device settings
@@ -203,7 +213,14 @@ data class DeviceSettings(
               streamingUsingCellular = StreamingUsingCellularSetting.ALWAYS,
               androidAutoBrowseLimitForGrouping = 100,
               androidAutoBrowseSeriesSequenceOrder = AndroidAutoBrowseSeriesSequenceOrderSetting.ASC,
-              askBeforeStreamingIncomplete = false
+              askBeforeStreamingIncomplete = false,
+              autoDownloadEnabled = false,
+              autoDownloadAllPodcasts = false,
+              autoDownloadKeepCount = 3,
+              autoDownloadWifiOnly = true,
+              autoDownloadChargingOnly = false,
+              autoDownloadIntervalHours = 6,
+              downloadStorage = "internal"
       )
     }
   }
@@ -245,7 +262,9 @@ data class DeviceData(
         var serverConnectionConfigs: MutableList<ServerConnectionConfig>,
         var lastServerConnectionConfigId: String?,
         var deviceSettings: DeviceSettings?,
-        var lastPlaybackSession: PlaybackSession?
+        var lastPlaybackSession: PlaybackSession?,
+        // Downloads may sit on a storage other than the chosen one until a reconcile pass moves them
+        var reconcileNeeded: Boolean = false
 ) {
   @JsonIgnore
   fun getLastServerConnectionConfig(): ServerConnectionConfig? {

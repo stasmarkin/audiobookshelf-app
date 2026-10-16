@@ -16,6 +16,22 @@ class AbsDownloaderWeb extends WebPlugin {
   async removeDownload() {
     return { errorCode: 'notFound' }
   }
+
+  async checkAutoDownloads() {
+    return { status: 'disabled' }
+  }
+
+  async getPodcastAutoDownload() {
+    return { enabled: 'DEFAULT', keepCount: null }
+  }
+
+  async setPodcastAutoDownload() {
+    return {}
+  }
+
+  async getAutoDownloadedEpisodes() {
+    return { episodeIds: [] }
+  }
 }
 
 const AbsDownloader = registerPlugin('AbsDownloader', {

@@ -1,0 +1,30 @@
+name: Documentation improvement
+description: Report unclear, missing, or incorrect Audiobookshelf+ documentation.
+title: '[Docs]: '
+labels: ['documentation', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make the documentation clearer.
+        Do not include tokens, passwords, private server URLs, or personal information.
+        Use [private reporting](https://github.com/ADD-OCD/audiobookshelfplus-app/security/advisories/new) for vulnerabilities, including sensitive documentation disclosures.
+  - type: input
+    id: affected-page
+    attributes:
+      label: Affected page or file
+      description: Provide a public documentation URL or repository path and section. For missing documentation, suggest where it belongs.
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+      description: Explain what is wrong or missing and suggest clearer wording or the information to add.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Supporting context (optional)
+      description: Relevant app version, public references, or a redacted screenshot.

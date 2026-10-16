@@ -1,16 +1,14 @@
 import { AbsDownloader } from '@/plugins/capacitor'
+import { appStorageDownloadFolder, isAppStorageFolderId, safFoldersFor } from '@/utils/appStorage'
 
-// Auto-resolves a download folder for the given media type without ever blocking on a
-// folder-picker modal, for use by quick-action flows (Download & Play) where speed matters
-// more than folder choice - the user can still use the existing explicit download flows if
-// they want control over which folder is used.
+// Never shows the folder picker, so quick actions (Download & Play) stay fast: a lone SAF folder
+// without app storage alongside is the only unambiguous choice, anything else lets native decide.
 export async function resolveDownloadFolder(context, mediaType) {
-  const localFolders = (await context.$db.getLocalFolders()) || []
-  const foldersWithMediaType = localFolders.filter((lf) => lf.mediaType == mediaType)
-  if (foldersWithMediaType.length === 1) return foldersWithMediaType[0]
-  // Zero folders configured, or more than one ambiguous choice - default to internal storage
-  // (native creates it automatically if it doesn't exist yet).
-  return { id: `internal-${mediaType}`, mediaType }
+  const folders = (await context.$db.getLocalFolders()) || []
+  const saf = safFoldersFor(folders, mediaType)
+  const hasAppStorage = folders.some((f) => f && f.mediaType == mediaType && isAppStorageFolderId(f.id))
+  if (saf.length === 1 && !hasAppStorage) return saf[0]
+  return appStorageDownloadFolder(mediaType, '')
 }
 
 // Downloads whichever of the given (already sequence-ordered) queue items don't have a local

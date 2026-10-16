@@ -1,85 +1,77 @@
-name: 🐞 Audiobookshelf+ Bug Report
-description: File a bug in the Audiobookshelf+ Android app.
+name: Bug report
+description: Report a problem in the Audiobookshelf+ Android app.
 title: '[Bug]: '
-labels: ['bug', 'triage']
+labels: ['bug', 'android', 'needs-triage']
 body:
   - type: markdown
     attributes:
-      value: '## App Bug Description'
-  - type: markdown
-    attributes:
-      value: 'Thank you for filing a bug report! 🐛'
-  - type: markdown
-    attributes:
-      value: 'Audiobookshelf+ is an unofficial Android app. Ask questions in this repository''s [Discussions](https://github.com/ADD-OCD/audiobookshelfplus-app/discussions); report problems with the Audiobookshelf server itself to the [official project](https://github.com/advplyr/audiobookshelf).'
-  - type: textarea
-    id: what-happened
-    attributes:
-      label: What was the Problem?
-      description: Please help us understand the problem.
-      placeholder: Describe the problem you saw or experienced in detail! Include a screenshot or video, if applicable.
-    validations:
-      required: true
-  - type: textarea
-    id: steps-to-reproduce
-    attributes:
-      label: Steps to Reproduce the Issue
-      description: Please help us understand how we can reliably reproduce the issue.
-      placeholder: '1. Go to the library page of a Podcast library and...'
-    validations:
-      required: true
-  - type: textarea
-    id: what-was-expected
-    attributes:
-      label: What was Expected?
-      description: Please help us understand what should have happened.
-      placeholder: Please help us visualize by including a doodle or screenshot.
-    validations:
-      required: true
-  - type: markdown
-    attributes:
-      value: '## Mobile Environment'
+      value: |
+        Thanks for helping improve Audiobookshelf+! Search existing Issues first.
+        For questions, use [Discussions](https://github.com/ADD-OCD/audiobookshelfplus-app/discussions).
+        Server-only problems belong in the [upstream server project](https://github.com/advplyr/audiobookshelf).
+
+        **Security vulnerabilities:** use [private reporting](https://github.com/ADD-OCD/audiobookshelfplus-app/security/advisories/new), not a public Issue.
+        **Before sharing logs or screenshots, remove tokens, passwords, private server URLs, and personal information.** Check exported diagnostics yourself even if they appear sanitized.
   - type: input
-    id: phone-model
-    attributes:
-      label: Phone Model
-      description: What kind of phone are you using?
-      placeholder: e.g. Samsung Galaxy S26 Ultra, Pixel 9, etc
-    validations:
-      required: true
-  - type: input
-    id: phone-os
-    attributes:
-      label: Android Version
-      description: Which Android version? Is it stock or a custom system?
-      placeholder: e.g. Android 16 (One UI 8), etc
-    validations:
-      required: true
-  - type: dropdown
     id: app-version
     attributes:
-      label: Audiobookshelf+ Version
-      description: Shown at the bottom of the side drawer. Please make sure you are on the latest release.
-      multiple: false
-      options:
-        - '0.14.2-beta (129)'
-        - 'Other (list in "Additional Notes")'
+      label: Installed Audiobookshelf+ version
+      description: Include the Audiobookshelf+ version and build number if available, not just the upstream version. If unavailable, say so.
+      placeholder: e.g. Audiobookshelf+ 0.18.2, versionCode 136
     validations:
       required: true
-  - type: dropdown
-    id: install-source
+  - type: input
+    id: android-version
     attributes:
-      label: Installation Source
-      multiple: true
+      label: Android version
+      placeholder: e.g. Android 16 / One UI 8, or custom ROM
+  - type: input
+    id: device-model
+    attributes:
+      label: Device model
+      placeholder: e.g. Samsung Galaxy S22 Ultra or Pixel 9
+  - type: dropdown
+    id: media-source
+    attributes:
+      label: Downloaded or streamed media?
       options:
-        - 'GitHub Releases'
-        - 'Built from source'
-        - 'Other (List in "Additional Notes")'
+        - Downloaded media / offline playback
+        - Streamed media
+        - Both downloaded and streamed media
+        - Not related to media playback
+        - Not sure
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
     validations:
       required: true
   - type: textarea
-    id: additional-notes
+    id: actual-behavior
     attributes:
-      label: Additional Notes
-      description: Anything else you want to add?
-      placeholder: 'e.g. I have tried X, Y, and Z.'
+      label: Actual behavior
+      description: What happened instead? Include error text with private information removed.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Reproduction steps
+      description: Number the steps. If intermittent, describe what you know and how often it happens.
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant logs or screenshots (optional)
+      description: Paste a minimal sanitized excerpt or attach a redacted screenshot. Never include tokens, passwords, private server URLs, or personal information.
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context (optional)
+      description: Installation source, server version, audiobook or podcast, workarounds, and whether this worked in an earlier version.

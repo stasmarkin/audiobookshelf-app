@@ -45,7 +45,7 @@ test('every built-in theme satisfies the schema with no fallbacks', () => {
   assert.deepEqual(engine.BUILTIN_ERRORS, [])
   assert.deepEqual(
     engine.THEMES.map((t) => t.id),
-    ['black', 'dark', 'light', 'llama']
+    ['black', 'dark', 'light', 'llama', 'eink']
   )
   for (const theme of engine.THEMES) {
     for (const name of TOKEN_NAMES) assert.notEqual(theme.tokens[name], undefined, `${theme.id} ${name}`)
@@ -350,7 +350,7 @@ test('the status-bar icon style follows the theme token; web never touches the n
   assert.equal(web.service.id, 'black')
 })
 
-test('the Settings options list comes from the registry in the original order and labels, with LLAMA last', async () => {
+test('the Settings options list comes from the registry in the original order and labels, then LLAMA and E-ink', async () => {
   const { service } = await loadThemePlugin()
   assert.deepEqual(
     service.themes.map((t) => [t.id, t.labelKey]),
@@ -358,7 +358,8 @@ test('the Settings options list comes from the registry in the original order an
       ['black', 'LabelThemeBlack'],
       ['dark', 'LabelThemeDark'],
       ['light', 'LabelThemeLight'],
-      ['llama', 'LabelThemeLlama']
+      ['llama', 'LabelThemeLlama'],
+      ['eink', 'LabelThemeEink']
     ]
   )
   const strings = JSON.parse(await read('../strings/en-us.json'))
@@ -381,10 +382,16 @@ test('Gate H: success buttons use state.success-action, which carries white text
   const white = [255, 255, 255]
   for (const theme of engine.THEMES) {
     const t = theme.tokens
-    // state.success keeps its pre-token value for indicators; the action fill is separate
-    assert.deepEqual(t['state.success'], [76, 175, 80], theme.id)
-    assert.deepEqual(t['state.success-action'], [46, 125, 50], theme.id)
-    assert.ok(contrastRatio(white, t['state.success']) < 4.5, 'state.success alone is not a white-text fill')
+    if (t['presentation.finish'] === 'eink') {
+      // E-ink: every state is ink (states read by icon and label on e-paper), and ink carries white text
+      assert.deepEqual(t['state.success'], [0, 0, 0], theme.id)
+      assert.deepEqual(t['state.success-action'], [0, 0, 0], theme.id)
+    } else {
+      // state.success keeps its pre-token value for indicators; the action fill is separate
+      assert.deepEqual(t['state.success'], [76, 175, 80], theme.id)
+      assert.deepEqual(t['state.success-action'], [46, 125, 50], theme.id)
+      assert.ok(contrastRatio(white, t['state.success']) < 4.5, 'state.success alone is not a white-text fill')
+    }
     assert.ok(contrastRatio(white, t['state.success-action']) >= 4.5, `${theme.id} white on success-action`)
     if (t['presentation.finish'] === 'equipment') {
       // Brightest point of the steel sheen on .btn: edge-light at 18% over the fill

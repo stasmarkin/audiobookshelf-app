@@ -117,10 +117,10 @@ class RiceAppearanceTest {
 
   // --- Store reader (envelopes written the way theme/rice/store.js writes them) ---
 
-  private fun envelope(riceEnabled: Boolean, selection: JSONObject, widget: Any?, revision: Long = 3, schemaVersion: Int = 1) =
+  private fun envelope(riceEnabled: Boolean, selection: JSONObject, widget: Any?, revision: Long = 3, schemaVersion: Int = 1, lastBuiltin: String = "black") =
     JSONObject()
       .put("format", "absplus-rice-store").put("schemaVersion", schemaVersion).put("revision", revision).put("riceEnabled", riceEnabled)
-      .put("lastBuiltin", "black").put("selection", selection).put("rememberedRiceSelection", JSONObject.NULL).put("presets", JSONArray())
+      .put("lastBuiltin", lastBuiltin).put("selection", selection).put("rememberedRiceSelection", JSONObject.NULL).put("presets", JSONArray())
       .put("widget", widget ?: JSONObject.NULL).toString()
 
   private fun colors() = JSONObject().apply { for ((i, role) in listOf("background", "surface", "text", "muted", "icon", "track", "played").withIndex()) put(role, JSONArray(listOf(i, i + 10, i + 20))) }
@@ -168,6 +168,15 @@ class RiceAppearanceTest {
   fun theEnvelopeSelectionIsAuthoritativeOverTheLegacyKeyOnceRiceWasUsed() {
     save(envelope(false, JSONObject().put("kind", "builtin").put("id", "light"), null))
     assertEquals(AppearanceSnapshotReader.Committed.Builtin("light"), AppearanceSnapshotReader.read(ctx))
+    assertEquals(WidgetTheme.STANDARD, WidgetTheme.current(ctx))
+  }
+
+  @Test
+  fun eInkIsAValidBuiltInBeforeAndAfterRiceWasUsedAndKeepsTheStandardWidget() {
+    ctx.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE).edit().putString("theme", "eink").commit()
+    assertEquals(AppearanceSnapshotReader.Committed.Builtin("eink"), AppearanceSnapshotReader.read(ctx))
+    save(envelope(false, JSONObject().put("kind", "builtin").put("id", "eink"), null, lastBuiltin = "eink"))
+    assertEquals(AppearanceSnapshotReader.Committed.Builtin("eink"), AppearanceSnapshotReader.read(ctx))
     assertEquals(WidgetTheme.STANDARD, WidgetTheme.current(ctx))
   }
 
