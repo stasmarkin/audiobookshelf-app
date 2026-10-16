@@ -2,6 +2,9 @@ package app.absplus.android.sync
 
 import app.absplus.android.db.replica.AuthorEntity
 import app.absplus.android.db.replica.CollectionEntity
+import app.absplus.android.db.replica.DetailLevel
+import app.absplus.android.db.replica.EpisodeEntity
+import app.absplus.android.db.replica.IdExpanded
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryItemEntity
 import app.absplus.android.db.replica.PlaylistEntity
@@ -14,6 +17,16 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.security.MessageDigest
+import java.text.Normalizer
+import java.util.Locale
+
+/**
+ * Prefix of every [CatalogJson.searchKey]: a row with another prefix is out of date and recomputed when searched, so a
+ * change of [CatalogJson.normalizeForSearch] bumps this instead of migrating.
+ */
+const val SEARCH_KEY_VERSION = "1"
+/** Joins the parts of a search key; [CatalogJson.normalizeForSearch] removes it from queries, so no match spans two parts. */
+const val SEARCH_KEY_SEPARATOR = "\u0001"
 
 /** How `seriesName` of a minified book maps onto known series. */
 sealed interface SeriesNameParse {
@@ -113,6 +126,73 @@ object CatalogJson {
 
   private fun JsonNode.text(key: String): String? = get(key)?.takeIf { !it.isNull }?.asText()
 
+  private val COMBINING_MARKS = Regex("\\p{M}+")
+  private val CONTROLS = Regex("\\p{Cc}")
+  private val SPACES = Regex("\\s+")
+
+  /** Case and diacritics folded (`Ёлка` = `елка`, `Café` = `cafe`), control characters as spaces, spaces collapsed. */
+  fun normalizeForSearch(s: String): String =
+          Normalizer.normalize(s, Normalizer.Form.NFKD).replace(COMBINING_MARKS, "").lowercase(Locale.ROOT)
+                  .replace(CONTROLS, " ").replace(SPACES, " ").trim()
+
+  private fun searchKeyOf(parts: List<String?>): String =
+          (listOf(SEARCH_KEY_VERSION) + parts.mapNotNull { it?.let(::normalizeForSearch)?.takeIf(String::isNotEmpty) })
+                  .joinToString(SEARCH_KEY_SEPARATOR)
+
+  /**
+   * What the server's item search matches: a book's title, subtitle, asin and isbn; a podcast's title, author and
+   * iTunes ids. Absent and null fields are left out, so a query "null" finds nothing.
+   */
+  fun searchKey(minified: JsonNode): String {
+    val metadata = minified.path("media").path("metadata")
+    val keys = if (minified.path("mediaType").asText() == "podcast") listOf("title", "author", "itunesId", "itunesArtistId")
+    else listOf("title", "subtitle", "asin", "isbn")
+    return searchKeyOf(keys.map { metadata.text(it) })
+  }
+
+  fun episodeSearchKey(title: String): String = searchKeyOf(listOf(title))
+
+  private val UNSTORED_KEYS = listOf("userMediaProgress", "rssFeed", "mediaItemShare", "episodeDownloadsQueued", "episodesDownloading")
+
+  /** A copy of an expanded item fit for [LibraryItemEntity.expandedJson]: episodes live in their own table. */
+  fun expandedForStorage(item: JsonNode): ObjectNode {
+    val out = item.deepCopy<JsonNode>() as ObjectNode
+    out.remove(UNSTORED_KEYS)
+    if (out.path("mediaType").asText() == "podcast") (out.get("media") as? ObjectNode)?.remove("episodes")
+    return out
+  }
+
+  /** The episodes of an expanded podcast; null when the payload carries no `media.episodes` (they are not known). */
+  fun episodeEntities(serverConfigId: String, libraryId: String, podcastExpanded: JsonNode): List<EpisodeEntity>? {
+    val list = podcastExpanded.path("media").path("episodes").takeIf { it.isArray } ?: return null
+    val podcastId = podcastExpanded.path("id").asText()
+    return list.mapNotNull { episode ->
+      val id = episode.text("id")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+      val title = episode.text("title") ?: ""
+      EpisodeEntity(
+              serverConfigId = serverConfigId,
+              id = id,
+              libraryItemId = podcastId,
+              libraryId = libraryId,
+              title = title,
+              searchKey = episodeSearchKey(title),
+              publishedAt = episode.get("publishedAt")?.takeIf { it.isNumber }?.asLong(),
+              addedAt = episode.path("addedAt").asLong(0),
+              index = episode.get("index")?.takeIf { it.isNumber }?.asInt(),
+              json = mapper.writeValueAsString(episode))
+    }
+  }
+
+  /**
+   * A row rewritten from a minified answer keeps the expanded copy it had: as is for the same `updatedAt` (only the
+   * feed or a joined name changed), as [DetailLevel.STALE] for another one, so a podcast is asked for its episodes again.
+   */
+  fun carryExpanded(fresh: LibraryItemEntity, old: IdExpanded?): LibraryItemEntity = when {
+    old == null || old.detailLevel == DetailLevel.MINIFIED -> fresh
+    old.updatedAt == fresh.updatedAt -> fresh.copy(detailLevel = old.detailLevel, expandedJson = old.expandedJson)
+    else -> fresh.copy(detailLevel = DetailLevel.STALE, expandedJson = old.expandedJson)
+  }
+
   fun itemEntity(serverConfigId: String, item: JsonNode): LibraryItemEntity {
     val minified = minifyItem(item)
     val media = minified.path("media")
@@ -150,7 +230,8 @@ object CatalogJson {
             isMissing = minified.path("isMissing").asBoolean(false),
             isInvalid = minified.path("isInvalid").asBoolean(false),
             rssFeedJson = feed?.let { mapper.writeValueAsString(it) },
-            json = mapper.writeValueAsString(minified))
+            json = mapper.writeValueAsString(minified),
+            searchKey = searchKey(minified))
   }
 
   private fun stringArray(node: JsonNode): String {

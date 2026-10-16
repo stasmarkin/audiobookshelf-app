@@ -1,5 +1,7 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.replica.DetailLevel
+import app.absplus.android.db.replica.IdExpanded
 import app.absplus.android.db.replica.PlaylistItemEntity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -190,5 +192,85 @@ class CatalogJsonTest {
     val book = CatalogJson.mapper.readTree("""{"id":"p","libraryId":"l","items":[{"libraryItemId":"b1","libraryItem":{"id":"b1"}},{"libraryItemId":""}]}""")
     val (_, bookItems) = CatalogJson.playlistEntity("srv", book, 0)
     assertEquals("a book has no episode; an entry without an item is dropped", listOf(PlaylistItemEntity("srv", "p", 0, "b1", "", null)), bookItems)
+  }
+
+  @Test
+  fun searchKeyFoldsCaseAndDiacritics() {
+    val cases = listOf("Книга" to "книга", "книга" to "книга", "Ёлка" to "елка", "Café" to "cafe", "ÆON" to "æon", "  a\tb " to "a b",
+            "x\u0001y" to "x y")
+    cases.forEach { (input, expected) -> assertEquals(input, expected, CatalogJson.normalizeForSearch(input)) }
+
+    val book = fixture("book-minified.json").deepCopy<JsonNode>() as ObjectNode
+    (book.path("media").path("metadata") as ObjectNode).put("subtitle", "Второй Том").put("asin", "B00X").put("isbn", "978-5")
+    val key = CatalogJson.searchKey(book)
+    assertTrue(key, key.startsWith("1\u0001"))
+    // NFKD splits й into и and a breve, so the query "второй" folds the same way
+    listOf("мир: начало", "второи том", "b00x", "978-5").forEach { assertTrue("$key has $it", key.contains(it)) }
+
+    val plain = CatalogJson.searchKey(fixture("book-minified.json"))
+    assertFalse("null parts are left out: $plain", plain.contains("null"))
+    assertEquals("1\u0001мир: начало", plain)
+    assertEquals(plain, CatalogJson.itemEntity("srv", fixture("book-minified.json")).searchKey)
+
+    val podcast = CatalogJson.searchKey(fixture("podcast-minified.json"))
+    assertEquals("1\u0001synthetic pod\u0001pod author", podcast)
+    assertEquals("1\u0001episode 1", CatalogJson.episodeSearchKey("Épisode 1"))
+  }
+
+  @Test
+  fun expandedForStorageDropsUserAndListExtras() {
+    val input = fixture("podcast-expanded.json").deepCopy<JsonNode>() as ObjectNode
+    input.putObject("userMediaProgress").put("id", "p")
+    input.putObject("rssFeed").put("id", "f")
+    input.putObject("mediaItemShare").put("id", "s")
+    input.putArray("episodeDownloadsQueued").addObject().put("id", "q")
+    input.putArray("episodesDownloading").addObject().put("id", "d")
+
+    val out = CatalogJson.expandedForStorage(input)
+
+    listOf("userMediaProgress", "rssFeed", "mediaItemShare", "episodeDownloadsQueued", "episodesDownloading").forEach {
+      assertFalse(it, out.has(it))
+    }
+    assertFalse(out.path("media").has("episodes"))
+    assertEquals("Synthetic Pod", out.path("media").path("metadata").path("title").asText())
+    assertTrue("the input is not changed", input.path("media").has("episodes"))
+
+    val book = CatalogJson.expandedForStorage(fixture("book-expanded.json"))
+    assertTrue(book.path("media").path("chapters").isArray)
+  }
+
+  @Test
+  fun episodeEntitiesFromExpandedPodcast() {
+    val podcast = fixture("podcast-expanded.json")
+    val episodes = CatalogJson.episodeEntities("srv", "lib9", podcast)!!
+    val source = podcast.path("media").path("episodes")
+    assertEquals(source.size(), episodes.size)
+    val first = episodes.first()
+    assertEquals(source[0].path("id").asText(), first.id)
+    assertEquals(podcast.path("id").asText(), first.libraryItemId)
+    assertEquals("lib9", first.libraryId)
+    assertEquals("Episode 1", first.title)
+    assertEquals("1\u0001episode 1", first.searchKey)
+    assertNull(first.publishedAt)
+    assertEquals(source[0].path("addedAt").asLong(), first.addedAt)
+    assertNull(first.index)
+    assertEquals(source[0].path("id").asText(), CatalogJson.mapper.readTree(first.json).path("id").asText())
+
+    val without = podcast.deepCopy<JsonNode>() as ObjectNode
+    (without.path("media") as ObjectNode).remove("episodes")
+    assertNull(CatalogJson.episodeEntities("srv", "lib9", without))
+  }
+
+  @Test
+  fun carryExpandedKeepsTheCopyOfTheSameVersion() {
+    val fresh = CatalogJson.itemEntity("srv", fixture("book-minified.json"))
+    assertEquals(fresh, CatalogJson.carryExpanded(fresh, null))
+    assertEquals(fresh, CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.MINIFIED, null)))
+    val same = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.EXPANDED, "{}"))
+    assertEquals(DetailLevel.EXPANDED to "{}", same.detailLevel to same.expandedJson)
+    val older = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt - 1, DetailLevel.EXPANDED, "{}"))
+    assertEquals(DetailLevel.STALE to "{}", older.detailLevel to older.expandedJson)
+    val stale = CatalogJson.carryExpanded(fresh, IdExpanded(fresh.id, fresh.updatedAt, DetailLevel.STALE, "{}"))
+    assertEquals(DetailLevel.STALE to "{}", stale.detailLevel to stale.expandedJson)
   }
 }

@@ -1,6 +1,7 @@
 package app.absplus.android.sync
 
 import androidx.room.withTransaction
+import app.absplus.android.db.replica.DetailLevel
 import app.absplus.android.db.replica.ReplicaDatabase
 import app.absplus.android.db.replica.SeriesEntity
 import com.fasterxml.jackson.databind.JsonNode
@@ -22,7 +23,8 @@ enum class CatalogEventResult { APPLIED, IGNORED, NEEDS_RECONCILE }
 
 /**
  * Applies the server's socket deltas to replica.db. An item payload older than the row (an event delayed behind a
- * reconcile page) is ignored; item payloads come without `rssFeed`, so the row keeps the feed it has.
+ * reconcile page) is ignored; item payloads come without `rssFeed`, so the row keeps the feed it has. Item payloads are
+ * expanded (`toOldJSONExpanded`): the row keeps that copy, and a podcast's episodes replace the stored ones.
  */
 class CatalogEventApplier(
         private val db: ReplicaDatabase,
@@ -82,8 +84,21 @@ class CatalogEventApplier(
       val item = payload.deepCopy<JsonNode>() as ObjectNode
       if (!item.has("rssFeed") && old?.rssFeedJson != null) item.set<JsonNode>("rssFeed", mapper.readTree(old.rssFeedJson))
       beforeItemWrite()
-      db.items().upsertAll(listOf(CatalogJson.itemEntity(sc, item)))
+      val entity = CatalogJson.itemEntity(sc, item)
+      val episodes = if (entity.mediaType == "podcast") CatalogJson.episodeEntities(sc, libraryId, item) else null
+      val row = when {
+        episodes != null -> entity.copy(detailLevel = DetailLevel.EXPANDED, expandedJson = CatalogJson.expandedForStorage(item).toString())
+        // Episodes unknown: marked explicitly, so the next reconcile reads them even at the same updatedAt
+        entity.mediaType == "podcast" -> entity.copy(detailLevel = DetailLevel.STALE, expandedJson = CatalogJson.expandedForStorage(item).toString())
+        isExpandedBook(item) -> entity.copy(detailLevel = DetailLevel.EXPANDED, expandedJson = CatalogJson.expandedForStorage(item).toString())
+        else -> CatalogJson.carryExpanded(entity, db.items().expandedOf(sc, listOf(id)).firstOrNull())
+      }
+      db.items().upsertAll(listOf(row))
       topics += "items:$libraryId"
+      if (episodes != null) {
+        db.episodes().replaceForPodcast(sc, id, episodes)
+        topics += "episodes:$libraryId"
+      }
       val series = item.path("media").path("metadata").path("series")
       if (item.path("mediaType").asText() == "book" && series.isArray) {
         val known = series.mapNotNull { s -> s.text("id")?.let { it to (s.text("name") ?: "") } }
@@ -103,6 +118,12 @@ class CatalogEventApplier(
       }
       CatalogEventResult.APPLIED
     }
+  }
+
+  /** A minified book (an older server's payload) has counts instead of `chapters`/`tracks` and is not an expanded copy. */
+  private fun isExpandedBook(item: JsonNode): Boolean {
+    val media = item.path("media")
+    return media.path("chapters").isArray || media.path("tracks").isArray || media.path("audioFiles").isArray
   }
 
   private suspend fun removeItem(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {

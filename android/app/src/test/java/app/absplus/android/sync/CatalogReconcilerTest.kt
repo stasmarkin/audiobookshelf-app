@@ -6,6 +6,7 @@ import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
 import app.absplus.android.db.member
 import app.absplus.android.db.replica.CollectionEntity
+import app.absplus.android.db.replica.DetailLevel
 import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.PlaylistEntity
 import app.absplus.android.db.replica.PlaylistItemEntity
@@ -292,6 +293,25 @@ class CatalogReconcilerTest {
     reconcile()
 
     assertTrue(runBlocking { db.items().get("srv", "b1") }!!.rssFeedJson!!.contains("feed1"))
+  }
+
+  @Test
+  fun reconcileKeepsExpandedOfUnchangedVersion() {
+    server.library("lib1")
+    val book = server.book("b1")
+    reconcile()
+    runBlocking { db.items().setExpanded("srv", "b1", 1L, DetailLevel.EXPANDED, "{\"x\":1}") }
+
+    book.rssFeedId = "feed1"
+    reconcile()
+    val sameVersion = runBlocking { db.items().get("srv", "b1") }!!
+    assertTrue("the row was rewritten", sameVersion.rssFeedJson!!.contains("feed1"))
+    assertEquals(DetailLevel.EXPANDED to "{\"x\":1}", sameVersion.detailLevel to sameVersion.expandedJson)
+
+    book.updatedAt = 2L
+    reconcile()
+    val newer = runBlocking { db.items().get("srv", "b1") }!!
+    assertEquals(DetailLevel.STALE to "{\"x\":1}", newer.detailLevel to newer.expandedJson)
   }
 
   @Test

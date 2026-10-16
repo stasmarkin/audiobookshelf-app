@@ -358,6 +358,8 @@ class CatalogReconciler(
     }
     if (changed.isEmpty()) return
     db.withTransaction {
+      val expanded = db.items().expandedOf(sc, changed.map { it.id }).associateBy { it.id }
+      val changed = changed.map { CatalogJson.carryExpanded(it, expanded[it.id]) }
       if (idsByName == null) {
         db.items().upsertAll(changed)
         return@withTransaction

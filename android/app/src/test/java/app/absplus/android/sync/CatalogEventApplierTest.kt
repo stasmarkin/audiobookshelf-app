@@ -6,6 +6,7 @@ import app.absplus.android.db.itemEntity
 import app.absplus.android.db.libraryRow
 import app.absplus.android.db.member
 import app.absplus.android.db.replica.CatalogFilter
+import app.absplus.android.db.replica.DetailLevel
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.SeriesIndex
 import app.absplus.android.db.replica.orderItems
@@ -152,6 +153,58 @@ class CatalogEventApplierTest {
   @Test
   fun backupAppliedAsksForReconcile() {
     assertEquals(CatalogEventResult.NEEDS_RECONCILE, apply("backup_applied", json("{}")))
+  }
+
+  private fun podcast(updatedAt: Long = 100, episodes: Int? = null): ObjectNode {
+    val node = mapper.readTree(javaClass.getResource("/catalog/podcast-item-updated.json")) as ObjectNode
+    node.put("id", "p1").put("libraryId", "lib1").put("updatedAt", updatedAt)
+    val media = node.path("media") as ObjectNode
+    val list = media.path("episodes") as com.fasterxml.jackson.databind.node.ArrayNode
+    if (episodes == null) return node
+    while (list.size() > episodes) list.remove(list.size() - 1)
+    return node
+  }
+
+  private fun episodeIds(podcastId: String) = runBlocking { db.episodes().forPodcast("srv", podcastId) }.map { it.id }
+
+  @Test
+  fun itemUpdatedStoresExpandedAndEpisodes() {
+    apply("item_updated", item("li1"))
+    val book = row("li1")!!
+    assertEquals(DetailLevel.EXPANDED, book.detailLevel)
+    assertTrue(mapper.readTree(book.expandedJson).path("media").path("chapters").isArray)
+
+    topics.clear()
+    val payload = podcast()
+    apply("item_updated", payload)
+    val all = payload.path("media").path("episodes").map { it.path("id").asText() }
+    assertEquals(3, all.size)
+    assertEquals(all.toSet(), episodeIds("p1").toSet())
+    assertEquals(DetailLevel.EXPANDED, row("p1")!!.detailLevel)
+    assertFalse("episodes are not kept twice", mapper.readTree(row("p1")!!.expandedJson).path("media").has("episodes"))
+    assertTrue(topics.containsAll(listOf("items:lib1", "episodes:lib1")))
+
+    apply("item_updated", podcast(updatedAt = 101, episodes = 2))
+    assertEquals(all.take(2).toSet(), episodeIds("p1").toSet())
+  }
+
+  @Test
+  fun podcastPayloadWithoutEpisodesMarksStale() {
+    apply("item_updated", podcast())
+    assertEquals(DetailLevel.EXPANDED, row("p1")!!.detailLevel)
+    val without = podcast()
+    (without.path("media") as ObjectNode).remove("episodes")
+
+    apply("item_updated", without)
+    assertEquals(DetailLevel.STALE, row("p1")!!.detailLevel)
+    assertTrue("episodes stay until a reconcile reads them", episodeIds("p1").isNotEmpty())
+    assertEquals(listOf("p1"), runBlocking { db.items().podcastsWithoutEpisodes("srv", "lib1") })
+
+    val fresh = podcast().put("id", "p2")
+    (fresh.path("media") as ObjectNode).remove("episodes")
+    apply("item_added", fresh)
+    assertEquals(DetailLevel.STALE, row("p2")!!.detailLevel)
+    assertEquals(setOf("p1", "p2"), runBlocking { db.items().podcastsWithoutEpisodes("srv", "lib1") }.toSet())
   }
 
   @Test
