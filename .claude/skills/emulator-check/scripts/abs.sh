@@ -10,7 +10,12 @@ reachable() { curl -fsS -m 3 "$ABS_HOST_URL/status" >/dev/null 2>&1; }
 
 # Colima's own port forwarder can silently fail to publish ports; tunnel through its SSH instead.
 ensure_host_port() {
-  for _ in $(seq 1 10); do reachable && return 0; sleep 1; done
+  # The first start initialises the database and can take a while.
+  for _ in $(seq 1 30); do reachable && return 0; sleep 1; done
+  if lsof -nP -i4TCP:"$ABS_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "Port $ABS_PORT is published but ABS does not answer; see 'docker logs $ABS_CONTAINER'" >&2
+    return 1
+  fi
   if [[ -f "$HOME/.colima/ssh_config" ]]; then
     echo "Port $ABS_PORT not published by Docker; opening SSH tunnel into colima" >&2
     ssh -F "$HOME/.colima/ssh_config" -o ExitOnForwardFailure=yes -f -N \
@@ -26,11 +31,11 @@ close_tunnel() { pkill -f "L 127.0.0.1:$ABS_PORT:127.0.0.1:$ABS_PORT colima" 2>/
 start_container() {
   mkdir -p "$STATE_DIR"/{config,metadata,audiobooks}
   if docker ps -a --format '{{.Names}}' | grep -qx "$ABS_CONTAINER"; then
-    # Containers from older versions of this script published the port on all interfaces or ran another image.
-    local binding image
-    binding="$(docker inspect -f '{{range (index .HostConfig.PortBindings "80/tcp")}}{{.HostIp}} {{end}}' "$ABS_CONTAINER")"
-    image="$(docker inspect -f '{{.Config.Image}}' "$ABS_CONTAINER")"
-    if [[ "$binding" == "127.0.0.1 " && "$image" == "$ABS_IMAGE" ]]; then
+    # Reuse only a container matching the current settings: older ones published on all interfaces, ran another
+    # image, or were created with another ABS_PORT / ABSPLUS_EMU_STATE. Data stays in the bind mounts either way.
+    local actual
+    actual="$(docker inspect -f '{{range (index .HostConfig.PortBindings "80/tcp")}}{{.HostIp}}:{{.HostPort}} {{end}}{{.Config.Image}} {{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' "$ABS_CONTAINER")"
+    if [[ "$actual" == "127.0.0.1:$ABS_PORT $ABS_IMAGE $STATE_DIR/config" ]]; then
       docker start "$ABS_CONTAINER" >/dev/null
       return 0
     fi
@@ -96,7 +101,7 @@ seed() {
 
   local count=0
   for _ in $(seq 1 30); do
-    count="$(api GET "/api/libraries/$lib_id/items?limit=0" | json 'j.total')"
+    count="$(api GET "/api/libraries/$lib_id/items?limit=0" 2>/dev/null | json 'j.total' 2>/dev/null || echo 0)"
     [[ "$count" -ge 3 ]] && break
     sleep 1
   done

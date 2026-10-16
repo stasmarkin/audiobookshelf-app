@@ -31,20 +31,22 @@ disable_mic() {
 }
 
 up() {
-  local serial
-  serial="$(stand_serial)"
-  if [[ -n "$serial" ]]; then echo "Emulator already running: $serial ($AVD_NAME)"; return 0; fi
-
-  ensure_avd
-  disable_mic
-  mkdir -p "$STATE_DIR"
-  local args=(-avd "$AVD_NAME" -no-boot-anim -no-snapshot-save -netdelay none -netspeed full)
-  [[ "${1:-}" == "--window" ]] || args+=(-no-window)
-  nohup "$EMULATOR" "${args[@]}" >"$STATE_DIR/emulator.log" 2>&1 &
-  local pid=$!
+  local serial pid=""
+  # An emulator that is already up may still be booting, so both paths wait for boot_completed.
+  # Early in boot adb lists it as offline or not at all; the process is what holds the AVD.
+  pid="$(pgrep -f -- "emulator.*-avd $AVD_NAME( |\$)" | head -1 || true)"
+  if [[ -z "$pid" && -z "$(stand_serial)" ]]; then
+    ensure_avd
+    disable_mic
+    mkdir -p "$STATE_DIR"
+    local args=(-avd "$AVD_NAME" -no-boot-anim -no-snapshot-save -netdelay none -netspeed full)
+    [[ "${1:-}" == "--window" ]] || args+=(-no-window)
+    nohup "$EMULATOR" "${args[@]}" >"$STATE_DIR/emulator.log" 2>&1 &
+    pid=$!
+  fi
 
   for _ in $(seq 1 180); do
-    kill -0 "$pid" 2>/dev/null || { echo "Emulator exited; see $STATE_DIR/emulator.log" >&2; exit 1; }
+    [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null || { echo "Emulator exited; see $STATE_DIR/emulator.log" >&2; exit 1; }
     serial="$(stand_serial)"
     [[ -n "$serial" && "$("$ADB" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]] && break
     serial=""

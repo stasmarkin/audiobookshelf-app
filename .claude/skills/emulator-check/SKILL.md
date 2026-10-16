@@ -86,5 +86,5 @@ The audio is silent, so playback makes no sound while the position still advance
 - **One emulator and one app id serve every worktree.** Two agents deploying at the same time overwrite each other's APK. Don't check in parallel.
 - **The server is reached as `http://127.0.0.1:13378` through `adb reverse`** (set on every `app.sh launch`). On this machine, the emulator's usual `10.0.2.2` host alias refused TCP connections.
 - **The ABS port is published on loopback only**, because the admin password is well known. If Docker runs in colima and colima fails to publish the port, `abs.sh up` opens an SSH tunnel into the colima VM itself.
-- **The build runs on JDK 17–23** (Gradle 8.11 needs it). `app.sh` chooses one via `/usr/libexec/java_home`.
+- **The build runs on JDK 21–23**: Capacitor compiles for Java 21, and Gradle 8.11 runs on JDK 23 at most. `app.sh` chooses one via `/usr/libexec/java_home`.
 - **`app.sh login` targets `/connect`.** If it reports that the form isn't shown, you are already logged in.

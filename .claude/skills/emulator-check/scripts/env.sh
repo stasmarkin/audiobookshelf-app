@@ -39,6 +39,7 @@ APP_ID="app.absplus.android.debug"
 APK="$REPO_ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 
 STATE_DIR="${ABSPLUS_EMU_STATE:-$HOME/.local/state/absplus-emulator}"
+STATE_DIR="${STATE_DIR%/}"
 ABS_CONTAINER="absplus-emulator-abs"
 ABS_IMAGE="ghcr.io/advplyr/audiobookshelf:2.37.1"
 ABS_PORT="${ABS_PORT:-13378}"
@@ -48,10 +49,10 @@ ABS_EMULATOR_URL="http://127.0.0.1:$ABS_PORT"
 ABS_USER="root"
 ABS_PASSWORD="root"
 
-# Gradle 8.11 runs on JDK 17–23; the newest installed JDK may be outside that range.
+# Capacitor modules compile for Java 21 and Gradle 8.11 runs on up to 23; the newest installed JDK may be outside that range.
 pick_java_home() {
   local v home
-  for v in 21 17 22 23; do
+  for v in 21 22 23; do
     home="$(/usr/libexec/java_home -v "$v" 2>/dev/null)" || continue
     if "$home/bin/java" -version 2>&1 | grep -q "version \"$v"; then echo "$home"; return 0; fi
   done

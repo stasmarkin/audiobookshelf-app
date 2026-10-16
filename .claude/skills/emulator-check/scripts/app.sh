@@ -10,7 +10,7 @@ build() {
     (cd "$REPO_ROOT" && npm run generate && npx cap sync android)
   fi
   local java_home
-  java_home="$(pick_java_home)" || { echo "Need JDK 17–23 for Gradle 8.11" >&2; exit 1; }
+  java_home="$(pick_java_home)" || { echo "Need JDK 21–23 (Capacitor targets Java 21, Gradle 8.11 runs on up to 23)" >&2; exit 1; }
   (cd "$REPO_ROOT/android" && JAVA_HOME="$java_home" ./gradlew assembleDebug --console=plain -q)
   echo "Built $APK"
 }
@@ -65,7 +65,7 @@ case "${1:-}" in
   launch) launch ;;
   clear) "$ADB" shell pm clear "$APP_ID" >/dev/null; grant_permissions; echo "Cleared app data" ;;
   login) login ;;
-  screenshot) "$ADB" exec-out screencap -p >"${2:?screenshot path}" && echo "$2" ;;
+  screenshot) mkdir -p "$(dirname "${2:?screenshot path}")"; "$ADB" exec-out screencap -p >"$2" && echo "$2" ;;
   cdp) shift; cdp "$@" ;;
   adb) shift; "$ADB" "$@" ;;
   *) echo "Usage: $0 deploy|build|install|launch|clear|login|screenshot <file>|cdp <args>|adb <args>" >&2; exit 2 ;;
