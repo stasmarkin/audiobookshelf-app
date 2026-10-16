@@ -182,7 +182,7 @@ import { podcastSortOverrideKey, resolvePodcastEpisodeSort, sortPodcastEpisodes 
 import coverPresentation from '@/theme/coverPresentation'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { downloadState, DownloadState } from '@/utils/downloadState'
-import { leavesOnLibraryChange } from '@/utils/libraryScope'
+import { leavesOnLibraryChange, copyLeavesOnLibraryChange } from '@/utils/libraryScope'
 
 export default {
   async asyncData({ store, params, redirect, app, query }) {
@@ -751,7 +751,10 @@ export default {
     },
     libraryChanged() {
       // Also announced when nothing changed (a sign-in, a reconnect): the current library and server decide
-      if (leavesOnLibraryChange(this.$store.state, this.libraryItem.libraryId, this.loadedServerConfigId)) {
+      const leaves = this.isLocal
+        ? copyLeavesOnLibraryChange(this.$store.state, this.libraryItem, this.loadedServerConfigId)
+        : leavesOnLibraryChange(this.$store.state, this.libraryItem.libraryId, this.loadedServerConfigId)
+      if (leaves) {
         this.$router.replace('/bookshelf')
       }
     },
