@@ -337,4 +337,76 @@ class CatalogEventApplierTest {
     assertTrue(topics.isEmpty())
     assertTrue(CATALOG_EVENTS.containsAll(listOf("collection_added", "collection_updated", "collection_removed")))
   }
+
+  /** A playlist event payload (`toOldJSONExpanded`): [items] are (libraryItemId, episodeId or null). */
+  private fun playlist(id: String, items: List<Pair<String, String?>>, lastUpdate: Long = 100, libraryId: String = "lib1", name: String = "Playlist $id"): ObjectNode {
+    val node = mapper.createObjectNode().put("id", id).put("name", name).put("libraryId", libraryId).put("userId", "u1").putNull("description")
+            .put("lastUpdate", lastUpdate).put("createdAt", 1)
+    val list = node.putArray("items")
+    items.forEach { (itemId, episodeId) ->
+      val entry = list.addObject()
+      if (episodeId != null) {
+        entry.put("episodeId", episodeId)
+        entry.putObject("episode").put("id", episodeId).put("duration", 12.5).putObject("audioFile").put("duration", 12.5)
+      }
+      entry.put("libraryItemId", itemId)
+      entry.set<JsonNode>("libraryItem", item(itemId))
+    }
+    return node
+  }
+
+  private fun playlistRow(id: String) = runBlocking { db.playlists().get("srv", id) }
+  private fun playlistItems(id: String) = runBlocking { db.playlists().itemsOf("srv", id) }.map { it.libraryItemId to it.episodeId }
+
+  @Test
+  fun playlistAddedAnnouncesTheLibrary() {
+    assertEquals(CatalogEventResult.APPLIED, apply("playlist_added", playlist("pl1", listOf("li1" to null))))
+    assertEquals("the tab shows through library:<id>", setOf("playlists:lib1", "library:lib1"), topics.toSet())
+    assertEquals(0, playlistRow("pl1")!!.position)
+    assertFalse("the expanded items are not kept in the row", json(playlistRow("pl1")!!.json).has("items"))
+    assertNull("nor as library items", row("li1"))
+    assertEquals("a library the replica lacks", CatalogEventResult.IGNORED, apply("playlist_added", playlist("pl9", listOf("li1" to null), libraryId = "nowhere")))
+    assertNull(playlistRow("pl9"))
+  }
+
+  @Test
+  fun playlistUpdatedReplacesItems() {
+    apply("playlist_added", playlist("pl1", listOf("li1" to null, "pod" to "ep1", "li2" to null)))
+    apply("playlist_added", playlist("pl2", listOf("li1" to null)))
+    assertEquals("a new playlist goes last", 1, playlistRow("pl2")!!.position)
+    topics.clear()
+
+    // Removed li1, moved the episode last; the server keeps lastUpdate when only the items change
+    assertEquals(CatalogEventResult.APPLIED, apply("playlist_updated", playlist("pl1", listOf("li2" to null, "pod" to "ep1"))))
+    assertEquals(listOf("li2" to "", "pod" to "ep1"), playlistItems("pl1"))
+    assertEquals("an updated playlist keeps its place", 0, playlistRow("pl1")!!.position)
+    val episode = runBlocking { db.playlists().itemsOf("srv", "pl1") }[1].episodeJson!!
+    assertEquals(12.5, json(episode).path("audioFile").path("duration").asDouble(), 0.0)
+    assertEquals("the count did not change", setOf("playlists:lib1"), topics.toSet())
+
+    topics.clear()
+    assertEquals("delayed behind a newer write", CatalogEventResult.IGNORED, apply("playlist_updated", playlist("pl1", listOf("li9" to null), lastUpdate = 99)))
+    assertEquals(listOf("li2" to "", "pod" to "ep1"), playlistItems("pl1"))
+    assertTrue(topics.isEmpty())
+
+    assertEquals("an update the replica never saw the add of", CatalogEventResult.APPLIED, apply("playlist_updated", playlist("pl3", listOf("li1" to null))))
+    assertEquals(2, playlistRow("pl3")!!.position)
+    assertEquals(setOf("playlists:lib1", "library:lib1"), topics.toSet())
+  }
+
+  @Test
+  fun playlistRemovedDeletesIt() {
+    apply("playlist_added", playlist("pl1", listOf("li1" to null, "li2" to null)))
+    apply("playlist_added", playlist("pl2", listOf("li1" to null)))
+    topics.clear()
+    assertEquals(CatalogEventResult.APPLIED, apply("playlist_removed", playlist("pl1", listOf("li1" to null))))
+    assertNull(playlistRow("pl1"))
+    assertTrue(playlistItems("pl1").isEmpty())
+    assertEquals("other playlists keep their items", listOf("li1" to ""), playlistItems("pl2"))
+    assertEquals(setOf("playlists:lib1", "library:lib1"), topics.toSet())
+    topics.clear()
+    assertEquals("an unknown playlist", CatalogEventResult.IGNORED, apply("playlist_removed", json("""{"id":"pl1","libraryId":"lib1"}""")))
+    assertTrue(topics.isEmpty())
+    assertTrue(CATALOG_EVENTS.containsAll(listOf("playlist_added", "playlist_updated", "playlist_removed")))
+  }
 }

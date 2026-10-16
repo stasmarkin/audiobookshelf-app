@@ -23,6 +23,14 @@ class FakeCollection(val id: String, val libraryId: String, var name: String, va
 /** One `collections` answer before it is sent: a hook may change [results] and [total]. */
 class CollectionsPage(val libraryId: String, val page: Int, val call: Int, var results: List<FakeCollection>, var total: Int)
 
+/** An item of a playlist: a book, or an episode of a podcast item (`episodeId`). */
+data class FakePlaylistItem(val libraryItemId: String, val episodeId: String? = null)
+
+class FakePlaylist(val id: String, val libraryId: String, var name: String, var items: List<FakePlaylistItem>, var lastUpdate: Long = 1L)
+
+/** One `playlists` answer before it is sent: a hook may change [results] and [total]. */
+class PlaylistsPage(val libraryId: String, val page: Int, val call: Int, var results: List<FakePlaylist>, var total: Int)
+
 /** One `authors` answer before it is sent: a hook may change [results] and [total]. */
 class AuthorsPage(val libraryId: String, val page: Int, val call: Int, var results: List<FakeAuthor>, var total: Int)
 
@@ -40,6 +48,8 @@ class FakeCatalogServer {
   val authors = LinkedHashMap<String, FakeAuthor>()
   val collections = LinkedHashMap<String, FakeCollection>()
   var onCollectionsPage: (CollectionsPage) -> Unit = {}
+  val playlists = LinkedHashMap<String, FakePlaylist>()
+  var onPlaylistsPage: (PlaylistsPage) -> Unit = {}
   var onItemsPage: (ItemsPage) -> Unit = {}
   var onAuthorsPage: (AuthorsPage) -> Unit = {}
   var legacyAuthors = false
@@ -67,6 +77,33 @@ class FakeCatalogServer {
             .putNull("description").put("lastUpdate", collection.lastUpdate).put("createdAt", 1L)
     val books = node.putArray("books")
     collection.books.forEach { id -> books.add(itemJson(this.books.getValue(id))) }
+    return node
+  }
+
+  fun playlist(id: String, items: List<FakePlaylistItem>, libraryId: String = "lib1", name: String = "Playlist $id") =
+          FakePlaylist(id, libraryId, name, items).also { playlists[id] = it }
+
+  /** An episode as `PodcastEpisode.toOldJSONExpanded` gives it, trimmed to what playback reads. */
+  fun episodeJson(libraryItemId: String, episodeId: String): ObjectNode {
+    val node = mapper.createObjectNode().put("id", episodeId).put("libraryItemId", libraryItemId).put("title", "Episode $episodeId")
+    node.putObject("audioFile").put("index", 1).put("ino", "ino-$episodeId").put("duration", 61.5)
+    return node.put("duration", 61.5)
+  }
+
+  /** `Playlist.toOldJSONExpanded`: a book comes expanded, an episode with its podcast minified (here both in the list's item shape). */
+  fun playlistJson(playlist: FakePlaylist): ObjectNode {
+    val node = mapper.createObjectNode().put("id", playlist.id).put("name", playlist.name).put("libraryId", playlist.libraryId)
+            .put("userId", "user1").putNull("description").put("lastUpdate", playlist.lastUpdate).put("createdAt", 1L)
+    val items = node.putArray("items")
+    playlist.items.forEach { (itemId, episodeId) ->
+      val entry = items.addObject()
+      if (episodeId != null) {
+        entry.put("episodeId", episodeId)
+        entry.set<ObjectNode>("episode", episodeJson(itemId, episodeId))
+      }
+      entry.put("libraryItemId", itemId)
+      entry.set<ObjectNode>("libraryItem", itemJson(books.getValue(itemId)))
+    }
     return node
   }
 
@@ -173,6 +210,18 @@ class FakeCatalogServer {
         onCollectionsPage(answer)
         val results = mapper.createArrayNode()
         answer.results.forEach { results.add(collectionJson(it)) }
+        200 to mapper.writeValueAsString(mapper.createObjectNode().put("total", answer.total).put("limit", limit.toString()).put("page", page.toString())
+                .set<ObjectNode>("results", results))
+      }
+      "playlists" -> {
+        val limit = q["limit"]?.toInt() ?: 0
+        val page = q["page"]?.toInt() ?: 0
+        val all = playlists.values.filter { it.libraryId == libraryId }.sortedBy { it.name }
+        val call = calls.merge("$libraryId playlists", 1, Int::plus)!! - 1
+        val answer = PlaylistsPage(libraryId, page, call, if (limit == 0) all else all.drop(page * limit).take(limit), all.size)
+        onPlaylistsPage(answer)
+        val results = mapper.createArrayNode()
+        answer.results.forEach { results.add(playlistJson(it)) }
         200 to mapper.writeValueAsString(mapper.createObjectNode().put("total", answer.total).put("limit", limit.toString()).put("page", page.toString())
                 .set<ObjectNode>("results", results))
       }

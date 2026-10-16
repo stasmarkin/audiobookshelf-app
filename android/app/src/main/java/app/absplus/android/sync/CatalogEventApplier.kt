@@ -15,6 +15,7 @@ val CATALOG_EVENTS: Set<String> = setOf(
         "rss_feed_open", "rss_feed_closed",
         "author_added", "author_updated", "author_removed", "authors_num_books_updated",
         "collection_added", "collection_updated", "collection_removed",
+        "playlist_added", "playlist_updated", "playlist_removed",
         "backup_applied")
 
 enum class CatalogEventResult { APPLIED, IGNORED, NEEDS_RECONCILE }
@@ -57,6 +58,8 @@ class CatalogEventApplier(
       "authors_num_books_updated" -> updateAuthorCounts(serverConfigId, payload, topics)
       "collection_added", "collection_updated" -> upsertCollection(serverConfigId, payload, topics)
       "collection_removed" -> removeCollection(serverConfigId, payload, topics)
+      "playlist_added", "playlist_updated" -> upsertPlaylist(serverConfigId, payload, topics)
+      "playlist_removed" -> removePlaylist(serverConfigId, payload, topics)
       "backup_applied" -> CatalogEventResult.NEEDS_RECONCILE
       else -> CatalogEventResult.IGNORED
     }
@@ -266,6 +269,37 @@ class CatalogEventApplier(
     val old = db.collections().get(sc, id) ?: return CatalogEventResult.IGNORED
     db.collections().deleteByIds(sc, listOf(id))
     topics += "collections:${old.libraryId}"
+    return CatalogEventResult.APPLIED
+  }
+
+  /**
+   * The payload is the user's playlist with its items expanded. Its `lastUpdate` does not move when only the items
+   * change, so only an older one is dropped. A new playlist goes last and changes the library's `numUserPlaylists`.
+   */
+  private suspend fun upsertPlaylist(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
+    val id = payload.text("id") ?: return CatalogEventResult.IGNORED
+    val libraryId = payload.text("libraryId") ?: return CatalogEventResult.IGNORED
+    return db.withTransaction {
+      if (db.libraries().get(sc, libraryId) == null) return@withTransaction CatalogEventResult.IGNORED
+      val old = db.playlists().get(sc, id)
+      if (old != null && payload.path("lastUpdate").asLong() < mapper.readTree(old.json).path("lastUpdate").asLong()) {
+        return@withTransaction CatalogEventResult.IGNORED
+      }
+      val position = old?.position ?: ((db.playlists().maxPosition(sc, libraryId) ?: -1) + 1)
+      val (entity, items) = CatalogJson.playlistEntity(sc, payload, position)
+      db.playlists().replace(entity, items)
+      topics += "playlists:$libraryId"
+      if (old == null) topics += "library:$libraryId"
+      CatalogEventResult.APPLIED
+    }
+  }
+
+  private suspend fun removePlaylist(sc: String, payload: JsonNode, topics: MutableSet<String>): CatalogEventResult {
+    val id = payload.text("id") ?: return CatalogEventResult.IGNORED
+    val old = db.playlists().get(sc, id) ?: return CatalogEventResult.IGNORED
+    db.playlists().deleteByIds(sc, listOf(id))
+    topics += "playlists:${old.libraryId}"
+    topics += "library:${old.libraryId}"
     return CatalogEventResult.APPLIED
   }
 }

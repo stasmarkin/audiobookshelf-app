@@ -20,15 +20,16 @@ const val SERIES_PAGE_SIZE = 25
 const val AUTHORS_PAGE_SIZE = 100
 /** The server builds the whole collection list with every book expanded and cuts the page from it. */
 const val COLLECTIONS_PAGE_SIZE = 20
+/** As collections: the server expands every item of every playlist of the user and cuts the page from it. */
+const val PLAYLISTS_PAGE_SIZE = 20
 
 data class CatalogResult(val libraries: Int, val failedLibraries: List<String>, val stoppedBy: HttpOutcome?)
 
 fun emptyLibraryState(sc: String, libraryId: String) = LibraryStateEntity(sc, libraryId, null, false, null, null, null, null, null)
 
 /**
- * One pass over the catalog of a server into replica.db: libraries with their filterdata, series, items, authors and
- * collections, page by
- * page, a Room transaction per page. Rows missing on the server are deleted only after a walk in which the total did
+ * One pass over the catalog of a server into replica.db: libraries with their filterdata, series, items, authors,
+ * collections and the user's playlists, page by page, a Room transaction per page. Rows missing on the server are deleted only after a walk in which the total did
  * not move; otherwise the walk is repeated once, and a second unstable walk keeps what it saw without deleting.
  * Series membership comes from the items' `seriesName`; names that cannot be read with certainty are asked from the
  * server per series ([LibraryStateEntity.pendingSeriesQueries], kept across interrupted passes).
@@ -138,9 +139,10 @@ class CatalogReconciler(
     } else null
     reconcileItems(config, id, idsByName)
     if (book) runPointQueries(config, id)
-    // Last: a failed authors or collections read skips the library only after its items are in
+    // Last: a failed authors, collections or playlists read skips the library only after its items are in
     if (book) reconcileAuthors(config, id)
     if (book) reconcileCollections(config, id)
+    reconcilePlaylists(config, id)
     updateState(sc, id) { it.copy(lastError = null) }
   }
 
@@ -211,6 +213,51 @@ class CatalogReconciler(
     if (changed) onReplicaChanged()
     // The first pass also tells a tab that read the server meanwhile to read the replica now
     if (changed || (firstPass && walk.consistent)) notify(listOf("collections:$libraryId"))
+  }
+
+  /**
+   * The user's playlists in the server's order, each with its items (episodes with their JSON) in the playlist's order.
+   * The items are compared whole: the server keeps `lastUpdate` when only they change.
+   */
+  private suspend fun reconcilePlaylists(config: ServerConnectionConfig, libraryId: String) {
+    val sc = config.id
+    val existing = db.playlists().forLibrary(sc, libraryId).associateBy { it.id }
+    val firstPass = db.libraryState().get(sc, libraryId)?.playlistsReconciledAt == null
+    var changed = false
+    var position = 0
+    var positionsOf = 0
+    val walk = walk(config, "playlists of $libraryId", { page ->
+      "/api/libraries/$libraryId/playlists?limit=$PLAYLISTS_PAGE_SIZE&page=$page"
+    }) { results, attempt ->
+      // A walk started again numbers anew
+      if (attempt != positionsOf) {
+        position = 0
+        positionsOf = attempt
+      }
+      for (node in results) {
+        val (entity, items) = CatalogJson.playlistEntity(sc, node, position++)
+        val row = if (entity.libraryId.isEmpty()) entity.copy(libraryId = libraryId) else entity
+        if (row.id.isEmpty()) continue
+        if (row == existing[row.id] && items == db.playlists().itemsOf(sc, row.id)) continue
+        db.playlists().replace(row, items)
+        changed = true
+      }
+    }
+    if (walk.consistent) {
+      val missing = db.playlists().ids(sc, libraryId).filter { it !in walk.seen }
+      if (missing.isNotEmpty()) {
+        db.playlists().deleteByIds(sc, missing)
+        changed = true
+      }
+      updateState(sc, libraryId) { it.copy(playlistsReconciledAt = clock()) }
+    }
+    if (changed) onReplicaChanged()
+    val topics = mutableListOf<String>()
+    // The first pass also tells a tab that read the server meanwhile to read the replica now
+    if (changed || (firstPass && walk.consistent)) topics += "playlists:$libraryId"
+    // The library's numUserPlaylists is read from the replica: the Playlists tab shows or hides with it
+    if (db.playlists().count(sc, libraryId) != existing.size || (firstPass && walk.consistent)) topics += "library:$libraryId"
+    if (topics.isNotEmpty()) notify(topics)
   }
 
   private class Walk(val consistent: Boolean, val seen: Set<String>)

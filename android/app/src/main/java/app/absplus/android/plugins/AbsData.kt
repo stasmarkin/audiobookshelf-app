@@ -9,7 +9,10 @@ import app.absplus.android.sync.CollectionBooksRequest
 import app.absplus.android.sync.CollectionsRequest
 import app.absplus.android.sync.MAX_COLLECTIONS_LIMIT
 import app.absplus.android.sync.ItemsRequest
+import app.absplus.android.sync.MAX_PLAYLISTS_LIMIT
 import app.absplus.android.sync.MAX_READ_LIMIT
+import app.absplus.android.sync.PlaylistItemsRequest
+import app.absplus.android.sync.PlaylistsRequest
 import app.absplus.android.sync.SeriesRequest
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
@@ -79,6 +82,18 @@ internal fun collectionsRequest(data: JSONObject): CollectionsRequest {
 internal fun collectionBooksRequest(data: JSONObject): CollectionBooksRequest {
   val (id, limit, page) = pageArguments(data, MAX_READ_LIMIT, idKey = "id")
   return CollectionBooksRequest(id, limit, page)
+}
+
+/** `getPlaylists` arguments: at most [MAX_PLAYLISTS_LIMIT] playlists a call. */
+internal fun playlistsRequest(data: JSONObject): PlaylistsRequest {
+  val (libraryId, limit, page) = pageArguments(data, MAX_PLAYLISTS_LIMIT)
+  return PlaylistsRequest(libraryId, limit, page)
+}
+
+/** `getPlaylistItems` arguments; IllegalArgumentException with the message the call is rejected with. */
+internal fun playlistItemsRequest(data: JSONObject): PlaylistItemsRequest {
+  val (id, limit, page) = pageArguments(data, MAX_READ_LIMIT, idKey = "id")
+  return PlaylistItemsRequest(id, limit, page)
 }
 
 private fun text(data: JSONObject, key: String) = data.opt(key)?.takeIf { it is String && it.isNotEmpty() } as String?
@@ -509,6 +524,45 @@ class AbsData : Plugin() {
       JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
               .put("found", false).put("replica", emptyReplica())
     }) { reader, sc -> reader.collectionBooks(sc, request) }
+  }
+
+  /**
+   * A page of the user's playlists of `GET /api/libraries/:id/playlists` from the replica, each with up to 4 preview
+   * items and `itemKeys` (every item, ids only); `limit` must be 1..20.
+   */
+  @PluginMethod
+  fun getPlaylists(call: PluginCall) {
+    val request = try {
+      playlistsRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("replica", emptyReplica())
+    }) { reader, sc -> reader.playlists(sc, request) }
+  }
+
+  /** `{ serverConfigId, playlist, replica }`: the playlist without its items, `null` when the replica lacks it. */
+  @PluginMethod
+  fun getPlaylist(call: PluginCall) {
+    val id = call.getString("id")
+    if (id.isNullOrEmpty()) return call.reject("id is required")
+    readCatalog(call, { JSONObject().put("playlist", JSONObject.NULL).put("replica", emptyReplica()) }) { reader, sc -> reader.playlist(sc, id) }
+  }
+
+  /** A page of a playlist's items in its order, `found: false` when the replica lacks it; `limit` must be 1..100. */
+  @PluginMethod
+  fun getPlaylistItems(call: PluginCall) {
+    val request = try {
+      playlistItemsRequest(call.data)
+    } catch (e: IllegalArgumentException) {
+      return call.reject(e.message)
+    }
+    readCatalog(call, {
+      JSONObject().put("results", JSONArray()).put("total", 0).put("limit", request.limit).put("page", request.page)
+              .put("found", false).put("replica", emptyReplica())
+    }) { reader, sc -> reader.playlistItems(sc, request) }
   }
 
   /** The library the next catalog pass reconciles first. */

@@ -8,6 +8,8 @@ import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.QueryEntry
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryStateEntity
+import app.absplus.android.db.replica.PlaylistCounts
+import app.absplus.android.db.replica.PlaylistEntity
 import app.absplus.android.db.replica.ReplicaDatabase
 import app.absplus.android.db.replica.SeriesEntity
 import app.absplus.android.db.replica.SeriesIndex
@@ -28,6 +30,10 @@ const val MAX_READ_LIMIT = 100
 /** Collections a list call returns: each carries up to [COLLECTION_PREVIEW_BOOKS] books, so a call stays within 100 items. */
 const val MAX_COLLECTIONS_LIMIT = 20
 const val COLLECTION_PREVIEW_BOOKS = 4
+
+/** As collections: each playlist of a list call carries up to [PLAYLIST_PREVIEW_ITEMS] items. */
+const val MAX_PLAYLISTS_LIMIT = 20
+const val PLAYLIST_PREVIEW_ITEMS = 4
 
 data class ItemsRequest(
         val libraryId: String,
@@ -57,6 +63,11 @@ data class CollectionsRequest(val libraryId: String, val limit: Int, val page: I
 
 /** A page of the books of a collection. */
 data class CollectionBooksRequest(val id: String, val limit: Int, val page: Int)
+
+data class PlaylistsRequest(val libraryId: String, val limit: Int, val page: Int)
+
+/** A page of the items of a playlist. */
+data class PlaylistItemsRequest(val id: String, val limit: Int, val page: Int)
 
 /**
  * Reads the catalog replica in the shape of the server's answers. The ordered ids of the last items query are kept,
@@ -97,15 +108,20 @@ class CatalogReader(
             .put("replica", replica(state?.itemsReconciledAt, state?.itemsComplete ?: false))
   }
 
-  /** `library: null` (and no reconcile time) for a library the replica does not have. */
+  /**
+   * `library: null` (and no reconcile time) for a library the replica does not have. `numUserPlaylists` counts the
+   * playlists in the replica; until they were read once, at least the count the library read brought.
+   */
   suspend fun library(sc: String, id: String): JSONObject {
     val library = db.libraries().get(sc, id)
     val state = library?.let { db.libraryState().get(sc, id) }
+    val playlists = library?.let { db.playlists().count(sc, id) } ?: 0
+    val numUserPlaylists = if (state?.playlistsReconciledAt != null) playlists else maxOf(playlists, library?.numUserPlaylists ?: 0)
     return JSONObject().put("serverConfigId", sc)
             .put("library", library?.let { JSONObject(it.json) } ?: JSONObject.NULL)
             .put("filterdata", library?.filterDataJson?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("issues", library?.issues ?: 0)
-            .put("numUserPlaylists", library?.numUserPlaylists ?: 0)
+            .put("numUserPlaylists", numUserPlaylists)
             .put("replica", replica(state?.itemsReconciledAt, state?.itemsComplete ?: false))
   }
 
@@ -320,6 +336,108 @@ class CatalogReader(
         json[id]?.let { row -> results.put(JSONObject(row.json).apply { row.rssFeedJson?.let { put("rssFeed", JSONObject(it)) } }) }
       }
       Triple(found?.second?.visible ?: 0, found != null, collectionReplica(sc, found?.first))
+    }
+    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
+            .put("page", req.page).put("found", found).put("replica", replica)
+  }
+
+  /** As the server, a playlist is never empty: one whose items are all out of the replica (the user's reach) is not shown. */
+  private fun shown(counts: PlaylistCounts?) = counts == null || counts.visible > 0
+
+  private fun playlistsReconciledAt(state: LibraryStateEntity?) = state?.playlistsReconciledAt?.takeIf { state.itemsReconciledAt != null }
+
+  private fun itemKey(libraryItemId: String, episodeId: String) =
+          JSONObject().put("libraryItemId", libraryItemId).put("episodeId", episodeId.ifEmpty { null } ?: JSONObject.NULL)
+
+  /**
+   * A page of the library's playlists in the server's order, each with `numItems`, the first [PLAYLIST_PREVIEW_ITEMS]
+   * items it can show with their library item cut down to a cover, and `itemKeys`: every item it can show, ids only
+   * (what "already in this playlist" needs). The items themselves are read with [playlistItems].
+   */
+  suspend fun playlists(sc: String, req: PlaylistsRequest): JSONObject {
+    require(req.limit in 1..MAX_PLAYLISTS_LIMIT) { "limit must be 1..$MAX_PLAYLISTS_LIMIT" }
+    require(req.page >= 0) { "page must not be negative" }
+    val state = db.libraryState().get(sc, req.libraryId)
+    val results = JSONArray()
+    val total = db.withTransaction {
+      val counts = db.playlists().counts(sc, req.libraryId).associateBy { it.playlistId }
+      val shown = db.playlists().forLibrary(sc, req.libraryId).filter { shown(counts[it.id]) }
+      val slice = shown.drop(offset(req.page, req.limit)).take(req.limit)
+      val keys = slice.associate { it.id to db.playlists().visibleKeys(sc, it.id) }
+      val previewIds = keys.values.flatMap { list -> list.take(PLAYLIST_PREVIEW_ITEMS).map { it.libraryItemId } }.distinct()
+      val covers = db.items().json(sc, previewIds).associate { it.id to CatalogJson.previewItem(it.json).toString() }
+      for (playlist in slice) {
+        val previews = JSONArray()
+        val itemKeys = JSONArray()
+        keys.getValue(playlist.id).forEachIndexed { i, key ->
+          itemKeys.put(itemKey(key.libraryItemId, key.episodeId))
+          if (i < PLAYLIST_PREVIEW_ITEMS) {
+            covers[key.libraryItemId]?.let { cover ->
+              previews.put(itemKey(key.libraryItemId, key.episodeId).put("libraryItem", JSONObject(cover)).put("episode", JSONObject.NULL))
+            }
+          }
+        }
+        results.put(playlistJson(playlist, counts[playlist.id]).put("items", previews).put("itemKeys", itemKeys))
+      }
+      shown.size
+    }
+    return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
+            .put("page", req.page).put("replica", replica(playlistsReconciledAt(state), state?.itemsComplete ?: false))
+  }
+
+  private fun playlistJson(playlist: PlaylistEntity, counts: PlaylistCounts?) =
+          JSONObject(playlist.json).put("numItems", counts?.visible ?: 0)
+
+  private suspend fun shownPlaylist(sc: String, id: String): Pair<PlaylistEntity, PlaylistCounts?>? {
+    val playlist = db.playlists().get(sc, id) ?: return null
+    val counts = db.playlists().countsOf(sc, id)
+    return if (shown(counts)) playlist to counts else null
+  }
+
+  /**
+   * The replica state of a playlist; for one the replica lacks, null while any library of the server never had its
+   * playlists read (it may be there), else the oldest playlists pass.
+   */
+  private suspend fun playlistReplica(sc: String, playlist: PlaylistEntity?): JSONObject {
+    if (playlist != null) {
+      val state = db.libraryState().get(sc, playlist.libraryId)
+      return replica(playlistsReconciledAt(state), state?.itemsComplete ?: false)
+    }
+    val states = db.libraryState().all(sc).associateBy { it.libraryId }
+    val libraries = db.libraries().all(sc).map { states[it.id] }
+    val times = libraries.map { playlistsReconciledAt(it) }
+    return replica(if (times.isEmpty() || times.any { it == null }) null else times.filterNotNull().min(),
+            libraries.isNotEmpty() && libraries.all { it?.itemsComplete == true })
+  }
+
+  /** `GET /api/playlists/:id` without its items: `playlist: null` when it is not to be shown. */
+  suspend fun playlist(sc: String, id: String): JSONObject {
+    val (playlist, replica) = db.withTransaction {
+      val found = shownPlaylist(sc, id)
+      found?.let { (p, counts) -> playlistJson(p, counts) } to playlistReplica(sc, found?.first)
+    }
+    return JSONObject().put("serverConfigId", sc).put("playlist", playlist ?: JSONObject.NULL).put("replica", replica)
+  }
+
+  /**
+   * A page of the items of a playlist the replica has, in its order: the library item minified as the items list gives
+   * it, an episode as the server expanded it; `found: false` (and no items) when the playlist is not to be shown.
+   */
+  suspend fun playlistItems(sc: String, req: PlaylistItemsRequest): JSONObject {
+    require(req.limit in 1..MAX_READ_LIMIT) { "limit must be 1..$MAX_READ_LIMIT" }
+    require(req.page >= 0) { "page must not be negative" }
+    val results = JSONArray()
+    val (total, found, replica) = db.withTransaction {
+      val found = shownPlaylist(sc, req.id)
+      val items = found?.let { db.playlists().visibleItems(sc, req.id, req.limit, offset(req.page, req.limit)) } ?: emptyList()
+      val json = db.items().json(sc, items.map { it.libraryItemId }.distinct()).associateBy { it.id }
+      items.forEach { item ->
+        val row = json[item.libraryItemId] ?: return@forEach
+        val libraryItem = JSONObject(row.json).apply { row.rssFeedJson?.let { put("rssFeed", JSONObject(it)) } }
+        results.put(itemKey(item.libraryItemId, item.episodeId).put("libraryItem", libraryItem)
+                .put("episode", item.episodeJson?.let { JSONObject(it) } ?: JSONObject.NULL))
+      }
+      Triple(found?.second?.visible ?: 0, found != null, playlistReplica(sc, found?.first))
     }
     return JSONObject().put("serverConfigId", sc).put("results", results).put("total", total).put("limit", req.limit)
             .put("page", req.page).put("found", found).put("replica", replica)

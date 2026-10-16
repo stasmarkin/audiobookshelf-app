@@ -263,11 +263,87 @@ abstract class CollectionDao {
   abstract suspend fun deleteForLibrary(sc: String, libraryId: String)
 }
 
-/** Filled from release 4e on; here only what removing a library needs. */
+/** Items of a playlist, all and those whose library item the replica has. */
+data class PlaylistCounts(val playlistId: String, val total: Int, val visible: Int)
+
+data class PlaylistKey(val libraryItemId: String, val episodeId: String)
+
 @Dao
 abstract class PlaylistDao {
   @Upsert
   abstract suspend fun upsertAll(list: List<PlaylistEntity>)
+
+  @Query("SELECT * FROM playlists WHERE serverConfigId = :sc AND libraryId = :libraryId ORDER BY position, id")
+  abstract suspend fun forLibrary(sc: String, libraryId: String): List<PlaylistEntity>
+
+  @Query("SELECT * FROM playlists WHERE serverConfigId = :sc AND id = :id")
+  abstract suspend fun get(sc: String, id: String): PlaylistEntity?
+
+  @Query("SELECT id FROM playlists WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun ids(sc: String, libraryId: String): List<String>
+
+  @Query("SELECT COUNT(*) FROM playlists WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun count(sc: String, libraryId: String): Int
+
+  @Query("SELECT MAX(position) FROM playlists WHERE serverConfigId = :sc AND libraryId = :libraryId")
+  abstract suspend fun maxPosition(sc: String, libraryId: String): Int?
+
+  @Query("SELECT * FROM playlist_items WHERE serverConfigId = :sc AND playlistId = :playlistId ORDER BY position")
+  abstract suspend fun itemsOf(sc: String, playlistId: String): List<PlaylistItemEntity>
+
+  /** Playlists without items have no row. */
+  @Query("""SELECT pi.playlistId AS playlistId, COUNT(*) AS total, COUNT(li.id) AS visible FROM playlist_items pi
+            JOIN playlists p ON p.serverConfigId = pi.serverConfigId AND p.id = pi.playlistId
+            LEFT JOIN library_items li ON li.serverConfigId = pi.serverConfigId AND li.id = pi.libraryItemId
+            WHERE pi.serverConfigId = :sc AND p.libraryId = :libraryId GROUP BY pi.playlistId""")
+  abstract suspend fun counts(sc: String, libraryId: String): List<PlaylistCounts>
+
+  @Query("""SELECT pi.playlistId AS playlistId, COUNT(*) AS total, COUNT(li.id) AS visible FROM playlist_items pi
+            LEFT JOIN library_items li ON li.serverConfigId = pi.serverConfigId AND li.id = pi.libraryItemId
+            WHERE pi.serverConfigId = :sc AND pi.playlistId = :playlistId GROUP BY pi.playlistId""")
+  abstract suspend fun countsOf(sc: String, playlistId: String): PlaylistCounts?
+
+  /** The items whose library item the replica has, in the playlist's order. */
+  @Query("""SELECT pi.* FROM playlist_items pi
+            JOIN library_items li ON li.serverConfigId = pi.serverConfigId AND li.id = pi.libraryItemId
+            WHERE pi.serverConfigId = :sc AND pi.playlistId = :playlistId ORDER BY pi.position LIMIT :limit OFFSET :offset""")
+  abstract suspend fun visibleItems(sc: String, playlistId: String, limit: Int, offset: Int): List<PlaylistItemEntity>
+
+  @Query("""SELECT pi.libraryItemId AS libraryItemId, pi.episodeId AS episodeId FROM playlist_items pi
+            JOIN library_items li ON li.serverConfigId = pi.serverConfigId AND li.id = pi.libraryItemId
+            WHERE pi.serverConfigId = :sc AND pi.playlistId = :playlistId ORDER BY pi.position""")
+  abstract suspend fun visibleKeys(sc: String, playlistId: String): List<PlaylistKey>
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  abstract suspend fun insertItems(list: List<PlaylistItemEntity>)
+
+  @Query("DELETE FROM playlist_items WHERE serverConfigId = :sc AND playlistId = :playlistId")
+  abstract suspend fun deleteItemsOf(sc: String, playlistId: String)
+
+  /** The playlist with its items, numbered by their order in [items]. */
+  @Transaction
+  open suspend fun replace(playlist: PlaylistEntity, items: List<PlaylistItemEntity>) {
+    upsertAll(listOf(playlist))
+    deleteItemsOf(playlist.serverConfigId, playlist.id)
+    if (items.isNotEmpty()) {
+      insertItems(items.mapIndexed { i, item -> item.copy(serverConfigId = playlist.serverConfigId, playlistId = playlist.id, position = i) })
+    }
+  }
+
+  /** The playlists and their items. */
+  @Transaction
+  open suspend fun deleteByIds(sc: String, ids: List<String>) {
+    inChunks(ids) {
+      deleteItemsChunk(sc, it)
+      deleteChunk(sc, it)
+    }
+  }
+
+  @Query("DELETE FROM playlists WHERE serverConfigId = :sc AND id IN (:ids)")
+  abstract suspend fun deleteChunk(sc: String, ids: List<String>)
+
+  @Query("DELETE FROM playlist_items WHERE serverConfigId = :sc AND playlistId IN (:ids)")
+  abstract suspend fun deleteItemsChunk(sc: String, ids: List<String>)
 
   @Query("""DELETE FROM playlist_items WHERE serverConfigId = :sc
             AND playlistId IN (SELECT id FROM playlists WHERE serverConfigId = :sc AND libraryId = :libraryId)""")

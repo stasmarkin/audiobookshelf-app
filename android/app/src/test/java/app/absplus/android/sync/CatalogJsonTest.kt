@@ -1,5 +1,6 @@
 package app.absplus.android.sync
 
+import app.absplus.android.db.replica.PlaylistItemEntity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.junit.Assert.assertEquals
@@ -164,5 +165,30 @@ class CatalogJsonTest {
       "media":{"coverPath":"/metadata/items/li-3/cover.jpg","metadata":{"title":"Третья","authorName":"Лев Толстой"}}}"""), preview)
     // Fields the item lacks are left out; the media and metadata objects are always there
     assertEquals(CatalogJson.mapper.readTree("""{"id":"x","media":{"metadata":{}}}"""), CatalogJson.previewItem("""{"id":"x","path":"/a"}"""))
+  }
+
+  /**
+   * `playlists-page.json` is made from the server's code (2.37.1 LibraryController.getUserPlaylistsForLibrary /
+   * Playlist.toOldJSONExpanded) and the recorded podcast fixtures, not recorded.
+   */
+  @Test
+  fun playlistEntityKeepsEpisodesWithoutTheExpandedItems() {
+    val page = fixture("playlists-page.json").path("results")
+    val (row, items) = CatalogJson.playlistEntity("srv", page[0], 3)
+    assertEquals("pl-2", row.id)
+    assertEquals("ad4b6377-f8af-48be-b9d0-2e8fe044ddca", row.libraryId)
+    assertEquals(3, row.position)
+    val json = CatalogJson.mapper.readTree(row.json)
+    assertEquals(setOf("id", "name", "libraryId", "userId", "description", "lastUpdate", "createdAt"), json.fieldNames().asSequence().toSet())
+    assertEquals(listOf("40c8825a-0d97-466e-aa72-1ee8604f2585", "c44a5356-8178-4775-b183-9a68c55525c4"), items.map { it.episodeId })
+    assertEquals(listOf(0, 1), items.map { it.position })
+    assertTrue(items.all { it.libraryItemId == "5448c89f-8d2f-40a2-b310-b53b53602982" && it.playlistId == "pl-2" && it.serverConfigId == "srv" })
+    val episode = CatalogJson.mapper.readTree(items[0].episodeJson)
+    assertEquals("Episode 3", episode.path("title").asText())
+    assertTrue(episode.path("audioFile").path("duration").isNumber)
+
+    val book = CatalogJson.mapper.readTree("""{"id":"p","libraryId":"l","items":[{"libraryItemId":"b1","libraryItem":{"id":"b1"}},{"libraryItemId":""}]}""")
+    val (_, bookItems) = CatalogJson.playlistEntity("srv", book, 0)
+    assertEquals("a book has no episode; an entry without an item is dropped", listOf(PlaylistItemEntity("srv", "p", 0, "b1", "", null)), bookItems)
   }
 }

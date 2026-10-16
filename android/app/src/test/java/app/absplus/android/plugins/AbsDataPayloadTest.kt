@@ -4,6 +4,8 @@ import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CollectionBooksRequest
 import app.absplus.android.sync.CollectionsRequest
 import app.absplus.android.sync.ItemsRequest
+import app.absplus.android.sync.PlaylistItemsRequest
+import app.absplus.android.sync.PlaylistsRequest
 import app.absplus.android.sync.SeriesRequest
 import org.json.JSONArray
 import org.json.JSONObject
@@ -99,6 +101,34 @@ class AbsDataPayloadTest {
     }
     try {
       collectionBooksRequest(JSONObject().put("limit", 10))
+      fail("no id")
+    } catch (expected: IllegalArgumentException) {
+      assertEquals("id is required", expected.message)
+    }
+  }
+
+  @Test
+  fun playlistsRequestsRejectLimitsAboveTheirCap() {
+    assertEquals(PlaylistsRequest("lib1", 20, 3), playlistsRequest(JSONObject().put("libraryId", "lib1").put("limit", 20).put("page", 3)))
+    for (limit in listOf(21, 0)) {
+      try {
+        playlistsRequest(JSONObject().put("libraryId", "lib1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("each playlist carries preview items", "limit must be 1..20", expected.message)
+      }
+    }
+    assertEquals(PlaylistItemsRequest("p1", 100, 2), playlistItemsRequest(JSONObject().put("id", "p1").put("limit", 100).put("page", 2)))
+    for (limit in listOf(101, 0)) {
+      try {
+        playlistItemsRequest(JSONObject().put("id", "p1").put("limit", limit))
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..100", expected.message)
+      }
+    }
+    try {
+      playlistItemsRequest(JSONObject().put("limit", 10))
       fail("no id")
     } catch (expected: IllegalArgumentException) {
       assertEquals("id is required", expected.message)

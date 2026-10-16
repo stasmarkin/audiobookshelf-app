@@ -4,6 +4,8 @@ import app.absplus.android.db.replica.AuthorEntity
 import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryItemEntity
+import app.absplus.android.db.replica.PlaylistEntity
+import app.absplus.android.db.replica.PlaylistItemEntity
 import app.absplus.android.db.replica.SeriesEntity
 import app.absplus.android.db.replica.SeriesItemEntity
 import com.fasterxml.jackson.databind.JsonNode
@@ -214,6 +216,23 @@ object CatalogJson {
     val bookIds = collection.path("books").mapNotNull { book -> book.text("id")?.takeIf { it.isNotEmpty() } }
     return CollectionEntity(serverConfigId, collection.path("id").asText(), collection.path("libraryId").asText(), position,
             mapper.writeValueAsString(json)) to bookIds
+  }
+
+  /**
+   * A playlist of `GET /api/libraries/:id/playlists` or a playlist event (`toOldJSONExpanded`): the row without `items`,
+   * and its items in the playlist's order, an episode with its JSON. The expanded library items are not kept.
+   */
+  fun playlistEntity(serverConfigId: String, playlist: JsonNode, position: Int): Pair<PlaylistEntity, List<PlaylistItemEntity>> {
+    val json = nodes.objectNode()
+    playlist.fields().forEach { (key, value) -> if (key != "items") json.set<JsonNode>(key, value) }
+    val id = playlist.path("id").asText()
+    val items = playlist.path("items").mapNotNull { item -> item.text("libraryItemId")?.takeIf { it.isNotEmpty() }?.let { it to item } }
+            .mapIndexed { i, (libraryItemId, item) ->
+              val episodeId = item.text("episodeId") ?: ""
+              val episode = item.path("episode").takeIf { episodeId.isNotEmpty() && it.isObject }
+              PlaylistItemEntity(serverConfigId, id, i, libraryItemId, episodeId, episode?.let { mapper.writeValueAsString(it) })
+            }
+    return PlaylistEntity(serverConfigId, id, playlist.path("libraryId").asText(), position, mapper.writeValueAsString(json)) to items
   }
 
   /** What a collection cover reads of a book, cut from a minified item; fields the item lacks are left out. */

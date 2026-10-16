@@ -10,6 +10,8 @@ import app.absplus.android.db.replica.FilterCodec
 import app.absplus.android.db.replica.ItemsQuery
 import app.absplus.android.db.replica.LibraryEntity
 import app.absplus.android.db.replica.LibraryStateEntity
+import app.absplus.android.db.replica.PlaylistEntity
+import app.absplus.android.db.replica.PlaylistItemEntity
 import app.absplus.android.db.replica.SeriesIndex
 import app.absplus.android.db.replica.orderItems
 import app.absplus.android.db.seriesRow
@@ -669,5 +671,150 @@ class CatalogReaderTest {
     assertTrue(other.isNull("collection"))
     assertFalse(collectionBooks("c1", sc = "b").getBoolean("found"))
     assertEquals(0, collections(sc = "b").getInt("total"))
+  }
+
+  private fun playlists(sc: String = "srv", limit: Int = 20, page: Int = 0, libraryId: String = "lib1") =
+          runBlocking { reader.playlists(sc, PlaylistsRequest(libraryId, limit, page)) }
+
+  private fun playlistItems(id: String, sc: String = "srv", limit: Int = 100, page: Int = 0) =
+          runBlocking { reader.playlistItems(sc, PlaylistItemsRequest(id, limit, page)) }
+
+  private fun playlistRow(id: String, position: Int = 0, sc: String = "srv", libraryId: String = "lib1") =
+          PlaylistEntity(sc, id, libraryId, position, """{"id":"$id","name":"Playlist $id","libraryId":"$libraryId","userId":"u1","description":null,"lastUpdate":1,"createdAt":1}""")
+
+  private fun entries(id: String, keys: List<Pair<String, String>>, sc: String = "srv") =
+          keys.mapIndexed { i, (itemId, episodeId) -> PlaylistItemEntity(sc, id, i, itemId, episodeId, if (episodeId.isEmpty()) null else """{"id":"$episodeId","duration":3}""") }
+
+  private fun itemKeyPairs(list: org.json.JSONArray) = (0 until list.length()).map { list.getJSONObject(it) }
+          .map { it.getString("libraryItemId") to (if (it.isNull("episodeId")) null else it.getString("episodeId")) }
+
+  @Test
+  fun playlistListCarriesPreviewsAndKeys() {
+    val order = (0 until 300).map { "li%03d".format((it * 7) % 300) to (if (it % 2 == 0) "" else "ep$it") }
+    runBlocking {
+      db.libraries().upsertAll(listOf(library()))
+      val book = CatalogJson.mapper.readTree(javaClass.getResource("/catalog/book-minified.json")) as com.fasterxml.jackson.databind.node.ObjectNode
+      db.items().upsertAll((0 until 300).map { CatalogJson.itemEntity("srv", book.deepCopy().put("id", "li%03d".format(it)).put("libraryId", "lib1")) })
+      db.playlists().replace(playlistRow("big"), entries("big", order))
+    }
+
+    val big = playlists().getJSONArray("results").getJSONObject(0)
+    assertEquals(300, big.getInt("numItems"))
+    assertEquals("Playlist big", big.getString("name"))
+    val previews = big.getJSONArray("items")
+    assertEquals("the first items by position", order.take(4).map { it.first to it.second.ifEmpty { null } }, itemKeyPairs(previews))
+    val preview = previews.getJSONObject(1)
+    assertEquals(setOf("libraryItemId", "episodeId", "libraryItem", "episode"), keys(preview))
+    assertTrue("previews carry no episode", preview.isNull("episode"))
+    val cover = preview.getJSONObject("libraryItem")
+    assertEquals(setOf("id", "ino", "libraryId", "mediaType", "updatedAt", "media"), keys(cover))
+    assertEquals(setOf("title", "authorName"), keys(cover.getJSONObject("media").getJSONObject("metadata")))
+    val itemKeys = big.getJSONArray("itemKeys")
+    assertEquals("every item, ids only", order.map { it.first to it.second.ifEmpty { null } }, itemKeyPairs(itemKeys))
+    assertEquals(setOf("libraryItemId", "episodeId"), keys(itemKeys.getJSONObject(0)))
+
+    val pages = (0..3).map { playlistItems("big", page = it) }
+    assertEquals(listOf(100, 100, 100, 0), pages.map { it.getJSONArray("results").length() })
+    pages.forEach {
+      assertEquals(300, it.getInt("total"))
+      assertTrue(it.getBoolean("found"))
+    }
+    assertEquals("all items by position", order.map { it.first to it.second.ifEmpty { null } }, pages.flatMap { itemKeyPairs(it.getJSONArray("results")) })
+    val full = pages[0].getJSONArray("results").getJSONObject(1)
+    assertEquals("minified items, as the items list", 1, full.getJSONObject("libraryItem").getJSONObject("media").getInt("numTracks"))
+    assertEquals(3, full.getJSONObject("episode").getInt("duration"))
+
+    for (limit in listOf(21, 0)) {
+      try {
+        playlists(limit = limit)
+        fail("limit $limit")
+      } catch (expected: IllegalArgumentException) {
+        assertEquals("limit must be 1..20", expected.message)
+      }
+    }
+    try {
+      playlistItems("big", limit = 101)
+      fail("limit 101")
+    } catch (expected: IllegalArgumentException) {
+      assertEquals("limit must be 1..100", expected.message)
+    }
+  }
+
+  @Test
+  fun playlistWithOnlyMissingItemsIsHidden() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library()))
+      db.items().upsertAll(listOf(itemEntity("srv", "b1")))
+      db.playlists().replace(playlistRow("mixed", 0), entries("mixed", listOf("b9" to "", "b1" to "")))
+      db.playlists().replace(playlistRow("hidden", 1), entries("hidden", listOf("b8" to "", "b9" to "")))
+    }
+    val list = playlists()
+    assertEquals(listOf("mixed"), ids(list))
+    assertEquals(1, list.getInt("total"))
+    val mixed = list.getJSONArray("results").getJSONObject(0)
+    assertEquals("items the replica lacks are skipped", 1, mixed.getInt("numItems"))
+    assertEquals(listOf("b1" to null), itemKeyPairs(mixed.getJSONArray("itemKeys")))
+    assertTrue(runBlocking { reader.playlist("srv", "hidden") }.isNull("playlist"))
+    assertFalse(playlistItems("hidden").getBoolean("found"))
+    val one = runBlocking { reader.playlist("srv", "mixed") }.getJSONObject("playlist")
+    assertEquals(1, one.getInt("numItems"))
+    assertFalse("no items, they come by page", one.has("items"))
+    assertEquals(listOf("b1" to null), itemKeyPairs(playlistItems("mixed").getJSONArray("results")))
+  }
+
+  @Test
+  fun playlistsAreInServerOrderAndReportTheirPass() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library(), LibraryEntity("srv", "pods", 1, "podcast", """{"id":"pods"}""", null, 0, 0)))
+      db.items().upsertAll(listOf(itemEntity("srv", "b1")))
+      db.playlists().replace(playlistRow("b-tie", 5), entries("b-tie", listOf("b1" to "")))
+      db.playlists().replace(playlistRow("a-tie", 5), entries("a-tie", listOf("b1" to "")))
+      db.playlists().replace(playlistRow("first", 1), entries("first", listOf("b1" to "")))
+    }
+    assertEquals("position, then id", listOf("first", "a-tie", "b-tie"), ids(playlists()))
+    assertEquals(listOf("a-tie"), ids(playlists(limit = 1, page = 1)))
+    assertTrue(playlists().getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", null, false, null, null, null, 70L, null)) }
+    assertTrue("read before the items: not loaded", playlists().getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, null, null, null, 70L, null)) }
+    assertEquals(70L, playlists().getJSONObject("replica").getLong("reconciledAt"))
+    assertTrue(playlists().getJSONObject("replica").getBoolean("complete"))
+    assertEquals(70L, runBlocking { reader.playlist("srv", "first") }.getJSONObject("replica").getLong("reconciledAt"))
+    assertEquals(70L, playlistItems("first").getJSONObject("replica").getLong("reconciledAt"))
+    assertTrue("a podcast library whose playlists were never read may have it",
+            runBlocking { reader.playlist("srv", "nope") }.getJSONObject("replica").isNull("reconciledAt"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "pods", 60L, true, null, null, null, 50L, null)) }
+    assertEquals("the oldest playlists pass", 50L, runBlocking { reader.playlist("srv", "nope") }.getJSONObject("replica").getLong("reconciledAt"))
+  }
+
+  @Test
+  fun numUserPlaylistsComesFromTheReplica() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library().copy(numUserPlaylists = 5)))
+      db.items().upsertAll(listOf(itemEntity("srv", "b1")))
+      db.playlists().replace(playlistRow("p1", 0), entries("p1", listOf("b1" to "")))
+      db.playlists().replace(playlistRow("p2", 1), entries("p2", listOf("b1" to "")))
+    }
+    assertEquals("until the playlists were read, the server's count from the library read", 5,
+            runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
+    runBlocking { db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 60L, true, null, null, null, 70L, null)) }
+    assertEquals(2, runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
+    runBlocking { db.playlists().deleteByIds("srv", listOf("p1", "p2")) }
+    assertEquals(0, runBlocking { reader.library("srv", "lib1") }.getInt("numUserPlaylists"))
+  }
+
+  @Test
+  fun playlistOfAnotherServerIsNull() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(library("a")))
+      db.items().upsertAll(listOf(itemEntity("a", "b1")))
+      db.playlists().replace(playlistRow("p1", sc = "a"), entries("p1", listOf("b1" to ""), sc = "a"))
+    }
+    assertEquals(1, runBlocking { reader.playlist("a", "p1") }.getJSONObject("playlist").getInt("numItems"))
+    val other = runBlocking { reader.playlist("b", "p1") }
+    assertEquals("b", other.getString("serverConfigId"))
+    assertTrue(other.isNull("playlist"))
+    assertFalse(playlistItems("p1", sc = "b").getBoolean("found"))
+    assertEquals(0, playlists(sc = "b").getInt("total"))
   }
 }

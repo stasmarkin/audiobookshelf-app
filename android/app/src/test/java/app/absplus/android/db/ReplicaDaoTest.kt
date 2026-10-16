@@ -90,6 +90,6 @@ class ReplicaDaoTest {
     // Robolectric's SQLite allows 32 766 variables, so only the source shows the DAO deletes go through inChunks
     val source = File("src/main/java/app/absplus/android/db/replica/ReplicaDaos.kt").readText()
     val deletes = Regex("""suspend fun deleteByIds\(sc: String, ids: List<String>\) \{\s+inChunks\(ids\)""").findAll(source).count()
-    assertEquals("LibraryItemDao, SeriesDao, AuthorDao and CollectionDao delete through inChunks", 4, deletes)
+    assertEquals("LibraryItemDao, SeriesDao, AuthorDao, CollectionDao and PlaylistDao delete through inChunks", 5, deletes)
   }
 }

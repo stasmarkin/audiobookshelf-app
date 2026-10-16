@@ -7,6 +7,8 @@ import app.absplus.android.db.libraryRow
 import app.absplus.android.db.member
 import app.absplus.android.db.replica.CollectionEntity
 import app.absplus.android.db.replica.FilterCodec
+import app.absplus.android.db.replica.PlaylistEntity
+import app.absplus.android.db.replica.PlaylistItemEntity
 import app.absplus.android.db.seriesRow
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -752,5 +754,143 @@ class CatalogReconcilerTest {
     reconcile()
 
     assertEquals("an odd answer is a failed walk, not an empty library", setOf("b1"), ids())
+  }
+
+  private fun playlistRequests(libraryId: String = "lib1") = api.requests.filter { it.path == "/api/libraries/$libraryId/playlists" }
+
+  private fun playlistRows(libraryId: String = "lib1") = runBlocking { db.playlists().forLibrary("srv", libraryId) }
+
+  private fun playlistItemKeys(id: String) = runBlocking { db.playlists().itemsOf("srv", id) }.map { it.libraryItemId to it.episodeId }
+
+  private fun readPlaylistItems(id: String) = runBlocking { reader.playlistItems("srv", PlaylistItemsRequest(id, 100, 0)) }
+
+  @Test
+  fun playlistKeepsEpisodesAndOrder() {
+    server.library("lib1").library("pods", "podcast")
+    server.book("b1")
+    server.book("p1", libraryId = "pods")
+    server.playlist("pl1", listOf(FakePlaylistItem("p1", "ep2"), FakePlaylistItem("b1"), FakePlaylistItem("p1", "ep1")))
+
+    reconcile()
+
+    assertEquals("the order of `items`", listOf("p1" to "ep2", "b1" to "", "p1" to "ep1"), playlistItemKeys("pl1"))
+    val row = playlistRows().single()
+    assertFalse("the expanded items are not kept in the row", CatalogJson.mapper.readTree(row.json).has("items"))
+    val stored = runBlocking { db.playlists().itemsOf("srv", "pl1") }
+    assertNull("a book has no episode", stored[1].episodeJson)
+
+    val results = readPlaylistItems("pl1").getJSONArray("results")
+    assertEquals(3, results.length())
+    val episode = results.getJSONObject(0)
+    assertEquals("p1", episode.getString("libraryItemId"))
+    assertEquals("ep2", episode.getString("episodeId"))
+    assertEquals("p1", episode.getJSONObject("libraryItem").getString("id"))
+    assertEquals(61.5, episode.getJSONObject("episode").getJSONObject("audioFile").getDouble("duration"), 0.0)
+    assertEquals(61.5, episode.getJSONObject("episode").getDouble("duration"), 0.0)
+    val book = results.getJSONObject(1)
+    assertEquals("b1", book.getJSONObject("libraryItem").getString("id"))
+    assertTrue(book.isNull("episodeId"))
+    assertTrue(book.isNull("episode"))
+    assertEquals("ep1", results.getJSONObject(2).getString("episodeId"))
+    assertTrue("the expanded items are not written as library items", runBlocking { db.items().ids("srv", "lib1") }.toSet() == setOf("b1"))
+  }
+
+  @Test
+  fun playlistsPassRunsForEveryLibraryAndDeletesMissing() {
+    server.library("lib1").library("pods", "podcast")
+    server.book("p1", libraryId = "pods")
+    repeat(45) { server.playlist("pl%02d".format(it), listOf(FakePlaylistItem("p1", "ep$it")), libraryId = "pods") }
+    runBlocking { db.playlists().replace(PlaylistEntity("srv", "gone", "pods", 0, """{"id":"gone"}"""), listOf(PlaylistItemEntity("srv", "gone", 0, "p1", "", null))) }
+
+    reconcile()
+
+    assertEquals("a podcast library has playlists too", listOf(0, 1, 2), playlistRequests("pods").map { it.query!!.substringAfter("page=").toInt() })
+    playlistRequests("pods").forEach { assertTrue(it.query!!, it.query!!.matches(Regex("limit=20&page=\\d"))) }
+    assertEquals(listOf(0), playlistRequests("lib1").map { it.query!!.substringAfter("page=").toInt() })
+    assertEquals((0 until 45).map { "pl%02d".format(it) }, playlistRows("pods").map { it.id })
+    assertEquals((0 until 45).toList(), playlistRows("pods").map { it.position })
+    assertTrue("the items of a deleted playlist go with it", playlistItemKeys("gone").isEmpty())
+    assertEquals(1_000L, state("pods")!!.playlistsReconciledAt)
+    assertEquals(1_000L, state("lib1")!!.playlistsReconciledAt)
+    assertTrue(topics.containsAll(listOf("playlists:pods", "playlists:lib1", "library:pods")))
+
+    // Unchanged rows are not written again, and the count did not move
+    topics.clear()
+    now = 2_000L
+    reconcile()
+    assertFalse(topics.contains("playlists:pods"))
+    assertFalse(topics.contains("library:pods"))
+    assertEquals(2_000L, state("pods")!!.playlistsReconciledAt)
+
+    // A total that moves twice deletes nothing
+    server.playlists.remove("pl00")
+    server.onPlaylistsPage = { if (it.page == 1) it.total = 100 + it.call }
+    reconcile()
+    assertTrue("pl00" in playlistRows("pods").map { it.id })
+    assertEquals("the last complete read stays", 2_000L, state("pods")!!.playlistsReconciledAt)
+    server.onPlaylistsPage = {}
+    topics.clear()
+    reconcile()
+    assertFalse("a stable walk deletes", "pl00" in playlistRows("pods").map { it.id })
+    assertEquals(0, playlistRows("pods").first { it.id == "pl01" }.position)
+    assertTrue("the number of playlists changed", topics.containsAll(listOf("playlists:pods", "library:pods")))
+  }
+
+  @Test
+  fun playlistItemsChangeIsWrittenWithoutLastUpdate() {
+    server.library("lib1")
+    listOf("b1", "b2", "b3").forEach { server.book(it) }
+    server.playlist("pl1", listOf(FakePlaylistItem("b1"), FakePlaylistItem("b2")))
+    reconcile()
+    topics.clear()
+    // The server does not move lastUpdate when only the items change
+    server.playlists.getValue("pl1").items = listOf(FakePlaylistItem("b3"), FakePlaylistItem("b1"))
+    reconcile()
+    assertEquals(listOf("b3" to "", "b1" to ""), playlistItemKeys("pl1"))
+    assertTrue(topics.contains("playlists:lib1"))
+    assertFalse("the count did not change", topics.contains("library:lib1"))
+  }
+
+  @Test
+  fun playlistsAnswerWithoutResultsDeletesNothing() {
+    server.library("lib1")
+    server.book("b1")
+    server.playlist("pl1", listOf(FakePlaylistItem("b1")))
+    reconcile()
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/playlists")) 200 to """{"total":0}""" else handler(r) }
+    now = 2_000L
+
+    val result = reconcile()
+
+    assertEquals(listOf("pl1"), playlistRows().map { it.id })
+    assertEquals(listOf("b1" to ""), playlistItemKeys("pl1"))
+    assertEquals(1_000L, state("lib1")!!.playlistsReconciledAt)
+    assertEquals(listOf("lib1"), result.failedLibraries)
+  }
+
+  @Test
+  fun firstPlaylistsPassTellsTheTabEvenWithoutPlaylists() {
+    server.library("lib1")
+    reconcile()
+    assertEquals(1_000L, state("lib1")!!.playlistsReconciledAt)
+    assertTrue("a tab reading the server switches to the replica", topics.contains("playlists:lib1"))
+  }
+
+  @Test
+  fun playlistsFailureDoesNotStopTheOtherPasses() {
+    server.library("lib1")
+    server.book("b1")
+    server.collection("c1", listOf("b1"))
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/playlists")) 500 to "boom" else handler(r) }
+
+    val result = reconcile()
+
+    assertEquals(setOf("b1"), ids())
+    assertEquals(1_000L, state("lib1")!!.itemsReconciledAt)
+    assertEquals(1_000L, state("lib1")!!.collectionsReconciledAt)
+    assertNull(state("lib1")!!.playlistsReconciledAt)
+    assertEquals(listOf("lib1"), result.failedLibraries)
   }
 }
