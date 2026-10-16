@@ -13,27 +13,36 @@
       <p v-if="bookResults.length" class="search-section-label font-semibold text-sm mb-1">{{ $strings.LabelBooks }}</p>
       <template v-for="item in bookResults">
         <div :key="item.libraryItem.id" class="w-full h-16 py-1">
-          <nuxt-link :to="itemLink(item)">
+          <nuxt-link v-if="!isUnavailable(item)" :to="itemLink(item)">
             <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
           </nuxt-link>
+          <div v-else role="link" tabindex="0" @click="showUnavailable" @keydown.enter="showUnavailable">
+            <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
+          </div>
         </div>
       </template>
 
       <p v-if="podcastResults.length" class="search-section-label font-semibold text-sm mb-1 mt-2">{{ $strings.LabelPodcasts }}</p>
       <template v-for="item in podcastResults">
         <div :key="item.libraryItem.id" class="text-fg select-none relative py-1">
-          <nuxt-link :to="itemLink(item)">
+          <nuxt-link v-if="!isUnavailable(item)" :to="itemLink(item)">
             <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
           </nuxt-link>
+          <div v-else role="link" tabindex="0" @click="showUnavailable" @keydown.enter="showUnavailable">
+            <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
+          </div>
         </div>
       </template>
 
       <p v-if="episodeResults.length" class="search-section-label font-semibold text-sm mb-1 mt-2">{{ $strings.HeaderEpisodes }}</p>
       <template v-for="item in episodeResults">
         <div :key="item.libraryItem.recentEpisode.id" class="text-fg select-none relative py-1">
-          <nuxt-link :to="episodeLink(item)">
+          <nuxt-link v-if="!isUnavailable(item)" :to="episodeLink(item)">
             <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" :local-episode="item.localEpisode" />
           </nuxt-link>
+          <div v-else role="link" tabindex="0" @click="showUnavailable" @keydown.enter="showUnavailable">
+            <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" :local-episode="item.localEpisode" />
+          </div>
         </div>
       </template>
 
@@ -93,6 +102,10 @@ export default {
       // Only the answer of the latest request is shown and clears isFetching
       searchSeq: 0,
       catalogNotLoaded: false,
+      // The groups of the shown answer, before the downloaded copies are joined
+      answerResults: {},
+      // The downloaded items, read once for the open page and again when a download finishes or a copy is deleted
+      localItems: null,
       refreshDebouncer: null,
       stopDataChanged: null,
       bookResults: [],
@@ -104,7 +117,18 @@ export default {
       tagResults: []
     }
   },
+  watch: {
+    currentLibraryId() {
+      this.libraryOrServerChanged()
+    },
+    activeServerConfigId() {
+      this.libraryOrServerChanged()
+    }
+  },
   computed: {
+    activeServerConfigId() {
+      return this.$store.state.activeServerConfigId ?? null
+    },
     currentLibraryId() {
       return this.$store.state.libraries.currentLibraryId
     },
@@ -124,9 +148,13 @@ export default {
       this.authorResults = []
       this.narratorResults = []
       this.tagResults = []
+      this.answerResults = {}
       this.catalogNotLoaded = false
     },
-    async runSearch(value) {
+    /**
+     * `silent`: a re-run for a catalog change, which keeps the shown results and shows no "Fetching" until it answers.
+     */
+    async runSearch(value, { silent = false } = {}) {
       const seq = ++this.searchSeq
       this.lastSearch = value
       this.$store.commit('globals/setLastSearch', value)
@@ -137,26 +165,35 @@ export default {
         this.isFetching = false
         return
       }
-      this.isFetching = true
+      if (!silent) this.isFetching = true
       const libraryId = this.currentLibraryId
-      const [answer, localItems] = await Promise.all([
+      const [answer] = await Promise.all([
         this.$absData.search({ libraryId, q }).catch((error) => {
           console.error('Search error', error)
           return null
         }),
-        this.$db.getLocalLibraryItems().catch(() => [])
+        this.loadLocalItems()
       ])
       if (seq !== this.searchSeq) return
       this.isFetching = false
-      const activeServerConfigId = this.$store.state.activeServerConfigId ?? null
       // Asked for the library or server that was current before a switch: none of it belongs here
-      if (answer && (answer.libraryId !== this.currentLibraryId || (answer.serverConfigId ?? null) !== activeServerConfigId)) {
+      if (answer && (answer.libraryId !== this.currentLibraryId || (answer.serverConfigId ?? null) !== this.activeServerConfigId)) {
         this.clearResults()
         return
       }
-
-      const results = answer?.results || {}
-      const withCopy = (item) => ({ ...item, localLibraryItem: findLocalCopy(localItems, item.libraryItem, activeServerConfigId) })
+      this.answerResults = answer?.results || {}
+      this.showResults()
+      this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.totalResults
+    },
+    async loadLocalItems() {
+      if (this.localItems === null) this.localItems = await this.$db.getLocalLibraryItems().catch(() => [])
+      return this.localItems
+    },
+    /** The groups of the shown answer with the downloaded copies of the active server joined. */
+    showResults() {
+      const results = this.answerResults
+      const localItems = this.localItems || []
+      const withCopy = (item) => ({ ...item, localLibraryItem: findLocalCopy(localItems, item.libraryItem, this.activeServerConfigId) })
       const withEpisode = (item) => {
         const copy = withCopy(item)
         const episodeId = item.libraryItem?.recentEpisode?.id
@@ -170,7 +207,26 @@ export default {
       this.authorResults = results.authors || []
       this.narratorResults = results.narrators || []
       this.tagResults = results.tags || []
-      this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.totalResults
+    },
+    /** A download finished or a downloaded copy was deleted: the copies joined to the results change. */
+    async localItemsChanged() {
+      this.localItems = null
+      await this.loadLocalItems()
+      this.showResults()
+    },
+    /** Results of another library or server never stay: the open query runs again for the current one. */
+    libraryOrServerChanged() {
+      this.clearResults()
+      if ((this.lastSearch || '').trim()) this.runSearch(this.lastSearch)
+      else this.searchSeq++
+    },
+    /** Offline, a result without a downloaded copy (an episode: without this episode downloaded) opens nothing. */
+    isUnavailable(item) {
+      if (!['offline', 'unauthorized'].includes(this.$store.state.serverState)) return false
+      return item.libraryItem?.recentEpisode ? !item.localEpisode : !item.localLibraryItem
+    },
+    showUnavailable() {
+      this.$toast?.info(this.$strings.LabelNotAvailableOffline)
     },
     /** A downloaded copy goes along, so the item page can open it without the server. */
     itemLink(item) {
@@ -189,7 +245,7 @@ export default {
       const ids = change.ids || []
       if (!SEARCH_TOPICS.some((topic) => ids.includes(`${topic}:${this.currentLibraryId}`))) return
       if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
-      this.refreshDebouncer.schedule(() => this.runSearch(this.lastSearch))
+      this.refreshDebouncer.schedule(() => this.runSearch(this.lastSearch, { silent: true }))
     },
     updateSearch(val) {
       clearTimeout(this.searchTimeout)
@@ -207,6 +263,8 @@ export default {
   },
   mounted() {
     this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
+    this.$eventBus.$on('new-local-library-item', this.localItemsChanged)
+    this.$eventBus.$on('local-library-items-changed', this.localItemsChanged)
     if (this.$store.state.globals.lastSearch) {
       this.search = this.$store.state.globals.lastSearch
       this.runSearch(this.search)
@@ -216,6 +274,8 @@ export default {
   },
   beforeDestroy() {
     clearTimeout(this.searchTimeout)
+    this.$eventBus.$off('new-local-library-item', this.localItemsChanged)
+    this.$eventBus.$off('local-library-items-changed', this.localItemsChanged)
     if (this.stopDataChanged) this.stopDataChanged()
     this.stopDataChanged = null
     if (this.refreshDebouncer) this.refreshDebouncer.cancel()

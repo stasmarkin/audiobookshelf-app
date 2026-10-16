@@ -62,8 +62,11 @@ export default {
       lastFetch: 0,
       lastFetchKey: null,
       fetchSeq: 0,
-      // The key of the playing item a playback tick already re-read the home for (see shouldRefreshHome)
-      refreshedForKey: null,
+      // `{ key, context }`: the playing item a playback tick already re-read the home for (see shouldRefreshHome), and
+      // the first "continue" key and playing episode it was asked under; it counts while those stay the same
+      refreshedFor: null,
+      // `<serverConfigId>|<libraryId>` the shown shelves were read for
+      shownFor: null,
       refreshDebouncer: null,
       stopDataChanged: null,
       localLibraryItems: [],
@@ -207,9 +210,9 @@ export default {
     /**
      * The home of the current library: native's shelves (the replica, or the server while the library was never
      * reconciled), the downloaded copies joined to them, and the local shelves. `force`: a re-read for a change native
-     * reported, not throttled; `playbackKey`: the playing item's key when a playback tick asked for it.
+     * reported, not throttled. Only a read of another library (or the first) shows the loading state.
      */
-    async fetchCategories({ force = false, playbackKey = null } = {}) {
+    async fetchCategories({ force = false } = {}) {
       const libraryId = this.currentLibraryId
       const serverConfigId = this.$store.state.activeServerConfigId ?? null
       const readsCatalog = !!(this.$store.getters['getHasActiveServer'] && libraryId)
@@ -220,16 +223,18 @@ export default {
       }
       this.lastFetch = Date.now()
       this.lastFetchKey = key
-      this.refreshedForKey = playbackKey
       const seq = ++this.fetchSeq
-      this.isLoading = true
+      const shelvesFor = `${serverConfigId}|${libraryId}`
+      const otherShelves = !this.shelves.length || this.shownFor !== shelvesFor
+      if (otherShelves) this.isLoading = true
 
       const localLibraryItems = await this.$db.getLocalLibraryItems()
       if (seq !== this.fetchSeq) return
       this.localLibraryItems = localLibraryItems
       const localShelves = this.getLocalMediaItemCategories()
-      // Something to show while native answers, on the first read only: a re-read keeps the shelves in place
-      if (!this.shelves.length) this.shelves = localShelves
+      // Shelves of the previous library or server never stay: the local ones while native answers. A re-read of the
+      // same library keeps its shelves in place
+      if (otherShelves) this.showLocalShelves(localShelves)
 
       let answer = null
       let failed = false
@@ -242,21 +247,32 @@ export default {
         if (seq !== this.fetchSeq) return
         // Asked for another library or server than the current one: the read for the current one is on its way
         if (answer && (answer.libraryId !== this.currentLibraryId || (answer.serverConfigId ?? null) !== (this.$store.state.activeServerConfigId ?? null))) {
+          if (this.shownFor !== `${this.$store.state.activeServerConfigId ?? null}|${this.currentLibraryId}`) this.showLocalShelves(localShelves)
           this.isLoading = false
           return
         }
       }
 
       if (failed) {
-        this.shelves = localShelves
-        this.catalogNotLoaded = false
+        this.showLocalShelves(localShelves)
       } else {
         const merged = mergeHomeShelves({ answer, localShelves, localItems: localLibraryItems, activeServerConfigId: serverConfigId, mediaType: this.currentLibraryMediaType })
         this.shelves = merged.shelves
         this.catalogNotLoaded = merged.catalogNotLoaded
+        this.shownFor = shelvesFor
       }
       console.log('[categories] Shelves set', this.shelves.length, answer?.fromServer ? 'from the server' : 'from the device')
       this.isLoading = false
+    },
+    /** The downloaded items' shelves alone, belonging to no library's catalog. */
+    showLocalShelves(localShelves) {
+      this.shelves = localShelves
+      this.catalogNotLoaded = false
+      this.shownFor = null
+    },
+    /** A download finished or a downloaded copy was deleted: the copies joined to the shelves change. */
+    localItemsChanged() {
+      return this.fetchCategories({ force: true })
     },
     libraryChanged() {
       if (this.currentLibraryId) {
@@ -268,19 +284,28 @@ export default {
     dataChanged(change) {
       const playingEpisodeId = this.$store.state.currentPlaybackSession?.episodeId || null
       const continueKeys = continueKeysOf(this.shelves)
-      if (!shouldRefreshHome(change, { libraryId: this.currentLibraryId, continueKeys, playingEpisodeId, refreshedForKey: this.refreshedForKey })) return
-      const keyOf = (id) => (playingEpisodeId ? `${id}:${playingEpisodeId}` : id)
-      const playbackKey = change.scope === 'playback' ? keyOf((change.ids || []).find((id) => keyOf(id) !== continueKeys[0] && keyOf(id) !== this.refreshedForKey)) : null
+      const context = `${continueKeys[0] ?? ''}|${playingEpisodeId ?? ''}`
+      const refreshedForKey = this.refreshedFor?.context === context ? this.refreshedFor.key : null
+      if (!shouldRefreshHome(change, { libraryId: this.currentLibraryId, continueKeys, playingEpisodeId, refreshedForKey })) return
+      if (change.scope === 'playback') {
+        const keyOf = (id) => (playingEpisodeId ? `${id}:${playingEpisodeId}` : id)
+        const id = (change.ids || []).find((i) => keyOf(i) !== continueKeys[0] && keyOf(i) !== refreshedForKey)
+        this.refreshedFor = { key: keyOf(id), context }
+      }
       if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
-      this.refreshDebouncer.schedule(() => this.fetchCategories({ force: true, playbackKey }))
+      this.refreshDebouncer.schedule(() => this.fetchCategories({ force: true }))
     },
     initListeners() {
       this.$eventBus.$on('library-changed', this.libraryChanged)
       this.$eventBus.$on('server-reachable', this.libraryChanged)
+      this.$eventBus.$on('new-local-library-item', this.localItemsChanged)
+      this.$eventBus.$on('local-library-items-changed', this.localItemsChanged)
     },
     removeListeners() {
       this.$eventBus.$off('library-changed', this.libraryChanged)
       this.$eventBus.$off('server-reachable', this.libraryChanged)
+      this.$eventBus.$off('new-local-library-item', this.localItemsChanged)
+      this.$eventBus.$off('local-library-items-changed', this.localItemsChanged)
     }
   },
   async mounted() {

@@ -63,7 +63,7 @@ test('home reads the replica and falls back while never reconciled', async () =>
   const serverShelves = [shelf('recently-added', 'book', [{ id: 'srv1' }])]
   const online = service({ plugin: never, http: fakeHttp(() => serverShelves) })
   const answer = await online.data.getPersonalized({ libraryId: 'lib1' })
-  assert.deepEqual(online.http.paths, ['/api/libraries/lib1/personalized?include=rssfeed,numEpisodesIncomplete&limit=10'])
+  assert.deepEqual(online.http.paths, ['/api/libraries/lib1/personalized?minified=1&include=rssfeed,numEpisodesIncomplete&limit=10'])
   assert.equal(answer.fromServer, true)
   assert.deepEqual(plain(answer.shelves), plain(serverShelves))
   assert.equal(answer.libraryId, 'lib1')
@@ -234,7 +234,7 @@ test('web dev fallback proxies home and search to $axios', async () => {
   const home = await data.getPersonalized({ libraryId: 'lib1' })
   const found = await data.search({ libraryId: 'lib1', q: 'a b' })
   assert.deepEqual(plain(gets), [
-    ['/api/libraries/lib1/personalized', { include: 'rssfeed,numEpisodesIncomplete', limit: 10 }],
+    ['/api/libraries/lib1/personalized', { minified: 1, include: 'rssfeed,numEpisodesIncomplete', limit: 10 }],
     ['/api/libraries/lib1/search', { q: 'a b', limit: 12 }]
   ])
   assert.equal(home.shelves[0].id, 'discover')
@@ -350,16 +350,90 @@ test('a progress change re-reads the home once', async () => {
   timers.run()
   await flush()
   assert.equal(page.plugin.calls.length, 3)
-  assert.equal(page.view.refreshedForKey, 'li9')
+  assert.equal(page.view.refreshedFor.key, 'li9')
   page.view.dataChanged({ scope: 'playback', ids: ['li9'] })
   assert.deepEqual(timers.run(), [])
-  // Any other re-read forgets the key
+  // Another re-read that leaves the first "continue" item as it was keeps the key: still no re-read per tick
   page.view.dataChanged({ scope: 'catalog', ids: ['state:lib1'] })
   timers.run()
   await flush()
-  assert.equal(page.view.refreshedForKey, null)
+  page.view.dataChanged({ scope: 'playback', ids: ['li9'] })
+  assert.deepEqual(timers.run(), [])
   page.view.dataChanged({ scope: 'catalog', ids: ['items:lib2'] })
   assert.deepEqual(timers.run(), [])
+  // A new first item (or another episode playing) forgets it
+  page.store.state.currentPlaybackSession = { episodeId: 'e2' }
+  page.view.dataChanged({ scope: 'playback', ids: ['li9'] })
+  assert.deepEqual(timers.run(), [1000])
+})
+
+test('a background re-read shows no loading state; another library never shows the previous shelves', async () => {
+  let release = null
+  const plugin = fakePlugin({
+    async getPersonalized(args) {
+      plugin.calls.push(['getPersonalized', args])
+      const answer = { serverConfigId: 'a', libraryId: args.libraryId, shelves: [shelf(`continue-${args.libraryId}`, 'book', [{ id: 'li1' }])], replica: replica() }
+      return release ? new Promise((resolve) => (release = () => resolve(answer))) : answer
+    }
+  })
+  const page = await homePage({ plugin, localItems: [{ id: 'local_1', libraryItemId: 'li1', serverConnectionConfigId: 'a', mediaType: 'book', media: {} }] })
+  await page.view.fetchCategories()
+  assert.deepEqual(page.view.shelves.map((s) => s.id), ['continue-lib1', 'local-books'])
+  const loading = []
+  const watched = page.view
+  let isLoading = watched.isLoading
+  Object.defineProperty(watched, 'isLoading', { get: () => isLoading, set: (v) => (loading.push(v), (isLoading = v)), configurable: true })
+
+  release = () => {}
+  const reread = watched.fetchCategories({ force: true })
+  await flush()
+  assert.deepEqual(watched.shelves.map((s) => s.id), ['continue-lib1', 'local-books'], 'the shelves stay in place')
+  release()
+  await reread
+  assert.ok(!loading.includes(true), 'no "Loading server data" for a re-read')
+  loading.length = 0
+
+  // Library switched: while native answers, the local shelves, not lib1's
+  page.store.state.libraries.currentLibraryId = 'lib2'
+  watched.catalogNotLoaded = true
+  const switched = watched.fetchCategories()
+  await flush()
+  assert.deepEqual(watched.shelves.map((s) => s.id), ['local-books'])
+  assert.equal(watched.catalogNotLoaded, false)
+  assert.deepEqual(loading, [true])
+  release()
+  await switched
+  assert.deepEqual(watched.shelves.map((s) => s.id), ['continue-lib2', 'local-books'])
+  assert.equal(loading.at(-1), false)
+
+  // An answer for the previous library arriving for the new one: not shown
+  const stale = await homePage({ plugin: fakePlugin({ getPersonalized: async () => ({ serverConfigId: 'a', libraryId: 'lib1', shelves: [shelf('continue-lib1', 'book', [{ id: 'x' }])], replica: replica() }) }) })
+  stale.view.shelves = [shelf('continue-lib1', 'book', [{ id: 'x' }])]
+  stale.view.shownFor = 'a|lib1'
+  stale.store.state.libraries.currentLibraryId = 'lib2'
+  await stale.view.fetchCategories()
+  assert.deepEqual(stale.view.shelves, [])
+  assert.equal(stale.view.isLoading, false)
+})
+
+test('a finished download or a deleted copy re-reads the home', async () => {
+  const page = await homePage()
+  const handlers = {}
+  page.view.$eventBus = { $on: (name, fn) => (handlers[name] = fn), $off: (name) => delete handlers[name] }
+  page.view.initListeners()
+  await page.view.fetchCategories()
+  assert.equal(page.view.shelves[0].entities[0].localLibraryItem, undefined)
+  page.view.$db.getLocalLibraryItems = async () => [{ id: 'local_1', libraryItemId: 'li1', serverConnectionConfigId: 'a', mediaType: 'book', media: {} }]
+  await handlers['new-local-library-item']()
+  assert.equal(page.view.shelves[0].entities[0].localLibraryItem.id, 'local_1')
+  page.view.$db.getLocalLibraryItems = async () => []
+  await handlers['local-library-items-changed']()
+  assert.equal(page.view.shelves[0].entities[0].localLibraryItem, undefined)
+  page.view.removeListeners()
+  assert.deepEqual(Object.keys(handlers), [])
+  // The menu that deletes a copy says so
+  const menu = await read('../components/modals/ItemMoreMenuModal.vue')
+  assert.equal((menu.match(/\$eventBus\.\$emit\('local-library-items-changed'\)/g) || []).length, 2)
 })
 
 test('home does not read /personalized directly', async () => {

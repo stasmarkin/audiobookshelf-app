@@ -62,7 +62,10 @@ async function searchPage({ user = null, serverState = 'offline', activeServerCo
     $store: store,
     $absData: absData,
     $db: { getLocalLibraryItems: async () => localItems },
-    $nativeHttp: { get: async (path) => (nativeHttp.push(path), {}) }
+    $nativeHttp: { get: async (path) => (nativeHttp.push(path), {}) },
+    $eventBus: { handlers: {}, $on(name, fn) { this.handlers[name] = fn }, $off(name) { delete this.handlers[name] } },
+    $toast: { shown: [], info(m) { this.shown.push(m) } },
+    $strings: { LabelNotAvailableOffline: 'Not available offline' }
   }
   for (const [name, fn] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: fn.bind(view), configurable: true })
   for (const [name, fn] of Object.entries(component.methods)) view[name] = fn.bind(view)
@@ -157,6 +160,47 @@ test('empty replica offline says catalog not loaded', async () => {
   assert.equal(found.view.catalogNotLoaded, false)
 })
 
+test('the search follows another library or server', async () => {
+  const page = await searchPage({ search: async ({ libraryId, q }) => ({ serverConfigId: page.store.state.activeServerConfigId, libraryId, q, results: { book: [book(`${libraryId}-${q}`)] }, replica: replica() }) })
+  await page.view.runSearch('abc')
+  assert.deepEqual(page.view.bookResults.map((r) => r.libraryItem.id), ['lib1-abc'])
+  page.store.state.libraries.currentLibraryId = 'lib2'
+  const rerun = page.view.libraryOrServerChanged()
+  assert.deepEqual(page.view.bookResults, [], "lib1's results go at once")
+  await flush()
+  assert.deepEqual(page.view.bookResults.map((r) => r.libraryItem.id), ['lib2-abc'])
+  page.store.state.activeServerConfigId = 'b'
+  page.view.libraryOrServerChanged()
+  await flush()
+  assert.deepEqual(page.asked.map((a) => a.libraryId), ['lib1', 'lib2', 'lib2'])
+  assert.equal(page.view.bookResults.length, 1)
+  const component = new Function('findLocalCopy', 'createDebouncer', scriptOf(await read('../pages/search.vue')))(findLocalCopy, createDebouncer)
+  assert.deepEqual(Object.keys(component.watch).sort(), ['activeServerConfigId', 'currentLibraryId'])
+  void rerun
+})
+
+test('downloaded copies are read once and follow downloads and deletions', async () => {
+  let reads = 0
+  let copies = []
+  const page = await searchPage({ search: ({ libraryId, q }) => ({ serverConfigId: 'a', libraryId, q, results: { book: [book('li1')] }, replica: replica() }) })
+  page.view.$db.getLocalLibraryItems = async () => (reads++, copies)
+  page.view.$eventBus.$on('new-local-library-item', page.view.localItemsChanged)
+  await page.view.runSearch('a')
+  await page.view.runSearch('ab')
+  assert.equal(reads, 1, 'not on every query')
+  assert.equal(page.view.bookResults[0].localLibraryItem, null)
+  copies = [{ id: 'local_1', libraryItemId: 'li1', serverConnectionConfigId: 'a', media: {} }]
+  await page.view.$eventBus.handlers['new-local-library-item']()
+  assert.equal(page.view.bookResults[0].localLibraryItem.id, 'local_1')
+  copies = []
+  await page.view.localItemsChanged()
+  assert.equal(page.view.bookResults[0].localLibraryItem, null)
+  assert.equal(page.asked.length, 2, 'the search is not asked again for a copy')
+  const script = scriptOf(await read('../pages/search.vue'))
+  assert.match(script, /\$eventBus\.\$on\('local-library-items-changed', this\.localItemsChanged\)/)
+  assert.match(script, /\$eventBus\.\$off\('new-local-library-item', this\.localItemsChanged\)/)
+})
+
 test('open search re-runs after the catalog changes', async () => {
   const page = await searchPage({ search: async ({ libraryId, q }) => ({ serverConfigId: 'a', libraryId, q, results: {}, replica: replica() }) })
   await page.view.runSearch('abc')
@@ -165,6 +209,7 @@ test('open search re-runs after the catalog changes', async () => {
   page.view.dataChanged({ scope: 'catalog', ids: ['state:lib1'] })
   page.view.dataChanged({ scope: 'catalog', ids: ['episodes:lib1'] })
   assert.deepEqual(timers.run(), [1000])
+  assert.equal(page.view.isFetching, false, 'a quiet re-run: no "Fetching" over the shown results')
   await flush()
   assert.deepEqual(page.asked.map((a) => a.q), ['abc', 'abc'])
 
@@ -184,12 +229,7 @@ async function searchCard(path, props, serverState) {
   const view = { ...props, $store: { state: { serverState }, getters: { 'libraries/getBookCoverAspectRatio': 1.6 } }, $toast: { info: (m) => toasts.push(m) }, $strings: { LabelNotAvailableOffline: 'Not available offline' } }
   for (const [name, fn] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: fn.bind(view), configurable: true })
   for (const [name, fn] of Object.entries(component.methods)) view[name] = fn.bind(view)
-  const click = () => {
-    const e = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true }, stopPropagation() {} }
-    view.clickCard(e)
-    return e.defaultPrevented
-  }
-  return { view, toasts, click }
+  return { view, toasts }
 }
 
 /** LazyBookCard's computed values and methods for an episode card. */
@@ -221,17 +261,26 @@ test('offline search cards are marked and do not navigate', async () => {
   for (const path of ['../components/cards/ItemSearchCard.vue', '../components/cards/EpisodeSearchCard.vue']) {
     const offline = await searchCard(path, { ...item, episode: { id: 'ep1' }, localLibraryItem: null, localEpisode: null }, 'offline')
     assert.equal(offline.view.notAvailableOffline, true, path)
-    assert.equal(offline.click(), true, `${path}: the link does not navigate`)
-    assert.deepEqual(offline.toasts, ['Not available offline'])
     const downloaded = await searchCard(path, { ...item, episode: { id: 'ep1' }, localLibraryItem: { id: 'local_1' }, localEpisode: { id: 'local_ep_1' } }, 'offline')
     assert.equal(downloaded.view.notAvailableOffline, false, path)
-    assert.equal(downloaded.click(), false)
-    assert.deepEqual(downloaded.toasts, [])
     const online = await searchCard(path, { ...item, episode: { id: 'ep1' }, localLibraryItem: null, localEpisode: null }, 'online')
     assert.equal(online.view.notAvailableOffline, false)
     assert.equal((await searchCard(path, { ...item, localLibraryItem: null, localEpisode: null }, 'unknown')).view.notAvailableOffline, false, 'not while the first check is pending')
     assert.match(templateOf(await read(path)), /v-if="notAvailableOffline"[^>]*>\{\{ \$strings\.LabelNotAvailableOffline \}\}/)
   }
+  // The page, not the card, keeps an unavailable result from opening: no link at all (click or keyboard), a toast
+  const page = await searchPage({ search: ({ libraryId, q }) => ({ serverConfigId: 'a', libraryId, q, results: { book: [book('li1')], episodes: [episode('pod1', 'ep1')] }, replica: replica() }), localItems: [{ id: 'local_2', libraryItemId: 'pod1', serverConnectionConfigId: 'a', media: { episodes: [{ id: 'local_ep_9', serverEpisodeId: 'ep9' }] } }] })
+  await page.view.runSearch('x')
+  assert.equal(page.view.isUnavailable(page.view.bookResults[0]), true)
+  assert.equal(page.view.isUnavailable(page.view.episodeResults[0]), true, 'another episode of the podcast does not count')
+  page.view.showUnavailable()
+  assert.deepEqual(page.view.$toast.shown, ['Not available offline'])
+  page.store.state.serverState = 'online'
+  assert.equal(page.view.isUnavailable(page.view.bookResults[0]), false)
+  const template = templateOf(await read('../pages/search.vue'))
+  assert.equal((template.match(/<nuxt-link v-if="!isUnavailable\(item\)"/g) || []).length, 3)
+  assert.equal((template.match(/<div v-else role="link" tabindex="0" @click="showUnavailable" @keydown\.enter="showUnavailable">/g) || []).length, 3)
+
   // The episode card needs this episode downloaded, not the podcast's other ones
   const episodeOnly = await searchCard('../components/cards/EpisodeSearchCard.vue', { ...item, localEpisode: null }, 'offline')
   assert.equal(episodeOnly.view.notAvailableOffline, true)

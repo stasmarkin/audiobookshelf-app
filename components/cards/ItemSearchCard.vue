@@ -63,22 +63,8 @@ export default {
       return ['offline', 'unauthorized'].includes(this.$store.state.serverState)
     }
   },
-  methods: {
-    /** The result's link opens nothing offline without a downloaded copy: say so instead. */
-    clickCard(e) {
-      if (!this.notAvailableOffline) return
-      e?.preventDefault?.()
-      e?.stopPropagation?.()
-      this.$toast?.info(this.$strings.LabelNotAvailableOffline)
-    }
-  },
-  mounted() {
-    // On the root element, before the result's link handles the click (the root stays a plain themed div)
-    this.$el.addEventListener('click', this.clickCard)
-  },
-  beforeDestroy() {
-    this.$el.removeEventListener('click', this.clickCard)
-  }
+  methods: {},
+  mounted() {}
 }
 </script>
 

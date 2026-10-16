@@ -527,11 +527,11 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     const { libraryId, limit = 10 } = args
     const include = 'rssfeed,numEpisodesIncomplete'
     if (isWeb) {
-      const data = await $axios.$get(`${libraryPath(libraryId)}/personalized`, { params: { include, limit } })
+      const data = await $axios.$get(`${libraryPath(libraryId)}/personalized`, { params: { minified: 1, include, limit } })
       return { ...homeShape(libraryId)(data), serverConfigId: activeServer(), replica: webReplica() }
     }
     const answer = await fromNative(() => plugin.getPersonalized({ libraryId, limit }))
-    return withServerFallback(answer, `${libraryPath(libraryId)}/personalized?include=${include}&limit=${limit}`, homeShape(libraryId), () => getPersonalized(args))
+    return withServerFallback(answer, `${libraryPath(libraryId)}/personalized?minified=1&include=${include}&limit=${limit}`, homeShape(libraryId), () => getPersonalized(args))
   }
 
   const search = async (args) => {
