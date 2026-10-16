@@ -26,7 +26,11 @@ ensure_host_port() {
   return 1
 }
 
-close_tunnel() { pkill -f "L 127.0.0.1:$ABS_PORT:127.0.0.1:$ABS_PORT colima" 2>/dev/null || true; }
+# colima's ssh_config multiplexes into lima's shared master, so the forward lives there and is cancelled through it.
+close_tunnel() {
+  [[ -f "$HOME/.colima/ssh_config" ]] || return 0
+  ssh -F "$HOME/.colima/ssh_config" -O cancel -L "127.0.0.1:$ABS_PORT:127.0.0.1:$ABS_PORT" colima >/dev/null 2>&1 || true
+}
 
 start_container() {
   mkdir -p "$STATE_DIR"/{config,metadata,audiobooks}
