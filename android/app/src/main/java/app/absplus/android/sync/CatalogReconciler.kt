@@ -26,6 +26,26 @@ const val COLLECTIONS_PAGE_SIZE = 20
 /** As collections: the server expands every item of every playlist of the user and cuts the page from it. */
 const val PLAYLISTS_PAGE_SIZE = 20
 
+/** Rows per transaction when search keys of an older version are recomputed. */
+const val SEARCH_KEY_BACKFILL_CHUNK = 500
+
+/**
+ * Recomputes the search keys of a library's items and episodes written before [SEARCH_KEY_VERSION] (rows of 4.x keep
+ * "" until they change). Only the key changes, nothing visible: no notice.
+ */
+internal suspend fun backfillSearchKeys(db: ReplicaDatabase, sc: String, libraryId: String): Int {
+  val prefix = SEARCH_KEY_VERSION + SEARCH_KEY_SEPARATOR
+  val items = db.items().staleSearchKeys(sc, libraryId, prefix)
+  for (chunk in items.chunked(SEARCH_KEY_BACKFILL_CHUNK)) {
+    db.withTransaction { chunk.forEach { db.items().replaceStaleSearchKey(sc, it.id, it.searchKey, CatalogJson.searchKey(CatalogJson.mapper.readTree(it.json))) } }
+  }
+  val episodes = db.episodes().staleKeys(sc, libraryId, prefix)
+  for (chunk in episodes.chunked(SEARCH_KEY_BACKFILL_CHUNK)) {
+    db.withTransaction { chunk.forEach { db.episodes().replaceStaleSearchKey(sc, it.id, it.searchKey, it.title, CatalogJson.episodeSearchKey(it.title)) } }
+  }
+  return items.size + episodes.size
+}
+
 data class CatalogResult(val libraries: Int, val failedLibraries: List<String>, val stoppedBy: HttpOutcome?)
 
 fun emptyLibraryState(sc: String, libraryId: String) = LibraryStateEntity(sc, libraryId, null, false, null, null, null, null, null)
@@ -148,6 +168,9 @@ class CatalogReconciler(
     if (book) reconcileAuthors(config, id)
     if (book) reconcileCollections(config, id)
     reconcilePlaylists(config, id)
+    // Here and not on the first search: on 10 000 rows it takes seconds on a phone
+    val backfilled = backfillSearchKeys(db, sc, id)
+    if (backfilled > 0) log("Catalog $sc library $id: $backfilled search keys recomputed")
     updateState(sc, id) { it.copy(lastError = null) }
   }
 

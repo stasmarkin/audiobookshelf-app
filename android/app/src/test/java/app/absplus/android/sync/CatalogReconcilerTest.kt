@@ -1069,4 +1069,25 @@ class CatalogReconcilerTest {
     assertEquals(listOf("p2", "p3"), itemFetches())
     assertNotNull(state("pods")!!.episodesReconciledAt)
   }
+
+  @Test
+  fun passBackfillsStaleSearchKeys() {
+    server.library("lib1")
+    repeat(1200) { server.book("b$it") }
+    reconcile()
+    val before = runBlocking { ids().map { db.items().get("srv", it)!! } }.associateBy { it.id }
+    runBlocking { before.keys.forEach { db.items().setSearchKey("srv", it, "") } }
+    topics.clear()
+
+    reconcile()
+
+    val after = runBlocking { ids().map { db.items().get("srv", it)!! } }
+    assertEquals(1200, after.size)
+    after.forEach {
+      assertTrue(it.searchKey, it.searchKey.startsWith("1\u0001title b"))
+      assertEquals(before.getValue(it.id).json, it.json)
+      assertEquals(before.getValue(it.id).contentHash, it.contentHash)
+    }
+    assertFalse(topics.contains("items:lib1"))
+  }
 }

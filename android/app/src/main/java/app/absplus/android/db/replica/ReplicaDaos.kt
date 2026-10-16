@@ -105,6 +105,10 @@ abstract class LibraryItemDao {
   @Query("UPDATE library_items SET searchKey = :key WHERE serverConfigId = :sc AND id = :id")
   abstract suspend fun setSearchKey(sc: String, id: String, key: String)
 
+  /** Only while the row still has [old]: a row rewritten meanwhile already carries its own key. */
+  @Query("UPDATE library_items SET searchKey = :key WHERE serverConfigId = :sc AND id = :id AND searchKey = :old")
+  abstract suspend fun replaceStaleSearchKey(sc: String, id: String, old: String, key: String)
+
   @Query("SELECT id, json, rssFeedJson FROM library_items WHERE serverConfigId = :sc AND id IN (:ids)")
   abstract suspend fun jsonChunk(sc: String, ids: List<String>): List<IdJson>
 
@@ -145,6 +149,11 @@ abstract class EpisodeDao {
 
   @Query("UPDATE podcast_episodes SET searchKey = :key WHERE serverConfigId = :sc AND id = :id")
   abstract suspend fun setSearchKey(sc: String, id: String, key: String)
+
+  /** Only while the row still has [old] and [title]. */
+  @Query("""UPDATE podcast_episodes SET searchKey = :key WHERE serverConfigId = :sc AND id = :id AND searchKey = :old
+            AND title = :title""")
+  abstract suspend fun replaceStaleSearchKey(sc: String, id: String, old: String, title: String, key: String)
 
   @Query("DELETE FROM podcast_episodes WHERE serverConfigId = :sc AND libraryItemId = :libraryItemId")
   abstract suspend fun deleteForPodcast(sc: String, libraryItemId: String)
