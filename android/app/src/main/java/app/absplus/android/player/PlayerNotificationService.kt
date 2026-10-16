@@ -1111,6 +1111,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     data class Failed(val message: String, val httpStatus: Int? = null) : StartResult
     /** A newer start, Close or a server switch came first: nothing was prepared. */
     object Replaced : StartResult
+    /** The queue's item can only stream and the server is away: the queue waits on it ([queueItemToAwait]). */
+    object AwaitingServer : StartResult
   }
 
   fun sourceResolver() = PlaybackSourceResolver({ DeviceManager.dbManager.getLocalLibraryItems() }, { DeviceManager.dbManager.getLocalLibraryItem(it) }) { item, episode ->
@@ -1171,6 +1173,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         stopSyncerThen { prepareAdmitted(ticket, session, request) }
       }
       is PlaybackSource.Stream -> {
+        // Without an active server there is nothing to wait for: the start fails as before
+        val queued = ActiveServer.current()?.let { queueItemToAwait(request, plan, playlistQueue, playlistQueueIndex, ServerReachability.state.value) }
+        if (queued != null) {
+          awaitQueueStart(ticket, queued)
+          onResult(StartResult.AwaitingServer)
+          return@launch
+        }
         val payload = getPlayItemRequestPayload(false)
         stopSyncerThen {
           apiHandler.playLibraryItemWithStatus(plan.libraryItemId, plan.episodeId ?: "", payload) { session, httpStatus ->
@@ -1190,6 +1199,21 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         }
       }
     }
+  }
+
+  /** The app started the queue on an item it cannot stream now: what plays stops, the queue waits on the item. */
+  private fun awaitQueueStart(ticket: StartGate.Ticket, item: PlaylistQueueItem) {
+    // Read before the pause below, which would turn the intent of this start into a paused one
+    val playWhenReady = startGate.admit(ticket) ?: return
+    if (currentPlayer.playWhenReady) {
+      pauseOrigin.beforeSelfPause(true)
+      currentPlayer.pause()
+      mainHandler.post { pauseOrigin.settle() }
+    }
+    if (mediaProgressSyncer.listeningTimerRunning) mediaProgressSyncer.pause {}
+    PlayerListener.lazyIsPlaying = false
+    clientEventEmitter?.onPlayingUpdate(false)
+    blockQueue(item, playWhenReady)
   }
 
   private fun prepareAdmitted(ticket: StartGate.Ticket, session: PlaybackSession, request: StartRequest) {

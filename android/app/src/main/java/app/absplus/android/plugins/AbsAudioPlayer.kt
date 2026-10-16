@@ -290,6 +290,8 @@ class AbsAudioPlayer : Plugin() {
           }
           // The call must resolve; another start took over and reports itself
           PlayerNotificationService.StartResult.Replaced -> call.resolve(JSObject())
+          // The queue stays and waits on this item; the player reports onAwaitingServer
+          PlayerNotificationService.StartResult.AwaitingServer -> call.resolve(JSObject().put("awaitingServer", true))
           is PlayerNotificationService.StartResult.Started ->
             if (result.session.isLocal) call.resolve(JSObject()) else call.resolve(JSObject(jacksonMapper.writeValueAsString(result.session)))
         }

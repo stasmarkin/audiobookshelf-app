@@ -14,8 +14,8 @@ const containerScript = (await read('../components/app/AudioPlayerContainer.vue'
   .replace(/^import .*$/gm, '')
   .replace('export default', 'globalThis.component =')
 
-function container(native, { casting = false, confirm = true } = {}) {
-  const calls = { cellular: 0, dialogs: 0, prepared: [], resolved: [] }
+function container(native, { casting = false, confirm = true, prepareAnswer = {} } = {}) {
+  const calls = { cellular: 0, dialogs: 0, prepared: [], resolved: [], cleared: 0, commits: [] }
   const AbsAudioPlayer = {
     resolvePlaybackSource: async (payload) => {
       calls.resolved.push(payload)
@@ -23,10 +23,12 @@ function container(native, { casting = false, confirm = true } = {}) {
     },
     prepareLibraryItem: async (payload) => {
       calls.prepared.push(payload)
-      return {}
+      return prepareAnswer
     },
     setPlaylistQueue: async () => {},
-    clearPlaylistQueue: async () => {},
+    clearPlaylistQueue: async () => {
+      calls.cleared++
+    },
     requestSession: () => {}
   }
   const Dialog = {
@@ -42,7 +44,7 @@ function container(native, { casting = false, confirm = true } = {}) {
     $store: {
       state: { isCasting: casting, playbackQueue: null, activeServerConfigId: 'server' },
       getters: { getIsMediaStreaming: () => false, 'user/getServerConnectionConfigId': 'server' },
-      commit: () => {}
+      commit: (type) => calls.commits.push(type)
     },
     $toast: { error: (message) => (ctx.error = message) },
     $refs: {},
@@ -138,4 +140,20 @@ test('playlist Play of a downloaded book leaves the start position to native', a
   }
   assert.equal(emitted[0][1].libraryItemId, 'local_1')
   assert.equal(emitted[1][1].serverLibraryItemId, 'li1')
+})
+
+test('a queue start that native holds for the server keeps the queue', async () => {
+  // Native answers awaitingServer when the queue's item can only stream and the server is away (queueItemToAwait)
+  const queue = { sourceType: 'playlist', sourceId: 'p1', items: [{ libraryItemId: 'li2', episodeId: null }], currentIndex: 0 }
+  const waiting = container({ resolvePlaybackSource: async () => ({ source: 'stream' }) }, { prepareAnswer: { awaitingServer: true } })
+  await waiting.ctx.startLibraryItem({ libraryItemId: 'li2', expectedTracks: 3 }, queue)
+  assert.equal(waiting.calls.cleared, 0, 'the native queue stays')
+  assert.ok(!waiting.calls.commits.includes('clearPlaybackQueue'), 'Up Next stays')
+  assert.ok(waiting.calls.commits.includes('setPlaybackQueue'))
+  assert.equal(waiting.ctx.error, undefined, 'no error toast')
+
+  const failed = container({ resolvePlaybackSource: async () => ({ source: 'stream' }) }, { prepareAnswer: { error: 'Server play request failed' } })
+  await failed.ctx.startLibraryItem({ libraryItemId: 'li2' }, queue)
+  assert.equal(failed.calls.cleared, 1, 'a failed start still clears it')
+  assert.equal(failed.ctx.error, 'Server play request failed')
 })
