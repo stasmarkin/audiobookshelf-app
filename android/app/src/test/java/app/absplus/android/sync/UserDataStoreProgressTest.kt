@@ -670,4 +670,37 @@ class UserDataStoreProgressTest {
     store.applyServerProgressCandidate("srv", server(0.0, lastUpdate = 1L, id = "mp7"))
     assertEquals("mp7", row()!!.serverProgressId)
   }
+
+  /** The scopes announced for one tick; their order depends on the dispatcher. */
+  private fun scopesAfter(tick: suspend () -> Unit): Set<String> = runBlocking {
+    changes.clear()
+    tick()
+    Thread.sleep(150)
+    changes.toSet()
+  }
+
+  @Test
+  fun playbackUnhidesFromContinueListening() = runBlocking {
+    db.mediaProgress().upsert(progressRow(100.0, 5L, pending = false).copy(hideFromContinueListening = true))
+
+    store.recordPlayback("srv", "li1", null, 100.0, 1000.0, 0.1, lastUpdate = 6L)
+    assertTrue("the same position keeps it hidden", row()!!.hideFromContinueListening)
+
+    store.recordPlayback("srv", "li1", null, 105.0, 1000.0, 0.105, lastUpdate = 7L)
+    assertFalse(row()!!.hideFromContinueListening)
+    assertTrue("the session carries it to the server", outbox().isEmpty())
+  }
+
+  @Test
+  fun shelfChangingTickAlsoNotifiesProgress() {
+    assertEquals("the first tick of a book", setOf("playback", "progress"),
+            scopesAfter { store.recordPlayback("srv", "li1", null, 10.0, 1000.0, 0.01, lastUpdate = 1L) })
+    assertEquals("an ordinary tick", setOf("playback"),
+            scopesAfter { store.recordPlayback("srv", "li1", null, 20.0, 1000.0, 0.02, lastUpdate = 2L) })
+    assertEquals("finishing", setOf("playback", "progress"),
+            scopesAfter { store.recordPlayback("srv", "li1", null, 995.0, 1000.0, 0.995, lastUpdate = 3L) })
+    runBlocking { db.mediaProgress().upsert(row()!!.copy(isFinished = false, hideFromContinueListening = true, pending = false)) }
+    assertEquals("unhiding", setOf("playback", "progress"),
+            scopesAfter { store.recordPlayback("srv", "li1", null, 30.0, 1000.0, 0.03, lastUpdate = 4L) })
+  }
 }

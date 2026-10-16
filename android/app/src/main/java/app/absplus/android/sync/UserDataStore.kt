@@ -198,20 +198,27 @@ class UserDataStore(
       // Only the user's mark: a reset, an import or listening after a reset send isFinished as playback leaves it
       val keepFinished = queued.any { it.kind == OutboxKind.PROGRESS_PATCH && OutboxPayload.finishedMark(it.payload) == true }
       val finished = if (keepFinished) row.isFinished else progressValue >= FINISHED_PROGRESS
+      // As the server (MediaProgress.applyProgressUpdate): listening on brings an item back to "continue"; the session
+      // carries the position, and the server clears its own flag by the same rule
+      val hidden = row.hideFromContinueListening && currentTime == row.currentTime
       var updated = row.copy(currentTime = currentTime, duration = duration, progress = progressValue,
               isFinished = finished, finishedAt = if (keepFinished) row.finishedAt else if (finished) lastUpdate else null,
-              lastUpdate = lastUpdate, source = PROGRESS_SOURCE_DEVICE)
+              hideFromContinueListening = hidden, lastUpdate = lastUpdate, source = PROGRESS_SOURCE_DEVICE)
       val lastDelete = queued.lastOrNull { it.kind == OutboxKind.PROGRESS_DELETE }
       if (lastDelete != null && queued.none { it.kind == OutboxKind.PROGRESS_PATCH && it.id > lastDelete.id }) {
         enqueue(serverConfigId, OutboxKind.PROGRESS_PATCH, key, OutboxPayload.progressPatch(PLAYBACK_FIELDS))
         updated = updated.copy(pending = true)
       }
       progress.upsert(updated)
-      updated
+      val shelvesChange = existing == null || existing.isFinished != updated.isFinished ||
+              (existing.hideFromContinueListening && !updated.hideFromContinueListening)
+      updated to shelvesChange
     } ?: return
-    if (mirrorToPaper) mirror.mirror(listOf(row), PLAYBACK_MIRROR_FIELDS, mirrorUnlessNewer)
+    if (mirrorToPaper) mirror.mirror(listOf(row.first), PLAYBACK_MIRROR_FIELDS, mirrorUnlessNewer)
     // Its own scope: the WebView re-reads just this row for a tick, not the Paper progress of every copy
     notifier.notify(SCOPE_PLAYBACK, listOf(libraryItemId))
+    // The home listens to ticks only for the order of "continue"; a tick that changes which shelf holds the item is progress
+    if (row.second) notifier.notify(SCOPE_PROGRESS, listOf(libraryItemId))
   }
 
   /**
