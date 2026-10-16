@@ -231,6 +231,28 @@ class CatalogReconcilerTest {
   }
 
   @Test
+  fun seriesAnswersWithoutResultsFailInsteadOfEmptying() {
+    server.library("lib1")
+    server.series("x", "X")
+    server.series("a", "A")
+    server.series("ab", "A, B")
+    server.series("b", "B")
+    val book = server.book("b1", series = listOf("x" to "1"))
+    reconcile()
+    book.series = listOf("ab" to "1")
+    book.updatedAt = 2
+    val handler = api.handler
+    api.handler = { r -> if (r.path.endsWith("/series")) 200 to """{"total":0}""" else handler(r) }
+    assertEquals(listOf("lib1"), reconcile().failedLibraries)
+    assertEquals("the series list is kept", setOf("x", "a", "ab", "b"), runBlocking { db.series().ids("srv", "lib1") }.toSet())
+
+    api.handler = { r -> if (r.query?.contains("filter=series.") == true) 200 to """{"total":0}""" else handler(r) }
+    assertEquals(listOf("lib1"), reconcile().failedLibraries)
+    assertEquals("the membership is not read as empty", setOf("x" to "1"), membership("b1"))
+    assertTrue("and is asked again next pass", state("lib1")!!.pendingSeriesQueries.contains("\"x\""))
+  }
+
+  @Test
   fun hiddenSingleBookSeriesKeepsMembership() {
     server.library("lib1")
     server.series("p", "Повесть", hidden = true)
