@@ -1149,14 +1149,18 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     return withContext(Dispatchers.IO) { planStart(effective, active, sourceResolver()) }
   }
 
-  /**
-   * Re-reads [plan]'s copy under its item lock and pins it, so a storage move cannot commit under it. Main thread, right
-   * after the start was admitted: no other start can interleave between the admit and the pin.
-   */
-  private fun pinLocal(plan: PlaybackSource.Local): PlaybackSource =
-          pinLocalSource(plan, { DeviceManager.dbManager.getLocalLibraryItem(it) }) { item, episode ->
-            LocalPlaybackAvailability.check(item, AndroidVolumeProbe(ctx)) { !item.isInvalid && item.hasTracks(ctx, episode) }
-          }
+  // Which start holds the playback pin: a replaced start gives back only its own pin, never a newer start's
+  private val pinOwnerLock = Any()
+  private var pinOwner: Any? = null
+
+  /** Re-reads [plan]'s copy under its item lock and pins it for [owner], so a storage move cannot commit under it. */
+  private suspend fun pinLocal(plan: PlaybackSource.Local, owner: Any): PlaybackSource = withContext(Dispatchers.IO) {
+    synchronized(pinOwnerLock) {
+      pinLocalSource(plan, { DeviceManager.dbManager.getLocalLibraryItem(it) }) { item, episode ->
+        LocalPlaybackAvailability.check(item, AndroidVolumeProbe(ctx)) { !item.isInvalid && item.hasTracks(ctx, episode) }
+      }.also { if (it is PlaybackSource.Local) pinOwner = owner }
+    }
+  }
 
   private fun failureMessage(source: PlaybackSource): String = when (source) {
     is PlaybackSource.NotFound -> source.message
@@ -1164,15 +1168,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     else -> NO_AUDIO_FILES_MESSAGE
   }
 
-  // A start replaced after it pinned its copy gives the pin back to what plays now
-  private fun releaseStalePin(pinnedId: String) {
-    if (!LocalItemLocks.isPinned(pinnedId)) return
+  // A start replaced after it pinned its copy gives the pin back to what plays now. Off main: a pin may wait on an item lock
+  private fun releaseStalePin(owner: Any) {
     val playing = currentPlaybackSession?.localLibraryItem?.id
-    if (playing == pinnedId) return
-    if (playing != null) {
-      LocalItemLocks.pinForPlayback(playing)
-    } else if (LocalItemLocks.clearPlaybackPin()) {
-      StorageMoveService.requestReconcile(this)
+    startScope.launch(Dispatchers.IO) {
+      synchronized(pinOwnerLock) {
+        if (pinOwner !== owner) return@synchronized
+        pinOwner = null
+        if (playing != null) {
+          LocalItemLocks.pinForPlayback(playing)
+        } else if (LocalItemLocks.clearPlaybackPin()) {
+          StorageMoveService.requestReconcile(this@PlayerNotificationService)
+        }
+      }
     }
   }
 
@@ -1214,7 +1222,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       is PlaybackSource.Local -> {
         val startTime = request.startTime ?: localStartTime(plan.item, plan.episode, request.libraryItemId)
         if (replaced()) return@launch
-        val pinned = pinLocal(plan)
+        val pinned = pinLocal(plan, ticket)
+        if (replaced()) {
+          releaseStalePin(ticket)
+          return@launch
+        }
         if (pinned !is PlaybackSource.Local) {
           onResult(StartResult.Failed(failureMessage(pinned)))
           return@launch
@@ -1251,7 +1263,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val playWhenReady = startGate.admit(ticket)
     if (playWhenReady == null) {
       DLog.i(tag, "Start of ${request.libraryItemId} was replaced (another start, Close or a server switch) - not preparing")
-      session.localLibraryItem?.let { releaseStalePin(it.id) }
+      releaseStalePin(ticket)
       return
     }
     if (request.followPlayer) {
@@ -1380,7 +1392,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             if (wakeLock.isHeld) wakeLock.release()
             return@launch
           }
-          val pinned = pinLocal(plan)
+          val pinned = pinLocal(plan, ticket)
+          if (startGate.admit(ticket) == null) {
+            releaseStalePin(ticket)
+            if (wakeLock.isHeld) wakeLock.release()
+            return@launch
+          }
           if (pinned !is PlaybackSource.Local) {
             DLog.e(tag, "advancePlaylistQueue: ${nextItem.libraryItemId} has no playable download ($pinned)")
             if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
@@ -1397,7 +1414,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
               prepareQueued(ticket, playbackSession, playbackRate)
             } else {
-              releaseStalePin(pinned.item.id)
+              releaseStalePin(ticket)
             }
             if (wakeLock.isHeld) wakeLock.release()
           }
@@ -1448,7 +1465,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val playWhenReady = startGate.admit(ticket)
     if (playWhenReady == null) {
       DLog.i(tag, "advancePlaylistQueue: replaced by another start - not preparing")
-      session.localLibraryItem?.let { releaseStalePin(it.id) }
+      releaseStalePin(ticket)
       return
     }
     sessionExpectedTracks = session.id to playlistQueue.getOrNull(playlistQueueIndex)?.expectedTracks
@@ -1853,7 +1870,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     // A stream downloaded since plays the copy; a copy that is gone is not streamed instead. Read off the main thread
     startScope.launch {
       val resolved = withContext(Dispatchers.IO) { sourceResolver().restoreSource(saved) }
-      when (val source = if (resolved is PlaybackSource.Local) pinLocal(resolved) else resolved) {
+      when (val source = if (resolved is PlaybackSource.Local) pinLocal(resolved, Any()) else resolved) {
         is PlaybackSource.NotFound -> failRestore("downloaded item no longer exists (${source.message})", permanent = true)
         is PlaybackSource.LocalBroken -> failRestore("downloaded item has no playable files", permanent = true)
         is PlaybackSource.StorageUnavailable -> failRestore("sd card not available", permanent = false)
