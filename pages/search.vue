@@ -8,13 +8,13 @@
         <p class="text-lg text-fg-muted">{{ $strings.MessageFetching }}</p>
       </div>
       <div v-if="!isFetching && lastSearch && !totalResults" class="w-full py-8 flex justify-center">
-        <p class="text-lg text-fg-muted">{{ $strings.MessageNoItemsFound }}</p>
+        <p class="text-lg text-fg-muted text-center">{{ catalogNotLoaded ? $strings.MessageCatalogNotLoaded : $strings.MessageNoItemsFound }}</p>
       </div>
       <p v-if="bookResults.length" class="search-section-label font-semibold text-sm mb-1">{{ $strings.LabelBooks }}</p>
       <template v-for="item in bookResults">
         <div :key="item.libraryItem.id" class="w-full h-16 py-1">
-          <nuxt-link :to="`/item/${item.libraryItem.id}`">
-            <cards-item-search-card :library-item="item.libraryItem" :search="lastSearch" />
+          <nuxt-link :to="itemLink(item)">
+            <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
           </nuxt-link>
         </div>
       </template>
@@ -22,8 +22,8 @@
       <p v-if="podcastResults.length" class="search-section-label font-semibold text-sm mb-1 mt-2">{{ $strings.LabelPodcasts }}</p>
       <template v-for="item in podcastResults">
         <div :key="item.libraryItem.id" class="text-fg select-none relative py-1">
-          <nuxt-link :to="`/item/${item.libraryItem.id}`">
-            <cards-item-search-card :library-item="item.libraryItem" :search="lastSearch" />
+          <nuxt-link :to="itemLink(item)">
+            <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
           </nuxt-link>
         </div>
       </template>
@@ -31,8 +31,8 @@
       <p v-if="episodeResults.length" class="search-section-label font-semibold text-sm mb-1 mt-2">{{ $strings.HeaderEpisodes }}</p>
       <template v-for="item in episodeResults">
         <div :key="item.libraryItem.recentEpisode.id" class="text-fg select-none relative py-1">
-          <nuxt-link :to="`/item/${item.libraryItem.id}/${item.libraryItem.recentEpisode.id}`">
-            <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" />
+          <nuxt-link :to="episodeLink(item)">
+            <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" :local-episode="item.localEpisode" />
           </nuxt-link>
         </div>
       </template>
@@ -77,6 +77,12 @@
 </template>
 
 <script>
+import { findLocalCopy } from '@/utils/localCopy'
+import { createDebouncer } from '@/utils/catalogRefresh'
+
+/** Catalog topics after which an open search is run again (so it moves from the server to the replica). */
+const SEARCH_TOPICS = ['state', 'items', 'series', 'authors', 'episodes']
+
 export default {
   data() {
     return {
@@ -84,6 +90,11 @@ export default {
       searchTimeout: null,
       lastSearch: null,
       isFetching: false,
+      // Only the answer of the latest request is shown and clears isFetching
+      searchSeq: 0,
+      catalogNotLoaded: false,
+      refreshDebouncer: null,
+      stopDataChanged: null,
       bookResults: [],
       podcastResults: [],
       episodeResults: [],
@@ -105,42 +116,80 @@ export default {
     }
   },
   methods: {
+    clearResults() {
+      this.bookResults = []
+      this.podcastResults = []
+      this.episodeResults = []
+      this.seriesResults = []
+      this.authorResults = []
+      this.narratorResults = []
+      this.tagResults = []
+      this.catalogNotLoaded = false
+    },
     async runSearch(value) {
-      if (this.isFetching && this.lastSearch === value) return
-
+      const seq = ++this.searchSeq
       this.lastSearch = value
       this.$store.commit('globals/setLastSearch', value)
 
-      if (!this.lastSearch) {
-        this.bookResults = []
-        this.podcastResults = []
-        this.episodeResults = []
-        this.seriesResults = []
-        this.authorResults = []
-        this.narratorResults = []
-        this.tagResults = []
+      const q = (value || '').trim()
+      if (!q) {
+        this.clearResults()
+        this.isFetching = false
         return
       }
       this.isFetching = true
-      const results = await this.$nativeHttp.get(`/api/libraries/${this.currentLibraryId}/search?q=${value}`).catch((error) => {
-        console.error('Search error', error)
-        return null
-      })
-      if (value !== this.lastSearch) {
-        console.log(`runSearch: New search was made for ${this.lastSearch} - results are from ${value}`)
+      const libraryId = this.currentLibraryId
+      const [answer, localItems] = await Promise.all([
+        this.$absData.search({ libraryId, q }).catch((error) => {
+          console.error('Search error', error)
+          return null
+        }),
+        this.$db.getLocalLibraryItems().catch(() => [])
+      ])
+      if (seq !== this.searchSeq) return
+      this.isFetching = false
+      const activeServerConfigId = this.$store.state.activeServerConfigId ?? null
+      // Asked for the library or server that was current before a switch: none of it belongs here
+      if (answer && (answer.libraryId !== this.currentLibraryId || (answer.serverConfigId ?? null) !== activeServerConfigId)) {
+        this.clearResults()
         return
       }
-      console.log('RESULTS', results)
 
-      this.isFetching = false
-
-      this.bookResults = results?.book || []
-      this.podcastResults = results?.podcast || []
-      this.episodeResults = results?.episodes || []
-      this.seriesResults = results?.series || []
-      this.authorResults = results?.authors || []
-      this.narratorResults = results?.narrators || []
-      this.tagResults = results?.tags || []
+      const results = answer?.results || {}
+      const withCopy = (item) => ({ ...item, localLibraryItem: findLocalCopy(localItems, item.libraryItem, activeServerConfigId) })
+      const withEpisode = (item) => {
+        const copy = withCopy(item)
+        const episodeId = item.libraryItem?.recentEpisode?.id
+        const localEpisode = (copy.localLibraryItem?.media?.episodes || []).find((ep) => ep.serverEpisodeId === episodeId) || null
+        return { ...copy, localEpisode }
+      }
+      this.bookResults = (results.book || []).map(withCopy)
+      this.podcastResults = (results.podcast || []).map(withCopy)
+      this.episodeResults = (results.episodes || []).map(withEpisode)
+      this.seriesResults = results.series || []
+      this.authorResults = results.authors || []
+      this.narratorResults = results.narrators || []
+      this.tagResults = results.tags || []
+      this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.totalResults
+    },
+    /** A downloaded copy goes along, so the item page can open it without the server. */
+    itemLink(item) {
+      const id = item.libraryItem.id
+      return item.localLibraryItem ? `/item/${id}?localLibraryItemId=${item.localLibraryItem.id}` : `/item/${id}`
+    },
+    /** Without the server the episode page reads only a downloaded copy, by its local ids. */
+    episodeLink(item) {
+      const readsLocal = !this.$store.state.user.serverConnectionConfig || this.$store.state.serverState !== 'online'
+      if (item.localEpisode && readsLocal) return `/item/${item.localLibraryItem.id}/${item.localEpisode.id}`
+      return `/item/${item.libraryItem.id}/${item.libraryItem.recentEpisode.id}`
+    },
+    /** The catalog of the current library changed: the open search is run again a second after the last notice. */
+    dataChanged(change) {
+      if (change?.scope !== 'catalog' || !this.currentLibraryId || !(this.lastSearch || '').trim()) return
+      const ids = change.ids || []
+      if (!SEARCH_TOPICS.some((topic) => ids.includes(`${topic}:${this.currentLibraryId}`))) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(() => this.runSearch(this.lastSearch))
     },
     updateSearch(val) {
       clearTimeout(this.searchTimeout)
@@ -157,12 +206,19 @@ export default {
     }
   },
   mounted() {
+    this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
     if (this.$store.state.globals.lastSearch) {
       this.search = this.$store.state.globals.lastSearch
       this.runSearch(this.search)
     } else {
       this.$nextTick(this.setFocus())
     }
+  },
+  beforeDestroy() {
+    clearTimeout(this.searchTimeout)
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
   }
 }
 </script>

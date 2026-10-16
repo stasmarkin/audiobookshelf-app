@@ -27,7 +27,7 @@
         </span>
       </button>
 
-      <nuxt-link v-if="user" class="mx-1.5 flex items-center h-10" to="/search" aria-label="Search">
+      <nuxt-link v-if="user || hasActiveServer" class="mx-1.5 flex items-center h-10" to="/search" aria-label="Search">
         <span class="material-symbols text-2xl leading-none">search</span>
       </nuxt-link>
 

@@ -1,10 +1,11 @@
 <template>
   <div class="flex h-full px-1 overflow-hidden">
-    <covers-book-cover class="card-artwork" :library-item="libraryItem" :width="coverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
+    <covers-book-cover class="card-artwork" :class="{ 'opacity-50': notAvailableOffline }" :library-item="libraryItem" :width="coverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
     <div class="grow px-2 audiobookSearchCardContent">
       <p class="truncate text-sm">{{ title }}</p>
       <p v-if="subtitle" class="truncate text-xs text-gray-300">{{ subtitle }}</p>
       <p class="text-xs text-gray-200 truncate">{{ $getString('LabelByAuthor', [authorName]) }}</p>
+      <p v-if="notAvailableOffline" class="not-offline-badge text-xs text-warning truncate">{{ $strings.LabelNotAvailableOffline }}</p>
     </div>
   </div>
 </template>
@@ -19,6 +20,11 @@ export default {
     libraryItem: {
       type: Object,
       default: () => {}
+    },
+    /** This episode downloaded on the active server, if it is. */
+    localEpisode: {
+      type: Object,
+      default: null
     }
   },
   data() {
@@ -52,10 +58,29 @@ export default {
     },
     authorName() {
       return this.mediaMetadata.author
+    },
+    /** Offline, an episode that is not downloaded cannot be opened, even when others of the podcast are. */
+    notAvailableOffline() {
+      if (this.localEpisode) return false
+      return ['offline', 'unauthorized'].includes(this.$store.state.serverState)
     }
   },
-  methods: {},
-  mounted() {}
+  methods: {
+    /** The result's link opens nothing offline without a downloaded copy: say so instead. */
+    clickCard(e) {
+      if (!this.notAvailableOffline) return
+      e?.preventDefault?.()
+      e?.stopPropagation?.()
+      this.$toast?.info(this.$strings.LabelNotAvailableOffline)
+    }
+  },
+  mounted() {
+    // On the root element, before the result's link handles the click (the root stays a plain themed div)
+    this.$el.addEventListener('click', this.clickCard)
+  },
+  beforeDestroy() {
+    this.$el.removeEventListener('click', this.clickCard)
+  }
 }
 </script>
 

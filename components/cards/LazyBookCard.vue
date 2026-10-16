@@ -328,7 +328,7 @@ export default {
     localEpisode() {
       if (!this.recentEpisode || !this.localLibraryItem) return null
       // Current recentEpisode is only implemented server side so this will always be the serverEpisodeId
-      return this.localLibraryItem.media.episodes.find((ep) => ep.serverEpisodeId === this.recentEpisode.id)
+      return (this.localLibraryItem.media?.episodes || []).find((ep) => ep.serverEpisodeId === this.recentEpisode.id) || null
     },
     isStreaming() {
       return this.store.getters['getIsMediaStreaming'](this.libraryItemId, this.recentEpisode?.id)
@@ -417,9 +417,15 @@ export default {
     showPlayButton() {
       return !!this.queueSource && !this.collapsedSeries && !this.isPodcast && !this.isMissing && !this.isInvalid && !!this.numTracks && !this.notAvailableOffline
     },
+    /** The episode page reads the server only while signed in to it and it answers. */
+    readsLocalEpisodePage() {
+      return !this.store.state.user?.serverConnectionConfig || this.store.state.serverState !== 'online'
+    },
     /** Offline, a server item without a downloaded copy cannot be opened or played (the replica lists it anyway). */
     notAvailableOffline() {
-      if (this.isLocal || this.localLibraryItem || this.collapsedSeries || !this.libraryItem) return false
+      if (this.isLocal || this.collapsedSeries || !this.libraryItem) return false
+      // An episode card plays and opens this very episode: another downloaded episode of the podcast does not help
+      if (this.recentEpisode ? this.localEpisode : this.localLibraryItem) return false
       // Not while the first check is pending ('unknown'): only a server known to be away
       return ['offline', 'unauthorized'].includes(this.store.state.serverState)
     }
@@ -476,6 +482,10 @@ export default {
     },
     async playEpisode() {
       if (this.playerIsStartingPlayback) return
+      if (this.notAvailableOffline) {
+        this.$toast?.info(this.$strings.LabelNotAvailableOffline)
+        return
+      }
 
       await this.$hapticsImpact()
       const eventBus = this.$eventBus || this.$nuxt.$eventBus
@@ -511,7 +521,9 @@ export default {
         }
         const router = this.$router || this.$nuxt.$router
         if (router) {
-          if (this.recentEpisode) router.push(`/item/${this.libraryItemId}/${this.recentEpisode.id}`)
+          // Without the server the episode page reads only a downloaded copy, by its local ids
+          if (this.recentEpisode && this.localEpisode && this.readsLocalEpisodePage) router.push(`/item/${this.localLibraryItemId}/${this.localEpisode.id}`)
+          else if (this.recentEpisode) router.push(`/item/${this.libraryItemId}/${this.recentEpisode.id}`)
           else if (this.collapsedSeries) router.push(`/bookshelf/series/${this.collapsedSeries.id}`)
           else if (this.localLibraryItem) {
             // Pass local library item id to server page to allow falling back to offline page
