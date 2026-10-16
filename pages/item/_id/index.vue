@@ -756,6 +756,9 @@ export default {
         : leavesOnLibraryChange(this.$store.state, this.libraryItem.libraryId, this.loadedServerConfigId)
       if (leaves) {
         this.$router.replace('/bookshelf')
+      } else if (this.isLocal) {
+        // A copy compares the next switch with this one (A to its own B, then back to A leaves)
+        this.loadedServerConfigId = this.$store.state.activeServerConfigId
       }
     },
     checkDescriptionClamped() {
