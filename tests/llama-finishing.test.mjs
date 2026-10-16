@@ -118,7 +118,7 @@ test('Page texture: the graphite scan lines are faint (a texture on close inspec
   for (const id of LEGACY) assert.deepEqual(presets.presentationRules([engine.getTheme(id)]), {}, id)
 })
 
-test('Compiled CSS: the new hooks are styled only under the LLAMA root', async () => {
+test('Compiled CSS: the new hooks are styled only under the LLAMA root (and E-ink, which keeps them visible on paper)', async () => {
   const postcss = require('postcss')
   const tailwind = require('tailwindcss')
   const config = require('../tailwind.config.js')
@@ -126,6 +126,6 @@ test('Compiled CSS: the new hooks are styled only under the LLAMA root', async (
   const { css } = await postcss([tailwind({ ...config, content: [{ raw: '<div class="card-frame series-play-action episode-play-control row-play-btn mini-compact"></div>' }] })]).process(source, { from: undefined })
   for (const hook of ['card-frame', 'series-play-action', 'episode-play-control']) {
     assert.ok(css.includes(`html[data-theme='llama'] .`) && css.includes(hook), hook)
-    for (const line of css.split('\n').filter((l) => l.includes(`.${hook}`) && l.includes('{'))) assert.match(line, /^html\[data-theme='llama'\]/, line)
+    for (const line of css.split('\n').filter((l) => l.includes(`.${hook}`) && l.includes('{'))) assert.match(line, /^html\[data-theme='(llama|eink)'\]/, line)
   }
 })
