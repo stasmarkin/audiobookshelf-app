@@ -136,8 +136,9 @@ object CatalogJson {
                   .replace(CONTROLS, " ").replace(SPACES, " ").trim()
 
   private fun searchKeyOf(parts: List<String?>): String =
-          (listOf(SEARCH_KEY_VERSION) + parts.mapNotNull { it?.let(::normalizeForSearch)?.takeIf(String::isNotEmpty) })
-                  .joinToString(SEARCH_KEY_SEPARATOR)
+          // The prefix keeps its separator even without parts: a key of the current version is never "stale"
+          SEARCH_KEY_VERSION + SEARCH_KEY_SEPARATOR +
+                  parts.mapNotNull { it?.let(::normalizeForSearch)?.takeIf(String::isNotEmpty) }.joinToString(SEARCH_KEY_SEPARATOR)
 
   /**
    * What the server's item search matches: a book's title, subtitle, asin and isbn; a podcast's title, author and
@@ -185,11 +186,14 @@ object CatalogJson {
 
   /**
    * A row rewritten from a minified answer keeps the expanded copy it had: as is for the same `updatedAt` (only the
-   * feed or a joined name changed), as [DetailLevel.STALE] for another one, so a podcast is asked for its episodes again.
+   * feed or a joined name changed), as [DetailLevel.STALE] for another one or for a podcast whose episode count moved,
+   * so it is asked for its episodes again.
    */
   fun carryExpanded(fresh: LibraryItemEntity, old: IdExpanded?): LibraryItemEntity = when {
     old == null || old.detailLevel == DetailLevel.MINIFIED -> fresh
-    old.updatedAt == fresh.updatedAt -> fresh.copy(detailLevel = old.detailLevel, expandedJson = old.expandedJson)
+    // A podcast's episode list may change without a new updatedAt; its count tells
+    old.updatedAt == fresh.updatedAt && (fresh.mediaType != "podcast" || old.numEpisodes == fresh.numEpisodes) ->
+      fresh.copy(detailLevel = old.detailLevel, expandedJson = old.expandedJson)
     else -> fresh.copy(detailLevel = DetailLevel.STALE, expandedJson = old.expandedJson)
   }
 

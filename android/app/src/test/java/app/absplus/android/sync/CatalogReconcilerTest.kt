@@ -1090,4 +1090,24 @@ class CatalogReconcilerTest {
     }
     assertFalse(topics.contains("items:lib1"))
   }
+
+  @Test
+  fun unchangedEpisodesPassTouchesNothing() {
+    podcasts("p1", "p2")
+    reconcile()
+    val changes = replicaChanges
+    now = 2_000L
+    reconcile()
+    assertEquals("nothing asked, nothing written: no cache is dropped", changes, replicaChanges)
+    assertEquals("the pass still counts as a full try", 2_000L, state("pods")!!.episodesReconciledAt)
+  }
+
+  @Test
+  fun stopDuringEpisodesKeepsThePlaylistsPass() {
+    podcasts("p1", "p2")
+    server.onItemFetch = { throw IOException("gone") }
+    val result = reconcile()
+    assertTrue(result.stoppedBy is HttpOutcome.Unreachable)
+    assertNotNull("playlists were read before the episodes", state("pods")!!.playlistsReconciledAt)
+  }
 }

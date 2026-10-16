@@ -94,7 +94,10 @@ class CatalogReaderHomeTest {
           "authors" -> assertEquals("$id: $theirKeys", theirKeys - "lastFirst", ours.keySet() - "lastFirst")
           else -> {
             assertEquals("$id keys", theirKeys, ours.keySet())
-            assertEquals("$id media keys", theirs.path("media").fieldNames().asSequence().toSet(), ours.getJSONObject("media").keySet())
+            // Discover is random: its first book may be an ebook (ebookFormat) on one side and not on the other
+            val optional = if (id == "discover") setOf("ebookFormat") else emptySet()
+            assertEquals("$id media keys", theirs.path("media").fieldNames().asSequence().toSet() - optional,
+                    ours.getJSONObject("media").keySet() - optional)
             if (shelf.getString("type") == "episode") {
               assertEquals(theirs.path("recentEpisode").path("id").asText().isNotEmpty(), ours.getJSONObject("recentEpisode").has("id"))
               assertTrue(ours.getJSONObject("recentEpisode").has("audioFile"))

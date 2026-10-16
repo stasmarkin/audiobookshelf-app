@@ -236,6 +236,6 @@ data class IdHash(val id: String, val updatedAt: Long, val contentHash: String)
 
 data class EpisodeKey(val id: String, val libraryItemId: String, val publishedAt: Long?, val addedAt: Long)
 
-data class IdExpanded(val id: String, val updatedAt: Long, val detailLevel: String, val expandedJson: String?)
+data class IdExpanded(val id: String, val updatedAt: Long, val detailLevel: String, val expandedJson: String?, val numEpisodes: Int)
 
 data class IdSearchJson(val id: String, val searchKey: String, val json: String)
