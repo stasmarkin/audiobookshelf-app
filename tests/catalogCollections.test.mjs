@@ -10,6 +10,7 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s)
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
 const { createDataService, catalogTopics, CATALOG_EVENTS } = await importSource('../utils/dataService.js')
 const { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } = await importSource('../utils/catalogRefresh.js')
+const { findLocalCopy: localCopyOf } = await importSource('../utils/localCopy.js')
 const { trackCount, fetchCollectionBooks } = await importSource('../utils/catalogItem.js')
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const replica = (reconciledAt = 5) => ({ reconciledAt, complete: reconciledAt != null })
@@ -303,13 +304,14 @@ test('never-reconciled collections read the server while online', async () => {
 async function bookshelf({ getCollections, hasActiveServer = true, currentLibraryId = 'l1', realSize = false }) {
   const source = await read('../components/bookshelf/LazyBookshelf.vue')
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
-  const component = new Function('bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'shouldRefreshShelf', 'createDebouncer', 'isReplicaIncomplete', script)(
+  const component = new Function('bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'shouldRefreshShelf', 'createDebouncer', 'isReplicaIncomplete', 'localCopyOf', script)(
     {},
     () => ({ reset() {}, succeeded() {}, failed() {} }),
     () => 1,
     shouldRefreshShelf,
     createDebouncer,
-    isReplicaIncomplete
+    isReplicaIncomplete,
+    localCopyOf
   )
   const reads = []
   const emitted = []

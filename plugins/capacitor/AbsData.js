@@ -85,6 +85,15 @@ class AbsDataWeb extends WebPlugin {
     return { serverConfigId: null, results: [], total: 0, limit, page, found: false, replica: { reconciledAt: null, complete: false } }
   }
 
+  async getPersonalized({ libraryId }) {
+    return { serverConfigId: null, libraryId, shelves: [], replica: { reconciledAt: null, complete: false } }
+  }
+
+  async search({ libraryId, q }) {
+    const results = { book: [], podcast: [], episodes: [], series: [], authors: [], narrators: [], tags: [], genres: [] }
+    return { serverConfigId: null, libraryId, q, results, replica: { reconciledAt: null, complete: false } }
+  }
+
   async setCurrentLibrary() {}
 }
 

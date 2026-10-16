@@ -37,7 +37,8 @@ export function playlistListEntry(playlist) {
 }
 
 /**
- * The `catalog` topics a socket event changes, as native names them (`libraries`, `library:<id>`, `items:<id>`, ...).
+ * The `catalog` topics a socket event changes, as native names them (`libraries`, `library:<id>`, `items:<id>`,
+ * `episodes:<id>`, ...).
  * A feed event has no library: it is taken for the current one. A missing library id sends no topic.
  */
 export function catalogTopics(event, payload, currentLibraryId) {
@@ -47,6 +48,8 @@ export function catalogTopics(event, payload, currentLibraryId) {
     const libraryId = lib(it?.libraryId)
     if (!libraryId) return
     topics.add(`items:${libraryId}`)
+    // A podcast's payload carries its episodes, which native writes to the replica as well
+    if (it?.mediaType === 'podcast') topics.add(`episodes:${libraryId}`)
     const series = it?.media?.metadata?.series
     if (Array.isArray(series) && series.length) topics.add(`series:${libraryId}`)
   }
@@ -85,7 +88,7 @@ export function catalogTopics(event, payload, currentLibraryId) {
  *   Paper progress of downloaded copies. Writes ("finished", reset, e-book position) go to native and work offline.
  * - Another saved server becoming active clears the user's data in the store and reads that server's; an answer that
  *   was asked for the previous server is dropped.
- * - The catalog (libraries, items, series, authors, collections, the user's playlists) is read from native replica.db, at most 100 entities a call. While a library was
+ * - The catalog (libraries, items, series, authors, collections, the user's playlists, the home shelves and search) is read from native replica.db, at most 100 entities a call. While a library was
  *   never reconciled (or the filter needs data the replica lacks) and the server is online, the same request goes to
  *   the server instead. `onDataChanged {scope:'catalog'}` keeps the libraries in the store current.
  * - In the browser (`platform: 'web'`, development only) there is no native side: everything goes straight to the
@@ -515,6 +518,32 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     return withServerFallback(answer, playlistPath(id), playlistItemsShape(limit, page), () => getPlaylistItems(args), answer?.found === false)
   }
 
+  const libraryPath = (libraryId) => `/api/libraries/${encodeURIComponent(libraryId)}`
+  const homeShape = (libraryId) => (data) => ({ libraryId, shelves: Array.isArray(data) ? data : [] })
+  // The server answers the groups at the top level, native under `results`
+  const searchShape = (libraryId, q) => (data) => ({ libraryId, q, results: data && typeof data === 'object' ? data : {} })
+
+  const getPersonalized = async (args) => {
+    const { libraryId, limit = 10 } = args
+    const include = 'rssfeed,numEpisodesIncomplete'
+    if (isWeb) {
+      const data = await $axios.$get(`${libraryPath(libraryId)}/personalized`, { params: { include, limit } })
+      return { ...homeShape(libraryId)(data), serverConfigId: activeServer(), replica: webReplica() }
+    }
+    const answer = await fromNative(() => plugin.getPersonalized({ libraryId, limit }))
+    return withServerFallback(answer, `${libraryPath(libraryId)}/personalized?include=${include}&limit=${limit}`, homeShape(libraryId), () => getPersonalized(args))
+  }
+
+  const search = async (args) => {
+    const { libraryId, q, limit = 12 } = args
+    if (isWeb) {
+      const data = await $axios.$get(`${libraryPath(libraryId)}/search`, { params: { q, limit } })
+      return { ...searchShape(libraryId, q)(data), serverConfigId: activeServer(), replica: webReplica() }
+    }
+    const answer = await fromNative(() => plugin.search({ libraryId, q, limit }))
+    return withServerFallback(answer, `${libraryPath(libraryId)}/search?q=${encodeURIComponent(q)}&limit=${limit}`, searchShape(libraryId, q), () => search(args))
+  }
+
   // Without this the indicator stays hidden until something else asks
   getServerState().catch((error) => console.error('[data] Could not read the server state', error))
   if (!isWeb && plugin.getSyncState) {
@@ -653,6 +682,16 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
      * `{ results, total, limit, page, found, replica }`; `limit` at most 100.
      */
     getPlaylistItems,
+    /**
+     * The home shelves of a library in the server's shape: `{ serverConfigId, libraryId, shelves, replica, fromServer? }`;
+     * `limit` (a shelf) 1..25. A shelf of series carries all their books, so an answer may hold more than 100 items.
+     */
+    getPersonalized,
+    /**
+     * `{ serverConfigId, libraryId, q, results, replica, fromServer? }`: `results` holds the server's groups (`book`,
+     * `podcast`, `episodes`, `series`, `authors`, `narrators`, `tags`, `genres`); `limit` (a group) 1..25.
+     */
+    search,
     /** The library native reconciles first. */
     async setCurrentLibrary({ libraryId }) {
       if (isWeb || !plugin.setCurrentLibrary) return

@@ -27,6 +27,7 @@ import bookshelfCardsHelpers from '@/mixins/bookshelfCardsHelpers'
 import { createPageRetry } from '@/utils/pageRetry'
 import { textScale } from '@/utils/textScale'
 import { shouldRefreshShelf, createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
+import { findLocalCopy as localCopyOf } from '@/utils/localCopy'
 
 /** The height of the "catalog partially downloaded" note above the rows. */
 const CATALOG_PARTIAL_HEIGHT = 24
@@ -293,13 +294,7 @@ export default {
     },
     /** The downloaded copy of a server item; replicas of two accounts on one server share item ids. */
     findLocalCopy(entity) {
-      if (!entity) return null
-      return (
-        this.localLibraryItems.find((lli) => {
-          if (this.activeServerConfigId && lli.serverConnectionConfigId !== this.activeServerConfigId) return false
-          return lli.libraryItemId == entity.id || (entity.ino && lli.ino && lli.ino == entity.ino)
-        }) || null
-      )
+      return localCopyOf(this.localLibraryItems, entity, this.activeServerConfigId)
     },
     async loadPage(page) {
       if (!this.currentLibraryId) {

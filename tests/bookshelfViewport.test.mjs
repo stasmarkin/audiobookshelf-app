@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createPageRetry } from '../utils/pageRetry.js'
 import { isReplicaIncomplete } from '../utils/catalogRefresh.js'
+import { findLocalCopy as localCopyOf } from '../utils/localCopy.js'
 
 const require = createRequire(import.meta.url)
 // Vue installs its DOM patcher only when it loads in a browser-like global
@@ -133,7 +134,7 @@ const makeWorld = ({ wrapped }) => {
 const loadBookshelf = async () => {
   const sfc = parseComponent(await read('../components/bookshelf/LazyBookshelf.vue'))
   const mixin = loadDefault(await read('../mixins/bookshelfCardsHelpers.js'), ['Vue'])(Vue)
-  const component = loadDefault(sfc.script.content, ['bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'isReplicaIncomplete'])(mixin, createPageRetry, () => 1, isReplicaIncomplete)
+  const component = loadDefault(sfc.script.content, ['bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'isReplicaIncomplete', 'localCopyOf'])(mixin, createPageRetry, () => 1, isReplicaIncomplete, localCopyOf)
   return { component, mixin }
 }
 
