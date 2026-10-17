@@ -103,9 +103,13 @@ test('recent episodes fall back to the server while episodes are pending', async
   assert.equal(answer.serverConfigId, 'a')
   assert.equal(answer.replica.reconciledAt, null, "native's replica state is kept")
 
-  // An answer without total counts its episodes
-  const noTotal = createDataService({ plugin: pending(), store: fakeStore(), nativeHttp: () => fakeHttp(() => ({ episodes: [episode('e1')] })) })
-  assert.equal((await noTotal.getRecentEpisodes({ libraryId: 'lib1', limit: 50, page: 0 })).total, 1)
+  // The server sends no total: unknown, not the length of the page; 50 a page by default
+  const noTotalHttp = fakeHttp(() => ({ episodes: serverEpisodes }))
+  const noTotal = createDataService({ plugin: pending(), store: fakeStore(), nativeHttp: () => noTotalHttp })
+  const unknownTotal = await noTotal.getRecentEpisodes({ libraryId: 'lib1' })
+  assert.equal(unknownTotal.total, null)
+  assert.equal(unknownTotal.limit, 50)
+  assert.deepEqual(noTotalHttp.paths, ['/api/libraries/lib1/recent-episodes?limit=50&page=0'])
 
   // Offline: native's answer as it is
   const offlinePlugin = pending()

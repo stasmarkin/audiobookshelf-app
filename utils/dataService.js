@@ -563,9 +563,10 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   }
 
   const getRecentEpisodes = async (args) => {
-    const { libraryId, limit, page = 0 } = args
+    const { libraryId, limit = 50, page = 0 } = args
     const path = `${libraryPath(libraryId)}/recent-episodes?limit=${limit}&page=${page}`
-    const shape = (data) => ({ episodes: data?.episodes || [], total: data?.total ?? (data?.episodes || []).length, limit, page })
+    // The server sends no total: unknown (null), a shorter page than `limit` is the end
+    const shape = (data) => ({ episodes: data?.episodes || [], total: data?.total ?? null, limit, page })
     if (isWeb) return { ...shape(await $axios.$get(path)), serverConfigId: activeServer(), replica: webReplica() }
     const answer = await fromNative(() => plugin.getRecentEpisodes({ libraryId, limit, page }))
     return withServerFallback(answer, path, shape, () => getRecentEpisodes(args))
@@ -729,7 +730,8 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     getLibraryItem,
     /**
      * A page of a podcast library's latest unfinished episodes: `{ serverConfigId, episodes, total, limit, page, replica,
-     * fromServer? }`, each episode with `libraryId` and its `podcast`; `limit` at most 100.
+     * fromServer? }`, each episode with `libraryId` and its `podcast`; `limit` at most 100, 50 by default. `total` is
+     * null when the server answered (it does not count them).
      */
     getRecentEpisodes,
     /** The library native reconciles first. */

@@ -749,7 +749,8 @@ class CatalogReader(
       }
       val copy = row.expandedJson?.let { mapper.readTree(it) as? ObjectNode }
       val (item, level) = when {
-        copy != null && row.detailLevel == DetailLevel.EXPANDED -> copy to DetailLevel.EXPANDED
+        // The same version may still have new metadata (a joined name, a feed): the row's is current
+        copy != null && row.detailLevel == DetailLevel.EXPANDED -> CatalogJson.overFreshRow(copy, fresh(), keepLinks = true) to DetailLevel.EXPANDED
         copy != null && row.detailLevel == DetailLevel.STALE -> CatalogJson.overFreshRow(copy, fresh()) to DetailLevel.STALE
         else -> fresh() to DetailLevel.MINIFIED
       }
@@ -758,7 +759,8 @@ class CatalogReader(
         val media = item.get("media") as? ObjectNode ?: item.putObject("media")
         val episodes = media.putArray("episodes")
         db.episodes().forPodcast(sc, id).forEach { episodes.add(mapper.readTree(it.json)) }
-        media.put("numEpisodes", episodes.size())
+        // No episodes in the replica before they were read: the server's count stands
+        media.put("numEpisodes", if (episodes.isEmpty && level != DetailLevel.EXPANDED) row.numEpisodes else episodes.size())
       }
       val state = db.libraryState().get(sc, row.libraryId)
       JSONObject().put("serverConfigId", sc).put("libraryItem", JSONObject(mapper.writeValueAsString(item))).put("detailLevel", level)
@@ -778,14 +780,25 @@ class CatalogReader(
   /** The series of a book with their names, in the order of its `seriesName`. */
   private suspend fun seriesOfItem(sc: String, id: String, seriesName: String): List<Triple<String, String, String?>> =
           db.series().membershipOfItem(sc, id).mapNotNull { m -> db.series().get(sc, m.seriesId)?.let { Triple(m.seriesId, it.name, m.sequence) } }
-                  .sortedWith(compareBy<Triple<String, String, String?>> { seriesName.indexOf(it.second).let { i -> if (i < 0) Int.MAX_VALUE else i } }
-                          .thenBy { it.first })
+                  .sortedWith(compareBy<Triple<String, String, String?>> { positionOfName(seriesName, it.second) }.thenBy { it.first })
 
-  private suspend fun authorIdsByName(sc: String, libraryId: String): Map<String, String> {
-    val out = HashMap<String, String>()
-    db.authors().forLibrary(sc, libraryId).sortedBy { it.id }.forEach { out.putIfAbsent(it.name, it.id) }
-    return out
+  /** Where [name] stands whole in "A #1, B": at a part's start and followed by " #", "," or the end, so S1 is not in S10. */
+  private fun positionOfName(joined: String, name: String): Int {
+    if (name.isEmpty()) return Int.MAX_VALUE
+    var i = joined.indexOf(name)
+    while (i >= 0) {
+      val end = i + name.length
+      val starts = i == 0 || joined.startsWith(", ", i - 2)
+      val ends = end == joined.length || joined.startsWith(" #", end) || joined.startsWith(",", end)
+      if (starts && ends) return i
+      i = joined.indexOf(name, i + 1)
+    }
+    return Int.MAX_VALUE
   }
+
+  /** Author ids by name; a name several authors share maps to null, since the book's row does not tell which one. */
+  private suspend fun authorIdsByName(sc: String, libraryId: String): Map<String, String?> =
+          db.authors().forLibrary(sc, libraryId).groupBy { it.name }.mapValues { (_, authors) -> authors.singleOrNull()?.id }
 
   /**
    * `GET /api/libraries/:id/recent-episodes` from the replica: `{ serverConfigId, episodes, total, limit, page, replica }`,

@@ -391,10 +391,10 @@ object CatalogJson {
 
   /**
    * A minified item in the expanded shape a page reads: a book gets `metadata.authors` (an id where the library knows
-   * the name, else null), `series` ([series]: id, name, sequence) and `narrators` back from its joined names. Chapters,
+   * the name of one author, else null; [authorIdByName] maps a name several authors share to null), `series` ([series]: id, name, sequence) and `narrators` back from its joined names. Chapters,
    * tracks and files stay unknown; their counts (`numTracks`, `numChapters`, `ebookFormat`) stay. A podcast as it is.
    */
-  fun pseudoExpanded(minified: JsonNode, series: List<Triple<String, String, String?>>, authorIdByName: Map<String, String>): ObjectNode {
+  fun pseudoExpanded(minified: JsonNode, series: List<Triple<String, String, String?>>, authorIdByName: Map<String, String?>): ObjectNode {
     val out = minified.deepCopy<JsonNode>() as ObjectNode
     if (out.path("mediaType").asText() == "podcast") return out
     val media = out.get("media") as? ObjectNode ?: out.putObject("media")
@@ -427,20 +427,34 @@ object CatalogJson {
     return out
   }
 
-  private val LINK_KEYS = setOf("authors", "narrators", "series", "genres")
+  private val LINKS = setOf("authors", "narrators", "series")
+  /** What a minified item carries; a field of these missing in it was removed on the server. */
+  private val ROW_ITEM_KEYS = ITEM_KEYS + listOf("numFiles", "size")
+  private val ROW_MEDIA_KEYS = listOf("coverPath", "tags", "duration")
 
   /**
-   * The expanded copy of an older version with the current row over it ([fresh]: its [pseudoExpanded] item): the top
-   * level, the metadata values and links, cover, tags and duration are the row's; chapters, tracks and files the copy's.
+   * An expanded copy with the current row over it ([fresh]: its [pseudoExpanded] item): the top level, the metadata
+   * values, genres, cover, tags and duration are the row's, also where the row no longer has them; chapters, tracks and
+   * files the copy's. [keepLinks]: the copy is of the row's version, so its authors, narrators and series (with ids) are
+   * exact and kept.
    */
-  fun overFreshRow(copy: ObjectNode, fresh: JsonNode): ObjectNode {
+  fun overFreshRow(copy: ObjectNode, fresh: JsonNode, keepLinks: Boolean = false): ObjectNode {
+    ROW_ITEM_KEYS.forEach { key -> if (!fresh.has(key)) copy.remove(key) }
     fresh.fields().forEach { (key, value) -> if (key != "media") copy.set<JsonNode>(key, value.deepCopy()) }
     val freshMedia = fresh.path("media")
     val media = copy.get("media") as? ObjectNode ?: copy.putObject("media")
-    listOf("coverPath", "tags", "duration").forEach { key -> freshMedia.get(key)?.let { media.set<JsonNode>(key, it.deepCopy()) } }
+    ROW_MEDIA_KEYS.forEach { key ->
+      val value = freshMedia.get(key)
+      if (value == null) media.remove(key) else media.set<JsonNode>(key, value.deepCopy())
+    }
     val metadata = media.get("metadata") as? ObjectNode ?: media.putObject("metadata")
-    freshMedia.path("metadata").fields().forEach { (key, value) ->
-      if (value.isValueNode || key in LINK_KEYS) metadata.set<JsonNode>(key, value.deepCopy())
+    val freshMetadata = freshMedia.path("metadata")
+    // A minified podcast carries its whole metadata, a book only these keys
+    val owned = if (fresh.path("mediaType").asText() == "podcast") metadata.fieldNames().asSequence().toList() else BOOK_METADATA_KEYS
+    owned.forEach { key -> if (!freshMetadata.has(key)) metadata.remove(key) }
+    freshMetadata.fields().forEach { (key, value) ->
+      val take = if (key in LINKS) !keepLinks else value.isValueNode || key == "genres"
+      if (take) metadata.set<JsonNode>(key, value.deepCopy())
     }
     return copy
   }

@@ -226,8 +226,11 @@ object SyncEngine {
   suspend fun applyEvent(name: String, payloadJson: String, serverConfigId: String?): Boolean =
           core?.applyEvent(name, payloadJson, serverConfigId) ?: false
 
-  /** The user opens [itemId] of the active server: its expanded copy, see [ExpandedItemCache]. Null before [init]. */
-  suspend fun openItem(itemId: String, force: Boolean = false): OpenOutcome? = core?.openItem(itemId, force)
+  /**
+   * The user opens [itemId] of [serverConfigId]: its expanded copy, see [ExpandedItemCache]; skipped unless that server is
+   * the active one. Null before [init].
+   */
+  suspend fun openItem(serverConfigId: String, itemId: String, force: Boolean = false): OpenOutcome? = core?.openItem(serverConfigId, itemId, force)
 
   @Synchronized
   internal fun initForTest(deps: SyncDeps) {
@@ -461,9 +464,10 @@ object SyncEngine {
       }
     }
 
-    suspend fun openItem(itemId: String, force: Boolean): OpenOutcome? {
+    suspend fun openItem(serverConfigId: String, itemId: String, force: Boolean): OpenOutcome? {
       val cache = expandedCache ?: return null
-      val config = deps.activeServer() ?: return OpenOutcome(OpenResult.SKIPPED)
+      // Read once: the caller's replica answer and the request must be about the same server
+      val config = deps.activeServer()?.takeIf { it.id == serverConfigId } ?: return OpenOutcome(OpenResult.SKIPPED)
       return cache.open(config, itemId, force)
     }
 

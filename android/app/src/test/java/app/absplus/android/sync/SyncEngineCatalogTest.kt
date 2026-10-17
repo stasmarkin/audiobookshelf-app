@@ -513,7 +513,7 @@ class SyncEngineCatalogTest {
     SyncEngine.syncNow(SyncReason.MANUAL)
     gate.awaitArrived()
 
-    val outcome = SyncEngine.openItem("li1")!!
+    val outcome = SyncEngine.openItem("srv", "li1")!!
     assertEquals(OpenResult.UPDATED, outcome.result)
     assertEquals("li1", CatalogJson.mapper.readTree(outcome.serverItem).path("id").asText())
     assertEquals("buffered until the pass ends", app.absplus.android.db.replica.DetailLevel.MINIFIED, detailLevel("li1"))
@@ -524,6 +524,17 @@ class SyncEngineCatalogTest {
   }
 
   @Test
+  fun openForAServerNoLongerActiveIsSkipped() = runBlocking {
+    server.book("li1")
+    startOnline()
+    serveExpanded("li1", updatedAt = 1)
+
+    assertEquals(OpenOutcome(OpenResult.SKIPPED), SyncEngine.openItem("previous", "li1"))
+    assertTrue(api.requests.none { it.path.startsWith("/api/items/") })
+    assertEquals(OpenResult.UPDATED, SyncEngine.openItem("srv", "li1")!!.result)
+  }
+
+  @Test
   fun notFoundDuringACatalogPassIsRemovedAfterIt() = runBlocking {
     server.book("li1")
     startOnline()
@@ -531,7 +542,7 @@ class SyncEngineCatalogTest {
     SyncEngine.syncNow(SyncReason.MANUAL)
     gate.awaitArrived()
 
-    assertEquals(OpenOutcome(OpenResult.REMOVED), SyncEngine.openItem("li1"))
+    assertEquals(OpenOutcome(OpenResult.REMOVED), SyncEngine.openItem("srv", "li1"))
     gate.release.countDown()
     awaitPasses(2)
     assertNull(title("li1"))
@@ -546,7 +557,7 @@ class SyncEngineCatalogTest {
     SyncEngine.syncNow(SyncReason.MANUAL)
     gate.awaitArrived()
 
-    assertEquals(OpenOutcome(OpenResult.UP_TO_DATE), SyncEngine.openItem("li1"))
+    assertEquals(OpenOutcome(OpenResult.UP_TO_DATE), SyncEngine.openItem("srv", "li1"))
     gate.release.countDown()
     awaitPasses(2)
     assertEquals(200L, replica.items().get("srv", "li1")!!.updatedAt)

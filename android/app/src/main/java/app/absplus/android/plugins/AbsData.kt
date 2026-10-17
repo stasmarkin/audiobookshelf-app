@@ -665,7 +665,7 @@ class AbsData : Plugin() {
     val force = flag(call.data, "force")
     readCatalog(call, { JSONObject().put("libraryItem", JSONObject.NULL).put("detailLevel", JSONObject.NULL).put("replica", emptyReplica()) }) { reader, sc ->
       // Only the active server is asked; a downloaded copy's other server answers from the replica
-      val outcome = if (refresh && sc == ActiveServer.current()?.id) SyncEngine.openItem(id, force) else null
+      val outcome = if (refresh) SyncEngine.openItem(sc, id, force) else null
       itemAnswer(outcome, reader.libraryItem(sc, id))
     }
   }

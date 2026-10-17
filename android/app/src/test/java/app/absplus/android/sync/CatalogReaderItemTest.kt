@@ -96,16 +96,91 @@ class CatalogReaderItemTest {
     assertTrue("tracks of the copy", item.path("media").path("tracks").isArray)
     assertTrue(item.has("libraryFiles"))
 
-    // The copy of the current version is the answer as it is
+  }
+
+  @Test
+  fun expandedCopyTakesTheRowsMetadataButKeepsItsLinks() {
     runBlocking {
-      db.items().upsertAll(listOf(db.items().get("srv", "li1")!!.copy(detailLevel = DetailLevel.EXPANDED, expandedJson = oldCopy())))
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
+      db.authors().upsertAll(listOf(authorRow("srv", "a9", name = "New Author")))
+      db.series().upsertAll(listOf(seriesRow("srv", "s2", name = "S2")))
+      db.series().insertMembers(listOf(member("srv", "s2", "li1", "2")))
+      // A rename at the same updatedAt: the row moved on, the copy of that version did not
+      db.items().upsertAll(listOf(bookRow("Renamed", "New Author", "S2 #2", "B", listOf("Sci-Fi"))
+              .copy(detailLevel = DetailLevel.EXPANDED, expandedJson = oldCopy())))
     }
-    val expanded = read("li1")
-    assertEquals("expanded", expanded.getString("detailLevel"))
-    val copy = tree(expanded).path("libraryItem")
-    assertEquals("Old", copy.path("media").path("metadata").path("title").asText())
-    assertEquals(mapper.readTree("""[{"id":"s1","name":"S1","sequence":"1"}]"""), copy.path("media").path("metadata").path("series"))
-    assertTrue(copy.has("rssFeed"))
+    val answer = read("li1")
+    assertEquals("expanded", answer.getString("detailLevel"))
+    val item = tree(answer).path("libraryItem")
+    val metadata = item.path("media").path("metadata")
+    assertEquals("Renamed", metadata.path("title").asText())
+    assertEquals("B", item.path("media").path("coverPath").asText())
+    assertEquals(mapper.readTree("""["Sci-Fi"]"""), metadata.path("genres"))
+    assertEquals("the copy's exact links", mapper.readTree("""[{"id":"s1","name":"S1","sequence":"1"}]"""), metadata.path("series"))
+    assertEquals(mapper.readTree("""[{"id":"a0","name":"Old Author"}]"""), metadata.path("authors"))
+    assertEquals(listOf("One", "Two"), item.path("media").path("chapters").map { it.path("title").asText() })
+    assertTrue(item.has("rssFeed"))
+  }
+
+  @Test
+  fun staleCopyDropsWhatTheRowNoLongerHas() {
+    val row = bookRow("New", "New Author", "", "B", emptyList())
+    val minified = mapper.readTree(row.json) as ObjectNode
+    (minified.path("media").path("metadata") as ObjectNode).remove("description")
+    (minified.path("media") as ObjectNode).remove("coverPath")
+    minified.remove("numFiles")
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
+      db.items().upsertAll(listOf(row.copy(json = mapper.writeValueAsString(minified), detailLevel = DetailLevel.STALE, expandedJson = oldCopy())))
+    }
+    val item = tree(read("li1")).path("libraryItem")
+    assertTrue("the copy has one", mapper.readTree(oldCopy()).path("media").path("metadata").has("description"))
+    assertFalse("a description removed on the server", item.path("media").path("metadata").has("description"))
+    assertFalse(item.path("media").has("coverPath"))
+    assertFalse(item.has("numFiles"))
+    assertTrue("what only the copy has stays", item.has("libraryFiles"))
+    assertTrue(item.path("media").path("metadata").has("descriptionPlain"))
+  }
+
+  @Test
+  fun ambiguousAuthorNameHasNoId() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
+      db.authors().upsertAll(listOf(authorRow("srv", "a1", name = "Ann Lee"), authorRow("srv", "a2", name = "Ann Lee"),
+              authorRow("srv", "a3", name = "Smith, Jr."), authorRow("srv", "a4", name = "Smith, Jr.")))
+      db.items().upsertAll(listOf(bookRow("New", "Smith, Jr., Ann Lee", "", "B", emptyList())))
+    }
+    val authors = tree(read("li1")).path("libraryItem").path("media").path("metadata").path("authors")
+    assertEquals("an ambiguous name is still one author", mapper.readTree("""[{"id":null,"name":"Smith, Jr."},{"id":null,"name":"Ann Lee"}]"""), authors)
+  }
+
+  @Test
+  fun seriesOrderFollowsWholeNames() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
+      db.series().upsertAll(listOf(seriesRow("srv", "s1", name = "S1"), seriesRow("srv", "s10", name = "S10")))
+      db.series().insertMembers(listOf(member("srv", "s1", "li1", "1"), member("srv", "s10", "li1", "2")))
+      db.items().upsertAll(listOf(bookRow("New", "", "S10 #2, S1 #1", "B", emptyList())))
+    }
+    val series = tree(read("li1")).path("libraryItem").path("media").path("metadata").path("series")
+    assertEquals(listOf("s10", "s1"), series.map { it.path("id").asText() })
+  }
+
+  @Test
+  fun podcastKeepsItsCountWhileEpisodesAreUnknown() {
+    val podcast = fixture("podcast-minified.json").put("id", "pod1").put("libraryId", "pods")
+    val row = CatalogJson.itemEntity("srv", podcast)
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "pods", mediaType = "podcast")))
+      db.items().upsertAll(listOf(row))
+    }
+    assertEquals(3, row.numEpisodes)
+    val minified = tree(read("pod1")).path("libraryItem").path("media")
+    assertEquals(0, minified.path("episodes").size())
+    assertEquals("the server's count until the episodes are read", 3, minified.path("numEpisodes").asInt())
+
+    runBlocking { db.items().upsertAll(listOf(row.copy(detailLevel = DetailLevel.EXPANDED, expandedJson = mapper.writeValueAsString(podcast)))) }
+    assertEquals("read: none left", 0, tree(read("pod1")).path("libraryItem").path("media").path("numEpisodes").asInt())
   }
 
   @Test
