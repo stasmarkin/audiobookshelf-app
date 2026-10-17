@@ -281,6 +281,8 @@ object SyncEngine {
     /** Start of the last reconcile that succeeded; a failed one does not cover later requests. */
     private var lastReconcileOkStartAt: Long? = null
     private var reconcileRunning = false
+    /** The next reconcile redoes one whose answer went stale; a stale redo is not redone again. */
+    private var staleReconcileRedo = false
     private var catalogJob: Job? = null
     private var lastCatalogStartAt: Long? = null
     private var delayedCatalog: Job? = null
@@ -523,9 +525,10 @@ object SyncEngine {
       try {
         if (reconcile) {
           val startedAt = deps.clock()
-          synchronized(lock) {
+          val redo = synchronized(lock) {
             reconcileDeferred = false
             reconcileRunning = true
+            staleReconcileRedo.also { staleReconcileRedo = false }
           }
           deps.log("Reconcile ${config.id}")
           val result = try {
@@ -539,7 +542,16 @@ object SyncEngine {
           }.onFailure { failure ->
             error = failure.message
             deps.logError("Reconcile ${config.id} failed: ${failure.message}")
-            synchronized(lock) { reconcileDeferred = true }
+            synchronized(lock) {
+              // A stale answer says nothing about the server: on a cold start it is the config JS sets meanwhile
+              if (failure is SyncFailure && failure.stale && !redo && deps.isForeground()) {
+                staleReconcileRedo = true
+                wantReconcile = true
+                wantPush = true
+              } else {
+                reconcileDeferred = true
+              }
+            }
           }
         }
         val result = pusher.pushAll(config)
@@ -606,6 +618,7 @@ object SyncEngine {
         socketDown = false
         wantPush = false
         wantReconcile = false
+        staleReconcileRedo = false
         lastReconcileAt = null
         lastReconcileOkStartAt = null
         unreachableRetries = 0
