@@ -34,7 +34,7 @@
         <div v-if="actionsOf(item).length" class="flex flex-wrap gap-2 mt-3">
           <ui-btn v-for="action in actionsOf(item)" :key="action" small :padding-y="2" class="min-w-16" :color="action === 'retry' || action === 'chooseFolder' ? 'success' : 'primary'" :loading="busyId === item.id" :disabled="!isServerOnline && action === 'retry'" @click="runAction(item, action)">{{ actionLabel(action) }}</ui-btn>
         </div>
-        <p v-if="!isServerOnline && actionsOf(item).includes('retry')" class="requires-server-label text-xs text-fg-muted mt-1">{{ requiresServerLabel() }}</p>
+        <p v-if="isServerAway && actionsOf(item).includes('retry')" class="requires-server-label text-xs text-fg-muted mt-1">{{ requiresServerLabel() }}</p>
 
         <div v-if="num + 1 < downloadItems.length" class="flex border-t border-border my-4" />
       </div>

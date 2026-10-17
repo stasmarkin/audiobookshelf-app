@@ -55,7 +55,7 @@
               <span class="material-symbols text-2xl fill">{{ playerIsPlaying ? 'pause' : 'play_arrow' }}</span>
               <span class="px-1 text-sm">{{ playerIsPlaying ? $strings.ButtonPause : isPodcast ? $strings.ButtonNextEpisode : hasLocal ? $strings.ButtonPlay : $strings.ButtonStream }}</span>
             </ui-btn>
-            <ui-btn v-if="showRead" color="info" class="flex items-center justify-center mx-1" :class="showPlay ? '' : 'flex-grow'" :disabled="notAvailableOffline" :padding-x="2" @click="readBook">
+            <ui-btn v-if="showRead" color="info" class="flex items-center justify-center mx-1" :class="showPlay ? '' : 'flex-grow'" :disabled="readDisabled" :padding-x="2" @click="readBook">
               <span class="material-symbols text-2xl">auto_stories</span>
               <span v-if="!showPlay" class="px-2 text-base">{{ $strings.ButtonRead }} {{ ebookFormat }}</span>
             </ui-btn>
@@ -72,7 +72,7 @@
           </ui-btn>
           <template v-if="showPlay || showRead">
             <p v-if="(showPlay && playDisabled) || (showRead && notAvailableOffline)" class="not-offline-label text-xs text-fg-muted text-center mt-1">{{ notAvailableOfflineLabel() }}</p>
-            <p v-else-if="showDownload && !isServerOnline && !downloadItem" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
+            <p v-if="showDownload && isServerAway && !downloadItem" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
           </template>
 
           <div v-if="!isPodcast && progressPercent > 0" class="detail-progress px-4 py-2 bg-primary text-sm font-semibold rounded-md text-fg mt-4 text-center">
@@ -163,7 +163,7 @@
 
         <tables-tracks-table v-if="tracks.length" :tracks="tracks" :library-item-id="libraryItemId" />
 
-        <tables-ebook-files-table v-if="ebookFiles.length" :library-item="libraryItem" :not-available-offline="notAvailableOffline" />
+        <tables-ebook-files-table v-if="ebookFiles.length" :library-item="libraryItem" />
       </div>
     </div>
 
@@ -218,7 +218,7 @@ export default {
       if (libraryItem?.libraryItemId?.startsWith('li_')) {
         // Detect old library item id
         console.error('Local library item has old server library item id', libraryItem.libraryItemId)
-      } else if (query.noredirect !== '1' && libraryItem?.libraryItemId && libraryItem?.serverAddress === store.getters['user/getServerAddress'] && store.state.socketConnected) {
+      } else if (query.noredirect !== '1' && libraryItem?.libraryItemId && isCopyOfActiveServer(libraryItem, store.state.activeServerConfigId) && store.state.socketConnected) {
         const queryParams = new URLSearchParams()
         queryParams.set('localLibraryItemId', libraryItemId)
         if (libraryItem.mediaType === 'podcast') {
@@ -236,7 +236,8 @@ export default {
       if (answer?.libraryItem) {
         libraryItem = await withLocalCopy(app.$db, store, answer.libraryItem)
         detailLevel = answer.detailLevel || null
-      } else if (query.localLibraryItemId) {
+      } else if (query.localLibraryItemId && !store.getters.getIsServerOnline) {
+        // Online the refresh in mounted() asks the server first (a book the replica does not have yet)
         return redirect(`/item/${encodeURIComponent(query.localLibraryItemId)}?noredirect=1`)
       }
     } else {
@@ -518,6 +519,10 @@ export default {
     showRead() {
       return !!(this.ebookFile || this.media.ebookFormat)
     },
+    /** A minified item names its e-book format but has no file to open until the full item arrives. */
+    readDisabled() {
+      return this.notAvailableOffline || !(this.ebookFile || this.localLibraryItem?.media?.ebookFile)
+    },
     showDownload() {
       if (this.isPodcast || this.hasLocal) return false
       return !!this.userCanDownload && (this.showPlay || this.showRead)
@@ -580,7 +585,7 @@ export default {
       this.showMoreMenu = true
     },
     readBook() {
-      if (this.notAvailableOffline) return
+      if (this.readDisabled) return
       if (this.localLibraryItem?.media?.ebookFile) {
         // Has local ebook file
         this.$store.commit('showReader', { libraryItem: this.localLibraryItem, keepProgress: true })
@@ -850,6 +855,8 @@ export default {
       if (change?.scope !== 'catalog' || !libraryId) return
       const topics = this.isPodcast ? [`items:${libraryId}`, `episodes:${libraryId}`] : [`items:${libraryId}`]
       if (!topics.some((topic) => (change.ids || []).includes(topic))) return
+      // A notice that names its items: only this one matters (a big podcast is not re-read for every other change)
+      if (Array.isArray(change.itemIds) && !change.itemIds.includes(this.libraryItemId)) return
       if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
       this.refreshDebouncer.schedule(() => this.readItem())
     },
@@ -888,10 +895,13 @@ export default {
     }
   },
   async mounted() {
-    // A downloaded copy's page (local_*) has no server item to read
-    if (!this.libraryItemId.startsWith('local') && !(await this.readItem(true))) return
+    // A downloaded copy's page (local_*) has no server item to read; a page drawn from the replica does not wait for it
+    const readsServerItem = !this.libraryItemId.startsWith('local')
+    const drawn = !!this.libraryItem
+    if (readsServerItem && !drawn && !(await this.readItem(true))) return
     if (this.$route.query.error === 'episode') this.$toast.info(this.$strings.ToastEpisodeNotAvailable)
     this.init()
+    if (readsServerItem && drawn) this.readItem(true)
     const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
     // Left the page before the listener was registered
     if (this._isDestroyed) {

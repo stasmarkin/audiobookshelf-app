@@ -21,7 +21,7 @@
       <div class="flex-grow" />
       <ui-btn color="success" :disabled="!isServerOnline" @click="submit">{{ $strings.ButtonSubmit }}</ui-btn>
     </div>
-    <p v-if="!isServerOnline" class="requires-server-label text-xs text-fg-muted text-right px-2">{{ requiresServerLabel() }}</p>
+    <p v-if="isServerAway" class="requires-server-label text-xs text-fg-muted text-right px-2">{{ requiresServerLabel() }}</p>
   </div>
 </template>
 

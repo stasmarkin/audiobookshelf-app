@@ -53,7 +53,7 @@
     <div v-show="userIsAdminOrUp" class="pt-2 h-20">
       <ui-btn v-if="currentFeed" color="error" class="w-full h-14" :disabled="!isServerOnline" @click="closeFeed">{{ $strings.ButtonCloseFeed }}</ui-btn>
       <ui-btn v-else color="success" class="w-full h-14" :disabled="!isServerOnline" @click="openFeed">{{ $strings.ButtonOpenFeed }}</ui-btn>
-      <p v-if="!isServerOnline" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
+      <p v-if="isServerAway" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
     </div>
   </modals-fullscreen-modal>
 </template>

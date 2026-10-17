@@ -23,7 +23,7 @@
         </template>
       </div>
       <div class="absolute bottom-6 left-0 w-full flex items-center" style="height: 50px">
-        <ui-btn class="w-full" :disabled="!episodesSelected.length || !isServerOnline" color="success" @click.stop="downloadEpisodes">{{ !isServerOnline ? requiresServerLabel() : episodesSelected.length ? `Add ${episodesSelected.length} Episode(s) to Server` : 'No Episodes Selected' }}</ui-btn>
+        <ui-btn class="w-full" :disabled="!episodesSelected.length || !isServerOnline" color="success" @click.stop="downloadEpisodes">{{ isServerAway ? requiresServerLabel() : episodesSelected.length ? `Add ${episodesSelected.length} Episode(s) to Server` : 'No Episodes Selected' }}</ui-btn>
       </div>
     </div>
   </modals-modal>

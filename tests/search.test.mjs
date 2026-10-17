@@ -295,10 +295,12 @@ test('offline search cards are marked', async () => {
   await downloaded.view.playEpisode()
   assert.equal(downloaded.emitted[0][1].episodeId, 'local_ep_1')
 
-  // Online and signed in: the server's episode page
-  const online = await episodeCard({ serverState: 'online', signedIn: true, localLibraryItem: { id: 'local_1', media: { episodes: [{ id: 'local_ep_1', serverEpisodeId: 'ep1' }] } } })
-  await online.view.clickCard({})
-  assert.deepEqual(online.pushed, ['/item/li1/ep1'])
+  // Online, signed in or not: the server's episode page (the same rule as a search result)
+  for (const signedIn of [true, false]) {
+    const online = await episodeCard({ serverState: 'online', signedIn, localLibraryItem: { id: 'local_1', media: { episodes: [{ id: 'local_ep_1', serverEpisodeId: 'ep1' }] } } })
+    await online.view.clickCard({})
+    assert.deepEqual(online.pushed, ['/item/li1/ep1'], `signed in: ${signedIn}`)
+  }
   // A copy without episodes (a book's) does not break the card
   assert.equal((await episodeCard({ serverState: 'offline', localLibraryItem: { id: 'local_2', media: {} } })).view.notAvailableOffline, true)
 })

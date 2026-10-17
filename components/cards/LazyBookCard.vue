@@ -419,9 +419,9 @@ export default {
     showPlayButton() {
       return !!this.queueSource && !this.collapsedSeries && !this.isPodcast && !this.isMissing && !this.isInvalid && !!this.numTracks && !this.notAvailableOffline
     },
-    /** The episode page reads the server only while signed in to it and it answers. */
+    /** Without the server a downloaded episode opens its copy (the same rule as a search result). */
     readsLocalEpisodePage() {
-      return !this.store.state.user?.serverConnectionConfig || this.store.state.serverState !== 'online'
+      return this.store.state.serverState !== 'online'
     },
     /** Offline, a server item without a downloaded copy cannot be played; its page opens from the replica. */
     notAvailableOffline() {
@@ -515,7 +515,7 @@ export default {
       } else {
         const router = this.$router || this.$nuxt.$router
         if (router) {
-          // Without the server the episode page reads only a downloaded copy, by its local ids
+          // Without the server a downloaded episode opens its copy; any other opens the server page from the replica
           if (this.recentEpisode && this.localEpisode && this.readsLocalEpisodePage) router.push(`/item/${this.localLibraryItemId}/${this.localEpisode.id}`)
           else if (this.recentEpisode) router.push(`/item/${this.libraryItemId}/${this.recentEpisode.id}`)
           else if (this.collapsedSeries) router.push(`/bookshelf/series/${this.collapsedSeries.id}`)

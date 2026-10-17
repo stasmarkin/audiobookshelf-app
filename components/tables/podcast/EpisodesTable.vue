@@ -37,7 +37,7 @@
         <span class="material-symbols ml-1 text-fg">{{ sortDesc ? 'arrow_drop_down' : 'arrow_drop_up' }}</span>
       </div>
     </div>
-    <p v-if="isAdminOrUp && !isServerOnline" class="requires-server-label text-xs text-fg-muted text-right">{{ requiresServerLabel() }}</p>
+    <p v-if="isAdminOrUp && isServerAway" class="requires-server-label text-xs text-fg-muted text-right">{{ requiresServerLabel() }}</p>
 
     <template v-for="episode in episodesSorted">
       <tables-podcast-episode-row :episode="episode" :local-episode="localEpisodeMap[episode.id]" :library-item-id="libraryItemId" :local-library-item-id="localLibraryItemId" :is-local="isLocal" :server-library-item-id="isLocal ? libraryItem.libraryItemId : null" :server-config-id="isLocal ? libraryItem.serverConnectionConfigId : null" :sort-key="sortKey" :auto-downloaded="autoEpisodeIds.includes(episode.id)" :key="episode.id" @addToPlaylist="addEpisodeToPlaylist" />

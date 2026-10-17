@@ -176,6 +176,7 @@ async function itemPage({ id = 'li1', serverState = 'offline', activeServerConfi
     window: { innerWidth: 400, outerHeight: 800, addEventListener() {}, removeEventListener() {} },
     document: { documentElement: { style: { setProperty() {} } } },
     setTimeout: () => 0,
+    URLSearchParams,
     Dialog: { confirm: async () => ({ value: true }), alert() {} },
     AbsFileSystem: { addListener: async () => ({ remove() {} }) },
     AbsDownloader: { downloadLibraryItem: async (payload) => (downloads.push(payload), {}) },
@@ -307,7 +308,8 @@ test('a never-opened book offline shows Play disabled, not hidden', async () => 
   assert.equal(v.showChaptersHint, true)
   const template = templateOf(pageSource)
   assert.match(template, /<ui-btn v-if="showPlay"[^>]*:disabled="playDisabled && !playerIsPlaying"/)
-  assert.match(template, /<ui-btn v-if="showRead"[^>]*:disabled="notAvailableOffline"/)
+  assert.match(template, /<ui-btn v-if="showRead"[^>]*:disabled="readDisabled"/)
+  assert.equal(v.readDisabled, true)
   assert.match(template, /<div v-if="showPlay \|\| showRead"[\s\S]*?<\/div>\n\s*<ui-btn v-else-if="isMissing"/, 'the labels do not break the Missing button chain')
   assert.match(template, /v-if="\(showPlay && playDisabled\) \|\| \(showRead && notAvailableOffline\)"[^>]*>\{\{ notAvailableOfflineLabel\(\) \}\}/)
   assert.match(template, /v-(?:else-)?if="showChaptersHint"[^>]*>\{\{ \$strings\.MessageChaptersAfterOnline \}\}/)
@@ -347,16 +349,17 @@ test('chapter tap and ebook read do nothing for an undownloaded book offline', a
   assert.equal(downloaded.emitted[0][1].startTime, 120, 'a chapter passes its own start')
   assert.equal(downloaded.commits.filter(([name]) => name === 'showReader').length, 1)
 
-  // The e-book files table reads only when the page says it can
+  // The e-book files table opens the server's file: only while the server is online, also for a downloaded book
   const tableSource = await read('../components/tables/ebook/EbookFilesTable.vue')
   const sandbox = { requiresServer }
   vm.runInNewContext(tableSource.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component ='), sandbox)
-  for (const notAvailableOffline of [true, false]) {
+  for (const isServerOnline of [false, true]) {
     const shown = []
-    sandbox.component.methods.readEbook.call({ notAvailableOffline, libraryItem: book, $store: { commit: (name) => shown.push(name) } }, 'ino1')
-    assert.deepEqual(shown, notAvailableOffline ? [] : ['showReader'])
+    sandbox.component.methods.readEbook.call({ isServerOnline, libraryItem: book, $store: { commit: (name) => shown.push(name) } }, 'ino1')
+    assert.deepEqual(shown, isServerOnline ? ['showReader'] : [])
   }
-  assert.match(pageSource, /<tables-ebook-files-table [^>]*:not-available-offline="notAvailableOffline"/)
+  assert.match(tableSource, /<tables-ebook-files-table-row [^>]*:read-disabled="!isServerOnline"/)
+  assert.match(await read('../components/tables/ebook/EbookFilesTableRow.vue'), /<ui-icon-btn icon="auto_stories"[^>]*:disabled="readDisabled"/)
 })
 
 test('an opened-online book shows its chapters offline', async () => {
@@ -403,9 +406,15 @@ test('a book gone from the server opens its downloaded copy', async () => {
   assert.deepEqual(none.replaced, ['/bookshelf'])
   assert.deepEqual(none.toasts, ['Failed to get library item from server'])
 
-  // Not in the replica at all: the copy the link names, or (offline) "not available offline" and back
+  // Not in the replica at all: offline the copy the link names, or "not available offline" and back
   const missing = await itemPage({ answers: [replicaAnswer(null, null)], query: { localLibraryItemId: 'local_li1' } })
   assert.equal(missing.redirected, '/item/local_li1?noredirect=1')
+  // Online the server is asked first: a new book the replica does not have yet opens its server page
+  const fresh = await itemPage({ serverState: 'online', user: { id: 'u1' }, answers: [replicaAnswer(null, null), { ...replicaAnswer(expandedBook(), 'expanded'), fromServer: true }], query: { localLibraryItemId: 'local_li1' } })
+  assert.equal(fresh.redirected, null)
+  await fresh.mount()
+  assert.deepEqual(fresh.replaced, [])
+  assert.equal(fresh.view.libraryItem.id, 'li1')
   const offline = await itemPage({ answers: [replicaAnswer(null, null)] })
   await offline.mount()
   assert.deepEqual(offline.toasts, ['Not available offline'])
@@ -463,7 +472,9 @@ test('download is visible and disabled offline', async () => {
   await page.view.downloadClick()
   assert.deepEqual(page.downloads, [])
   assert.match(templateOf(pageSource), /<ui-btn v-if="showDownload"[^>]*:disabled="!isServerOnline && !downloadItem"/)
-  assert.match(templateOf(pageSource), /v-(?:else-)?if="showDownload && !isServerOnline && !downloadItem"[^>]*>\{\{ requiresServerLabel\(\) \}\}/)
+  // Both reasons show at once: Play and Read not available offline, Download requires the server
+  assert.match(templateOf(pageSource), /<p v-if="showDownload && isServerAway && !downloadItem"[^>]*>\{\{ requiresServerLabel\(\) \}\}/)
+  assert.doesNotMatch(templateOf(pageSource), /v-else-if="showDownload/)
 
   const online = await itemPage({ serverState: 'online', user: { id: 'u1', permissions: { download: true } }, answers: [replicaAnswer(minifiedBook())] })
   await online.mount()
@@ -486,4 +497,61 @@ test('item page reads the item through $absData', async () => {
   assert.doesNotMatch(pageSource, /getLocalLibraryItemByLId/)
   // An author without an id (only a name in the replica) is text, not a link
   assert.match(templateOf(pageSource), /<nuxt-link v-if="author\.id"[\s\S]*?<span v-else[^>]*>\{\{ author\.name \}\}<\/span\n/)
+})
+
+test('a downloaded copy of another account stays on its own page', async () => {
+  const copy = { ...copyOf(minifiedBook()), serverAddress: 'https://abs' }
+  const page = (serverConnectionConfigId) => itemPage({ id: 'local_li1', local: { ...copy, serverConnectionConfigId }, serverState: 'online', user: { id: 'u1' } })
+  assert.equal((await page('a')).redirected, '/item/li1?localLibraryItemId=local_li1', 'a copy of the active server opens the server page')
+  assert.equal((await page('b')).redirected, null, 'same address, another account: the copy is not the active server item')
+})
+
+test('Read on a minified book online waits for the full item', async () => {
+  const pending = { resolve: null }
+  const page = await itemPage({ serverState: 'online', user: { id: 'u1' }, answers: [replicaAnswer(minifiedBook()), () => new Promise((resolve) => (pending.resolve = resolve))] })
+  page.def.mounted.call(page.view)
+  await flush()
+  assert.equal(page.view.showRead, true, 'shown by the e-book format')
+  assert.equal(page.view.readDisabled, true, 'no file to open yet')
+  page.view.readBook()
+  assert.deepEqual(page.commits.filter(([name]) => name === 'showReader'), [])
+  pending.resolve({ ...replicaAnswer(expandedBook(), 'expanded'), fromServer: true })
+  await flush()
+  assert.equal(page.view.readDisabled, false)
+  page.view.readBook()
+  assert.equal(page.commits.filter(([name]) => name === 'showReader').length, 1)
+})
+
+test('a page drawn from the replica subscribes before the refresh answers', async () => {
+  const pending = { resolve: null }
+  const page = await itemPage({ serverState: 'online', user: { id: 'u1' }, answers: [replicaAnswer(minifiedBook()), () => new Promise((resolve) => (pending.resolve = resolve))] })
+  page.def.mounted.call(page.view)
+  await flush()
+  assert.equal(page.subscribed, true, 'init() does not wait for the server')
+  pending.resolve({ ...replicaAnswer(expandedBook(), 'expanded'), fromServer: true })
+  await flush()
+  assert.equal(page.view.detailLevel, 'expanded')
+
+  // Without an item from the replica the page waits for the refresh before anything else
+  const missing = { resolve: null }
+  const empty = await itemPage({ serverState: 'online', user: { id: 'u1' }, answers: [replicaAnswer(null, null), () => new Promise((resolve) => (missing.resolve = resolve))] })
+  empty.def.mounted.call(empty.view)
+  await flush()
+  assert.equal(empty.subscribed, false)
+  missing.resolve({ ...replicaAnswer(expandedBook(), 'expanded'), fromServer: true })
+  await flush()
+  assert.equal(empty.subscribed, true)
+})
+
+test('a notice that names other items does not re-read the page', async () => {
+  const page = await itemPage({ answers: [replicaAnswer(minifiedBook())] })
+  await page.mount()
+  const before = page.reads.length
+  page.view.dataChanged({ scope: 'catalog', ids: ['items:l1'], itemIds: ['li9'] })
+  assert.deepEqual(await page.runTimers(), [])
+  page.view.dataChanged({ scope: 'catalog', ids: ['items:l1'], itemIds: ['li9', 'li1'] })
+  assert.deepEqual(await page.runTimers(), [1000])
+  page.view.dataChanged({ scope: 'catalog', ids: ['items:l1'] })
+  assert.deepEqual(await page.runTimers(), [1000], 'without item ids: as before')
+  assert.equal(page.reads.length, before + 2)
 })

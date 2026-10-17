@@ -11,7 +11,7 @@
       <div class="hidden md:block flex-grow" />
       <ui-btn class="w-full md:w-auto" :disabled="!isServerOnline && !showYearInReview" @click.stop="clickShowYearInReview">{{ showYearInReview ? $strings.LabelYearReviewHide : $strings.LabelYearReviewShow }}</ui-btn>
     </div>
-    <p v-if="!isServerOnline && !showYearInReview" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
+    <p v-if="isServerAway && !showYearInReview" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
 
     <!-- your year in review -->
     <div v-if="showYearInReview">

@@ -57,7 +57,7 @@
 
         <!-- Spacer to push elements left -->
         <div class="flex-grow" />
-        <p v-if="!isServerOnline && !isLocal" class="requires-server-label text-xs text-fg-muted">{{ requiresServerLabel() }}</p>
+        <p v-if="isServerAway && !isLocal" class="requires-server-label text-xs text-fg-muted">{{ requiresServerLabel() }}</p>
       </div>
     </div>
 

@@ -41,7 +41,7 @@
       </ui-btn>
     </div>
     <p v-if="notAvailableOffline" class="not-offline-label text-xs text-fg-muted text-center mt-1">{{ notAvailableOfflineLabel() }}</p>
-    <p v-else-if="showDownload && !isServerOnline" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
+    <p v-if="showDownload && isServerAway" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
 
     <p class="text-sm text-fg mt-1.5 mb-0.5 default-style description-container" v-html="transformedDescription"></p>
 
@@ -600,6 +600,7 @@ export default {
       const libraryId = this.libraryItem?.libraryId
       if (change?.scope !== 'catalog' || !libraryId) return
       if (![`items:${libraryId}`, `episodes:${libraryId}`].some((topic) => (change.ids || []).includes(topic))) return
+      if (Array.isArray(change.itemIds) && !change.itemIds.includes(this.libraryItemId)) return
       if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
       this.refreshDebouncer.schedule(() => this.readEpisode())
     },

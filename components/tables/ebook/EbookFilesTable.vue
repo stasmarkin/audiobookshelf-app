@@ -19,9 +19,10 @@
             <th v-if="userCanUpdate && !libraryIsAudiobooksOnly" class="text-center w-16"></th>
           </tr>
           <template v-for="file in ebookFiles">
-            <tables-ebook-files-table-row :key="file.path" :libraryItemId="libraryItemId" :file="file" @read="readEbook" @more="showMore" />
+            <tables-ebook-files-table-row :key="file.path" :libraryItemId="libraryItemId" :file="file" :read-disabled="!isServerOnline" @read="readEbook" @more="showMore" />
           </template>
         </table>
+        <p v-if="isServerAway" class="requires-server-label text-xs text-fg-muted px-4 py-1">{{ requiresServerLabel() }}</p>
       </div>
     </transition>
 
@@ -38,9 +39,7 @@ export default {
     libraryItem: {
       type: Object,
       default: () => {}
-    },
-    /** Offline without a downloaded copy: the files are listed but cannot be read. */
-    notAvailableOffline: Boolean
+    }
   },
   data() {
     return {
@@ -77,8 +76,9 @@ export default {
       this.selectedFile = file
       this.moreMenuItems = items.map((item) => (item.value === 'updateStatus' ? { ...item, ...this.serverOnlyItem } : item))
     },
+    /** Opens the server's file; a downloaded copy is read with Read on the item page. */
     readEbook(fileIno) {
-      if (this.notAvailableOffline) return
+      if (!this.isServerOnline) return
       this.$store.commit('showReader', { libraryItem: this.libraryItem, keepProgress: false, fileId: fileIno })
     },
     clickBar() {

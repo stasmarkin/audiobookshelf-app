@@ -12,7 +12,7 @@
             <span class="material-symbols fill text-lg">{{ item.icon }}</span>
             <div class="pl-4 text-left">
               <p>{{ item.text }}</p>
-              <p v-if="item.requiresServer && !isServerOnline" class="requires-server-label text-xs">{{ requiresServerLabel() }}</p>
+              <p v-if="item.requiresServer && isServerAway" class="requires-server-label text-xs">{{ requiresServerLabel() }}</p>
             </div>
           </button>
           <nuxt-link v-else :to="item.to" :key="item.text" :tabindex="show ? 0 : -1" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg" :class="currentRoutePath.startsWith(item.to) ? 'bg-bg-hover/50' : 'text-fg-muted'">

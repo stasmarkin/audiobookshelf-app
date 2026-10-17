@@ -138,7 +138,10 @@ test('a partly downloaded podcast offline', async () => {
   assert.equal(other.view.notAvailableOffline, true, "the podcast's copy does not make e2 playable")
   await other.view.playClick()
   assert.deepEqual(other.emitted, [])
-  assert.match(templateOf(await read('../pages/item/_id/_episode/index.vue')), /<ui-btn color="success"[^>]*:disabled="notAvailableOffline && !playerIsPlaying"[^>]*@click="playClick"/)
+  const episodeTemplate = templateOf(await read('../pages/item/_id/_episode/index.vue'))
+  assert.match(episodeTemplate, /<ui-btn color="success"[^>]*:disabled="notAvailableOffline && !playerIsPlaying"[^>]*@click="playClick"/)
+  // Both reasons show at once, and the server one not while the first check is pending
+  assert.match(episodeTemplate, /<p v-if="notAvailableOffline"[^>]*>\{\{ notAvailableOfflineLabel\(\) \}\}<\/p>\n\s*<p v-if="showDownload && isServerAway"/)
 
   // The podcast's Play (next episode) chooses only among the downloaded episodes
   const itemPage = async (copies) => {
