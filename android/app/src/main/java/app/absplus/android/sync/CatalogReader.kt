@@ -773,23 +773,44 @@ class CatalogReader(
   }
 
   /**
-   * The links of a copy of the row's version against the row ([fresh]), which may have moved on at the same updatedAt:
-   * series as the replica has them; the copy's authors under their current names while those still make up the row's
-   * `authorName` (their ids are exact), else read from the names; the copy's narrators while they make up `narratorName`.
+   * The links of a copy of the row's version against the row ([fresh]), which may have moved on at the same updatedAt.
+   * The copy's ids are exact: its series and authors are kept, under the current names of their tables, while they
+   * still read as the row's `seriesName`/`authorName` (by their names in the copy or their current ones: a renamed author
+   * may come before the book's own event). Otherwise the membership changed: the replica's series, authors read from
+   * the names. Narrators are the copy's while they make up `narratorName`.
    */
   private suspend fun currentLinks(sc: String, item: ObjectNode, fresh: JsonNode): ObjectNode {
     val metadata = item.path("media").path("metadata") as? ObjectNode ?: return item
     val freshMetadata = fresh.path("media").path("metadata")
-    metadata.set<JsonNode>("series", freshMetadata.path("series").deepCopy())
+    val mapper = CatalogJson.mapper
+
+    val series = metadata.path("series")
+    val currentSeries = mapper.createArrayNode()
+    series.forEach { s ->
+      val id = s.path("id").takeIf { it.isTextual }?.asText()
+      val name = id?.let { db.series().get(sc, it)?.name } ?: s.path("name").asText("")
+      currentSeries.addObject().put("id", id).put("name", name).set<JsonNode>("sequence", s.get("sequence")?.deepCopy() ?: NullNode.instance)
+    }
+    fun seriesName(list: JsonNode) = list.joinToString(", ") { s ->
+      val sequence = s.path("sequence").takeIf { it.isValueNode && !it.isNull }?.asText().orEmpty()
+      s.path("name").asText("") + if (sequence.isEmpty()) "" else " #$sequence"
+    }
+    val rowSeries = freshMetadata.path("seriesName").asText("")
+    val keepSeries = series.isArray && (seriesName(series) == rowSeries || seriesName(currentSeries) == rowSeries)
+    metadata.set<JsonNode>("series", if (keepSeries) currentSeries else freshMetadata.path("series").deepCopy())
+
     val authors = metadata.path("authors")
-    val renamed = CatalogJson.mapper.createArrayNode()
+    val currentAuthors = mapper.createArrayNode()
     authors.forEach { author ->
       val id = author.path("id").takeIf { it.isTextual }?.asText()
       val name = id?.let { db.authors().get(sc, it)?.name } ?: author.path("name").asText("")
-      renamed.addObject().put("id", id).put("name", name)
+      currentAuthors.addObject().put("id", id).put("name", name)
     }
-    val sameAuthors = authors.isArray && renamed.joinToString(", ") { it.path("name").asText() } == freshMetadata.path("authorName").asText("")
-    metadata.set<JsonNode>("authors", if (sameAuthors) renamed else freshMetadata.path("authors").deepCopy())
+    fun names(list: JsonNode) = list.joinToString(", ") { it.path("name").asText("") }
+    val rowAuthors = freshMetadata.path("authorName").asText("")
+    val keepAuthors = authors.isArray && (names(authors) == rowAuthors || names(currentAuthors) == rowAuthors)
+    metadata.set<JsonNode>("authors", if (keepAuthors) currentAuthors else freshMetadata.path("authors").deepCopy())
+
     val narrators = metadata.path("narrators")
     val sameNarrators = narrators.isArray && narrators.joinToString(", ") { it.asText() } == freshMetadata.path("narratorName").asText("")
     if (!sameNarrators) metadata.set<JsonNode>("narrators", freshMetadata.path("narrators").deepCopy())

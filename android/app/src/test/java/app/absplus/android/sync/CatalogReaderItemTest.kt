@@ -137,6 +137,44 @@ class CatalogReaderItemTest {
   }
 
   @Test
+  fun expandedCopyKeepsItsSeriesWhileTheyMatchTheRow() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
+      // The membership waits for its point query; the copy's series still read as the row's seriesName
+      db.series().upsertAll(listOf(seriesRow("srv", "s1", name = "S1")))
+      db.items().upsertAll(listOf(bookRow("Old", "Old Author", "S1 #1", "B", emptyList())
+              .copy(detailLevel = DetailLevel.EXPANDED, expandedJson = oldCopy())))
+    }
+    val series = tree(read("li1")).path("libraryItem").path("media").path("metadata").path("series")
+    assertEquals(mapper.readTree("""[{"id":"s1","name":"S1","sequence":"1"}]"""), series)
+  }
+
+  @Test
+  fun authorRenamedBeforeTheBookKeepsItsId() {
+    runBlocking {
+      db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
+      db.authors().upsertAll(listOf(authorRow("srv", "a0", name = "Old Author")))
+      db.items().upsertAll(listOf(bookRow("Old", "Old Author", "", "B", emptyList())
+              .copy(detailLevel = DetailLevel.EXPANDED, expandedJson = oldCopy())))
+    }
+    fun authors() = tree(read("li1")).path("libraryItem").path("media").path("metadata").path("authors")
+    assertEquals(mapper.readTree("""[{"id":"a0","name":"Old Author"}]"""), authors())
+
+    // author_updated: the author has its new name, the book's row still the old one
+    runBlocking { db.authors().upsertAll(listOf(authorRow("srv", "a0", name = "New Author"))) }
+    assertEquals(mapper.readTree("""[{"id":"a0","name":"New Author"}]"""), authors())
+
+    // item_updated at the same version: the row has the new name too
+    runBlocking {
+      val row = db.items().get("srv", "li1")!!
+      val json = mapper.readTree(row.json) as ObjectNode
+      (json.path("media").path("metadata") as ObjectNode).put("authorName", "New Author")
+      db.items().upsertAll(listOf(row.copy(json = mapper.writeValueAsString(json), authorName = "New Author")))
+    }
+    assertEquals(mapper.readTree("""[{"id":"a0","name":"New Author"}]"""), authors())
+  }
+
+  @Test
   fun staleCopyDropsWhatTheRowNoLongerHas() {
     val row = bookRow("New", "New Author", "", "B", emptyList())
     val minified = mapper.readTree(row.json) as ObjectNode
