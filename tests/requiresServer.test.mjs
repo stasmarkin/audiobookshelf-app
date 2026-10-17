@@ -74,6 +74,22 @@ test('requiresServer mixin works on an instance without $store', () => {
  * in `serverOnlyItem`).
  */
 const SERVER_ACTIONS = [
+  {
+    file: 'pages/item/_id/_episode/index.vue',
+    bind: [/<ui-btn v-if="showDownload"[^>]*:disabled="!isServerOnline"/, /value: 'playlist',[^}]*\.\.\.this\.serverOnlyItem/, /value: 'remove_from_server',[^}]*\.\.\.this\.serverOnlyItem/],
+    gates: ['downloadClick', 'deleteEpisodeFromServerClick']
+  },
+  ...['components/tables/podcast/EpisodeRow.vue', 'components/tables/podcast/LatestEpisodeRow.vue'].map((file) => ({
+    file,
+    bind: [/<button v-if="!isLocal"[^>]*:disabled="!isServerOnline"[^>]*@click\.stop="addToPlaylist"/, /\{ 'opacity-50': !isServerOnline \}\]" :aria-disabled="!isServerOnline"[^>]*@click\.stop="downloadClick"/],
+    gates: ['addToPlaylist', 'downloadClick']
+  })),
+  {
+    file: 'components/tables/podcast/EpisodesTable.vue',
+    bind: [/:class="\{ 'opacity-50': !isServerOnline \}" :aria-disabled="!isServerOnline"[^>]*@click="clearDownloadQueue"/, /<button v-if="isAdminOrUp && !fetchingRSSFeed"[^>]*:disabled="!isServerOnline"[^>]*@click="searchEpisodes"/],
+    gates: ['clearDownloadQueue', 'searchEpisodes', 'addEpisodeToPlaylist']
+  },
+  { file: 'pages/bookshelf/latest.vue', bind: [], gates: ['addEpisodeToPlaylist'], label: false },
   { file: 'pages/item/_id/index.vue', bind: [/<ui-btn v-if="showDownload"[^>]*:disabled="!isServerOnline && !downloadItem"/], gates: ['downloadClick'] },
   {
     file: 'components/modals/ItemMoreMenuModal.vue',
@@ -129,7 +145,7 @@ test('server actions do nothing offline when invoked', async () => {
     const calls = []
     const http = {
       get: async (path) => (calls.push(['get', path]), {}),
-      post: async (path) => (calls.push(['post', path]), {}),
+      post: async (path) => (calls.push(['post', path]), { podcast: { episodes: [] } }),
       patch: async (path) => (calls.push(['patch', path]), {})
     }
     const common = { $store: { ...storeOf(serverState), getters: { ...storeOf(serverState).getters, 'libraries/getCurrentLibrary': { id: 'l1', folders: [] } } }, $strings: strings, $nativeHttp: http, $toast: { success() {}, error() {}, info() {} }, $emit() {}, $hapticsImpact: async () => {} }
@@ -154,13 +170,19 @@ test('server actions do nothing offline when invoked', async () => {
     series.startSeriesPlayback = () => {}
     series.onDownloadOrStreamDownloadAndPlay()
 
+    const episodePage = bind(componentDef(await read('../pages/item/_id/_episode/index.vue'), { requiresServer, cellularPermissionHelpers: {}, progressTarget: () => null, isCopyOfActiveServer: () => true, Capacitor: {}, Dialog: { confirm: async () => ({ value: true }) }, AbsFileSystem: {}, AbsDownloader: {}, appStorageFolderFor() {}, safFoldersFor() {}, findLocalCopy() {}, createDebouncer() {} }), { ...common, libraryItem: { id: 'pod1' }, episode: { id: 'e1' }, $getString: () => '', $router: { replace() {} }, $nativeHttp: { ...http, delete: async (path) => (calls.push(['delete', path]), {}) } })
+    await episodePage.deleteEpisodeFromServerClick()
+
+    const episodesTable = bind(componentDef(await read('../components/tables/podcast/EpisodesTable.vue'), { requiresServer, Dialog: {}, AbsDownloader: {}, podcastSortOverrideKey() {}, resolvePodcastEpisodeSort() {}, sortPodcastEpisodes() {} }), { ...common, libraryItem: { id: 'pod1', media: { metadata: { feedUrl: 'https://feed' } } } })
+    await episodesTable.searchEpisodes()
+
     const retried = []
     const downloading = bind(componentDef(await read('../pages/downloading.vue'), { requiresServer, AbsDownloader: { retryDownload: async (a) => (retried.push(a), {}) }, AbsFileSystem: {}, downloadState() {}, downloadActions() {}, downloadProgress() {}, lostFolder() {}, isWaitingState() {}, DownloadAction: {}, DownloadState: {}, isAppStorageFolderId() {} }), { ...common })
     await downloading.retry({ id: 'd1' })
 
     await new Promise((resolve) => setImmediate(resolve))
     const paths = calls.map(([method, path]) => `${method} ${path}`)
-    const expected = ['post /api/emails/send-ebook-to-device', 'patch /api/items/li1/ebook/ino1/status', 'post /api/podcasts', 'get /api/me/listening-stats']
+    const expected = ['post /api/emails/send-ebook-to-device', 'patch /api/items/li1/ebook/ino1/status', 'post /api/podcasts', 'get /api/me/listening-stats', 'delete /api/podcasts/pod1/episode/e1?hard=1', 'post /api/podcasts/feed']
     assert.deepEqual(paths, online ? expected : [], serverState)
     assert.deepEqual(downloads, online ? ['series', 'missing'] : [], serverState)
     assert.equal(retried.length, online ? 1 : 0, serverState)

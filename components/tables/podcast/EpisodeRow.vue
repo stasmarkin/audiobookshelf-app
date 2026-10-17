@@ -30,21 +30,21 @@
 
       <div class="flex items-center pt-2">
         <!-- Play/Pause Button -->
-        <div class="episode-play-control h-10 px-4 border border-border rounded-full flex items-center justify-center cursor-pointer" :class="userIsFinished ? 'text-white text-opacity-40' : ''" @click.stop="playClick">
+        <div class="episode-play-control h-10 px-4 border border-border rounded-full flex items-center justify-center cursor-pointer" :class="[userIsFinished ? 'text-white text-opacity-40' : '', notAvailableOffline && !streamIsPlaying ? 'opacity-50' : '']" :aria-disabled="notAvailableOffline && !streamIsPlaying" @click.stop="playClick">
           <span v-if="!playerIsStartingForThisMedia" class="material-symbols text-2xl fill leading-none" :class="streamIsPlaying ? '' : 'text-success'">
             {{ streamIsPlaying ? 'pause' : 'play_arrow' }}
           </span>
           <svg v-else class="animate-spin" style="width: 28px; height: 28px" viewBox="0 0 24 24">
             <path fill="currentColor" d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
           </svg>
-          <p class="pl-2 pr-1 text-sm font-semibold">{{ timeRemaining }}</p>
+          <p class="pl-2 pr-1 text-sm font-semibold">{{ notAvailableOffline && !streamIsPlaying ? notAvailableOfflineLabel() : timeRemaining }}</p>
         </div>
 
         <!-- Read Status Button -->
         <ui-read-icon-btn :disabled="isProcessingReadUpdate" :is-read="userIsFinished" borderless class="mx-1" @click="toggleFinished" />
 
         <!-- Add to Playlist Button -->
-        <button v-if="!isLocal" class="mx-1.5" @click.stop="addToPlaylist">
+        <button v-if="!isLocal" class="mx-1.5 disabled:opacity-50" :disabled="!isServerOnline" :aria-label="isServerOnline ? null : requiresServerLabel()" @click.stop="addToPlaylist">
           <span class="material-symbols text-2xl leading-none">playlist_add</span>
         </button>
 
@@ -52,7 +52,7 @@
         <div v-if="userCanDownload" class="flex items-center">
           <span v-if="isLocal" class="material-symbols px-2 text-success text-2xl leading-none">audio_file</span>
           <template v-else-if="!localEpisode">
-            <span class="material-symbols mx-1.5 text-2xl leading-none" :class="downloadWaitingText ? 'text-fg-muted' : downloadItem || startingDownload ? 'animate-bounce text-warning text-opacity-75' : ''" @click.stop="downloadClick">
+            <span class="material-symbols mx-1.5 text-2xl leading-none" :class="[downloadWaitingText ? 'text-fg-muted' : downloadItem || startingDownload ? 'animate-bounce text-warning text-opacity-75' : '', { 'opacity-50': !isServerOnline }]" :aria-disabled="!isServerOnline" :aria-label="isServerOnline ? null : requiresServerLabel()" @click.stop="downloadClick">
               {{ downloadWaitingText ? 'schedule' : downloadItem || startingDownload ? 'downloading' : 'download' }}
             </span>
             <span v-if="downloadWaitingText" class="text-xs text-fg-muted">{{ downloadWaitingText }}</span>
@@ -65,6 +65,7 @@
 
         <!-- Spacer to push elements left -->
         <div class="flex-grow" />
+        <p v-if="!isServerOnline && !isLocal" class="requires-server-label text-xs text-fg-muted">{{ requiresServerLabel() }}</p>
       </div>
     </div>
 
@@ -81,6 +82,7 @@ import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 import { WAITING_LABEL_KEYS } from '@/utils/downloadState'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
   props: {
@@ -101,7 +103,7 @@ export default {
     sortKey: String,
     autoDownloaded: Boolean
   },
-  mixins: [cellularPermissionHelpers],
+  mixins: [cellularPermissionHelpers, requiresServer],
   data() {
     return {
       isProcessingReadUpdate: false,
@@ -201,6 +203,10 @@ export default {
     },
     localEpisodeId() {
       return this.localEpisode?.id || null
+    },
+    /** Offline only this episode downloaded plays (the row knows the episode's copy, not the podcast's). */
+    notAvailableOffline() {
+      return this.isNotAvailableOffline({ isLocal: this.isLocal }, this.localEpisode ? { media: { episodes: [this.localEpisode] } } : null, this.episode.id)
     }
   },
   methods: {
@@ -208,6 +214,7 @@ export default {
       this.$router.push(`/item/${this.libraryItemId}/${this.episode.id}`)
     },
     addToPlaylist() {
+      if (!this.isServerOnline) return
       this.$emit('addToPlaylist', this.episode)
     },
     async selectFolder() {
@@ -218,6 +225,7 @@ export default {
       return folderObj
     },
     async downloadClick() {
+      if (!this.isServerOnline) return
       if (this.downloadItem || this.startingDownload) return
 
       const hasPermission = await this.checkCellularPermission('download')
@@ -271,7 +279,7 @@ export default {
       }
     },
     async playClick() {
-      if (this.playerIsStartingPlayback) return
+      if (this.playerIsStartingPlayback || (this.notAvailableOffline && !this.streamIsPlaying)) return
 
       await this.$hapticsImpact()
       if (this.streamIsPlaying) {

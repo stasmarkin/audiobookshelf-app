@@ -1004,11 +1004,11 @@ test('authors and latest still read again when the same library is announced aft
   await flush()
   assert.ok(reads.length > before, 'authors read again, now able to fall back to the server')
 
-  const latestDef = componentDef(await read('../pages/bookshelf/latest.vue'))
+  const latestDef = componentDef(await read('../pages/bookshelf/latest.vue'), { requiresServer, createDebouncer })
   const gets = []
   const latest = bind(latestDef, {
     $store: { state: { libraries: { currentLibraryId: 'pods' } }, getters: { 'libraries/getCurrentLibraryMediaType': 'podcast' } },
-    $nativeHttp: { get: async (path) => (gets.push(path), gets.length === 1 ? Promise.reject(new Error('offline')) : { episodes: [], total: 0 }) },
+    $absData: { getRecentEpisodes: async (args) => (gets.push(args), gets.length === 1 ? Promise.reject(new Error('offline')) : { episodes: [], total: 0, replica: replica() }) },
     $toast: { error() {} },
     $router: { replace() {} }
   })
