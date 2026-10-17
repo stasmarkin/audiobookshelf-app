@@ -9,6 +9,7 @@ export const state = () => ({
   playerIsFullscreen: false,
   playerIsStartingPlayback: false, // When pressing play before native play response
   playerAwaitingServer: false, // the stream lost its server and native waits for it (paused, player open)
+  playerAwaitingDisplay: null, // the book a waiting queue is on, from the replica (native AwaitingDisplay); shown instead of the session
   playerStartingPlaybackMediaId: null,
   playbackQueue: null, // { sourceType: String, sourceId: String, items: Array, currentIndex: Number }
   playbackQueueGeneration: 0, // bumped by every set/clear, so an older async native queue answer can't replace a newer one
@@ -41,7 +42,7 @@ export const getters = {
     return state.currentPlaybackSession?.id || null
   },
   getIsPlayerOpen: (state) => {
-    return !!state.currentPlaybackSession
+    return !!state.currentPlaybackSession || !!state.playerAwaitingDisplay
   },
   getIsCurrentSessionLocal: (state) => {
     return state.currentPlaybackSession?.playMethod == PlayMethod.LOCAL
@@ -156,7 +157,10 @@ export const mutations = {
   },
   setPlaybackSession(state, playbackSession) {
     // Native reports the wait per session: a new session or a close ends it
-    if (!playbackSession || playbackSession.id !== state.currentPlaybackSession?.id) state.playerAwaitingServer = false
+    if (!playbackSession || playbackSession.id !== state.currentPlaybackSession?.id) {
+      state.playerAwaitingServer = false
+      state.playerAwaitingDisplay = null
+    }
     state.currentPlaybackSession = playbackSession
 
     state.isCasting = playbackSession?.mediaPlayer === 'cast-player'
@@ -172,6 +176,9 @@ export const mutations = {
   },
   setPlayerAwaitingServer(state, val) {
     state.playerAwaitingServer = !!val
+  },
+  setPlayerAwaitingDisplay(state, display) {
+    state.playerAwaitingDisplay = display || null
   },
   setPlayerPlaying(state, val) {
     state.playerIsPlaying = val

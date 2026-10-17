@@ -488,7 +488,12 @@ export default {
           } else if (data.awaitingServer) {
             // The queue waits on this item; what is open (paused) keeps its ids, so its bookmarks stay its own
             this.setSessionServerIds()
-            if (!this.currentPlaybackSession) this.$toast.info(this.$strings.ToastWaitingForServer)
+            if (data.display) {
+              this.$store.commit('setPlayerAwaitingServer', true)
+              this.$store.commit('setPlayerAwaitingDisplay', data.display)
+            } else if (!this.currentPlaybackSession) {
+              this.$toast.info(this.$strings.ToastWaitingForServer)
+            }
           } else {
             console.log('Library item play response', JSON.stringify(data))
             this.setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId)
@@ -529,9 +534,11 @@ export default {
       console.log('Got local media progress update', localMediaProgress.progress, JSON.stringify(localMediaProgress))
       this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
     },
-    // Native paused a stream whose server went away and resumes it itself: a label, not an error, and the player stays
+    // Native paused a stream whose server went away and resumes it itself: a label, not an error, and the player stays.
+    // A queue that waits on a book sends it as the display; native keeps it while it starts that book
     onAwaitingServer(data) {
       this.$store.commit('setPlayerAwaitingServer', !!data?.awaiting)
+      this.$store.commit('setPlayerAwaitingDisplay', data?.display || null)
     },
     onMediaPlayerChanged(data) {
       this.$store.commit('setMediaPlayer', data.value)

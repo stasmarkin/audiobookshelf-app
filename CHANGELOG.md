@@ -7,6 +7,11 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **The player opens on the book a queue waits for:** pressing Play on a series, collection or playlist whose next
+  book is not downloaded while the server is away now opens the player on that book (title, author, its position, the
+  downloaded cover if there is one, "Waiting for server"), instead of only a "Waiting for the server" toast, or of the
+  previous book's title when a player was open. The notification, the lock screen and the widget show the same book.
+  When the server is back it plays as before. A book that the catalog copy does not have yet still shows the toast.
 - **Book, podcast and episode pages offline:** every book, podcast and episode page opens from the catalog copy,
   online at once and offline too, also after a cold start in airplane mode. Online the page then fills in the
   chapters, tracks and files within a second; the full copy is fetched once per version of the book, so opening it
