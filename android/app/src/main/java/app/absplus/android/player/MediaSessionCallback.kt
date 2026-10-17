@@ -49,6 +49,8 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
   }
 
   override fun onStop() {
+    // Stop of a wait is its Close: nothing plays that a pause could keep
+    if (playerNotificationService.awaiting.isAwaiting || showsAwaitedItem) return playerNotificationService.closePlayback()
     playerNotificationService.pause()
   }
 

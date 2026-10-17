@@ -10,6 +10,10 @@ import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import com.fasterxml.jackson.databind.JsonNode
 import com.getcapacitor.JSObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /**
@@ -139,6 +143,36 @@ suspend fun startAwaiting(read: suspend () -> AwaitingDisplay?, stillCurrent: ()
   if (!stillCurrent() || !block(display)) return answer(null)
   answer(AwaitingStart(display))
   resumeIfOnline()
+}
+
+/** The display from its replica row; [progress] has its own budget, so a busy write queue only loses the position. */
+suspend fun readAwaitingDisplayRow(progressBudgetMs: Long, progress: suspend () -> MediaProgressEntity?,
+                                   row: suspend (MediaProgressEntity?) -> AwaitingDisplay?): AwaitingDisplay? =
+        row(withTimeoutOrNull(progressBudgetMs) { progress() })
+
+/**
+ * [read] in [scope], waited for at most [timeoutMs]: a blocking read cannot be cut off, so past the timeout the caller
+ * goes on without it and [late] gets it when it is done.
+ */
+suspend fun <T> readWithin(scope: CoroutineScope, timeoutMs: Long, read: suspend () -> T?, late: (T?) -> Unit): T? {
+  val reading = scope.async { read() }
+  val now = withTimeoutOrNull(timeoutMs) { reading.await() }
+  if (now == null && !reading.isCompleted) scope.launch { late(reading.await()) }
+  return now
+}
+
+/**
+ * The cover of [display], loaded after it is shown: applied only while it is still shown ([shown]); a cover that fails
+ * leaves the display as it is.
+ */
+suspend fun loadAwaitingCover(display: AwaitingDisplay, load: suspend () -> AwaitingCover?, shown: () -> AwaitingDisplay?,
+                              apply: (AwaitingCover) -> Unit) {
+  val cover = try {
+    load()
+  } catch (e: Exception) {
+    null
+  } ?: return
+  if (shown() == display) apply(cover)
 }
 
 /** The media session's state while an item is awaited: paused at its position; Play (try the server) and Stop only. */

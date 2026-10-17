@@ -10,7 +10,11 @@ import app.absplus.android.data.MediaTypeMetadata
 import app.absplus.android.data.PlaybackSession
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import app.absplus.android.sync.ServerState
+import app.absplus.android.db.userdata.MediaProgressEntity
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -166,5 +170,45 @@ class AwaitingDisplayPublishTest {
 
     assertEquals("Book A", nowPlayingMetadata(ctx, sessionA(), null, "Waiting for server").getString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE))
     assertNull(nowPlayingMetadata(ctx, null, null, "Waiting for server").getString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE))
+  }
+
+  @Test
+  fun aSlowReadLetsTheStartGoOnAndShowsTheDisplayLate() = runBlocking {
+    val scope = CoroutineScope(Dispatchers.Default)
+    val late = CompletableDeferred<AwaitingDisplay?>()
+    // A blocking read (a cover on an SD card, a slow Paper query) is not cut off by the start's timeout
+    val now = readWithin(scope, 50, { Thread.sleep(300); displayB }) { late.complete(it) }
+    assertNull("the start does not wait for it", now)
+    assertEquals("it is shown once it arrives", displayB, withTimeout(2_000) { late.await() })
+  }
+
+  @Test
+  fun aReadWithinTheTimeoutIsNotDeliveredTwice() = runBlocking {
+    var late = 0
+    assertEquals(displayB, readWithin(this, 1_000, { displayB }) { late++ })
+    yield()
+    assertEquals(0, late)
+  }
+
+  @Test
+  fun aBusyWriteQueueLosesOnlyThePosition() = runBlocking {
+    val never = CompletableDeferred<MediaProgressEntity?>()
+    val shown = readAwaitingDisplayRow(50, { never.await() }) { progress -> displayB.copy(currentTime = progress?.currentTime ?: 0.0) }
+    assertEquals(displayB.copy(currentTime = 0.0), shown)
+  }
+
+  @Test
+  fun aCoverThatFailsOrComesLateNeverHidesTheDisplay() = runBlocking {
+    presentation.begin(itemB, displayB)
+    val applied = mutableListOf<AwaitingCover>()
+    loadAwaitingCover(displayB, { throw java.io.IOException("card gone") }, { presentation.display }) { applied.add(it) }
+    assertEquals(displayB, presentation.display)
+    val cover = AwaitingCover(android.net.Uri.parse("file:///c.jpg"), null)
+    presentation.end()
+    loadAwaitingCover(displayB, { cover }, { presentation.display }) { applied.add(it) }
+    assertEquals("not for an item no longer shown", emptyList<AwaitingCover>(), applied)
+    presentation.begin(itemB, displayB)
+    loadAwaitingCover(displayB, { cover }, { presentation.display }) { applied.add(it) }
+    assertEquals(listOf(cover), applied)
   }
 }

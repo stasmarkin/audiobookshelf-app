@@ -8,12 +8,18 @@ import app.absplus.android.data.DeviceSettings
 import app.absplus.android.data.MediaTypeMetadata
 import app.absplus.android.data.PlaybackSession
 import app.absplus.android.device.DeviceManager
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import app.absplus.android.managers.DbManager
+import app.absplus.android.media.MediaProgressSyncer
+import com.google.android.exoplayer2.ExoPlayer
+import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
 import app.absplus.android.sync.ServerState
 import com.google.android.exoplayer2.Player
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -98,5 +104,45 @@ class AwaitingServiceTest {
     val resume = pns.awaiting.onServerState(ServerState.ONLINE, "config-1") as AwaitingAction.ResumeStream
     assertEquals(itemB, resume.queueItem)
     assertTrue(resume.playWhenReady)
+  }
+
+  @Test
+  fun playWhileTheAwaitedItemStartsDoesNotPlayTheOpenBook() {
+    pns.currentPlaybackSession = sessionA()
+    showB()
+    assertTrue(pns.awaiting.onServerState(ServerState.ONLINE, "config-1") is AwaitingAction.ResumeStream)
+    pns.awaitingPresentation.resuming()
+    playerCalls.clear()
+    pns.play()
+    assertEquals("book A's player is not started under book B's title", emptyList<String>(), playerCalls)
+  }
+
+  @Test
+  fun stopWhileWaitingEndsTheWait() {
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    showB()
+    MediaSessionCallback(pns).onStop()
+    assertNull(pns.awaitingDisplay)
+    assertFalse(pns.awaiting.isAwaiting)
+    assertTrue(pns.playlistQueue.isEmpty())
+  }
+
+  @Test
+  fun aConnectorChangeWhileWaitingKeepsTheAwaitedItemPublished() {
+    val session = MediaSessionCompat(ctx, "test")
+    val connector = MediaSessionConnector(session)
+    val exo = ExoPlayer.Builder(ctx).build()
+    connector.setPlayer(exo)
+    pns.mediaSession = session
+    pns.mediaSessionConnector = connector
+    pns.currentPlayer = exo
+    showB()
+    assertEquals(PlaybackStateCompat.STATE_PAUSED, session.controller.playbackState.state)
+    // A settings change (jump times) re-reads the connector's actions
+    pns.setMediaSessionConnectorPlaybackActions()
+    assertEquals(PlaybackStateCompat.STATE_PAUSED, session.controller.playbackState.state)
+    assertEquals(PlaybackStateCompat.ACTION_PLAY, session.controller.playbackState.actions and PlaybackStateCompat.ACTION_PLAY)
+    exo.release()
+    session.release()
   }
 }

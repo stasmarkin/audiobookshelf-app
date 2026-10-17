@@ -8,7 +8,9 @@ class StartGate {
   data class Ticket(val generation: Long, val playWhenReady: Boolean)
 
   private var generation = 0L
-  private var pausedGeneration = -1L
+  // The user's last Pause or Play during the start of this generation
+  private var intentGeneration = -1L
+  private var intentPlay = false
 
   fun begin(playWhenReady: Boolean): Ticket = Ticket(++generation, playWhenReady)
 
@@ -17,12 +19,22 @@ class StartGate {
   }
 
   fun pause() {
-    pausedGeneration = generation
+    intentGeneration = generation
+    intentPlay = false
+  }
+
+  /** A Play while the start is in flight: it prepares playing even if it began paused. */
+  fun play() {
+    intentGeneration = generation
+    intentPlay = true
   }
 
   /** The playWhenReady to prepare [ticket] with, or null when a newer start, Close or a server switch replaced it. */
   fun admit(ticket: Ticket): Boolean? {
     if (ticket.generation != generation) return null
-    return ticket.playWhenReady && pausedGeneration != generation
+    return if (intentGeneration == generation) intentPlay else ticket.playWhenReady
   }
+
+  /** [admit] again after a wait, keeping a Pause made during it; [before]: what the first admit said. */
+  fun admitAgain(ticket: Ticket, before: Boolean): Boolean? = admit(ticket)?.let { before && it }
 }

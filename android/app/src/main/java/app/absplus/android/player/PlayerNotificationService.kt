@@ -95,8 +95,10 @@ const val PLAYER_EXO = "exo-player"
 const val NO_AUDIO_FILES_MESSAGE = "No audio files found on device. Download book again to fix."
 private const val PROGRESS_ROW_TIMEOUT_MS = 3_000L
 private const val SERVER_PROGRESS_TIMEOUT_MS = 10_000L
-// A queue start waits this long at most for the awaited item's display; without one the app shows a toast
+// A queue start waits this long at most for the awaited item's display; a later one is shown when it arrives
 private const val AWAITING_READ_TIMEOUT_MS = 1_000L
+// Within that read: a busy write queue then only loses the awaited item's position
+private const val AWAITING_PROGRESS_BUDGET_MS = 500L
 
 class PlayerNotificationService : MediaBrowserServiceCompat() {
 
@@ -133,7 +135,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   var clientEventEmitter: ClientEventEmitter? = null
 
   private lateinit var ctx: Context
-  private lateinit var mediaSessionConnector: MediaSessionConnector
+  internal lateinit var mediaSessionConnector: MediaSessionConnector
   private lateinit var playerNotificationManager: PlayerNotificationManager
   lateinit var mediaSession: MediaSessionCompat
   private var remoteVolumeProvider: VolumeProviderCompat? = null
@@ -530,7 +532,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     transportControls = mediaController.transportControls
 
     mediaSessionConnector = MediaSessionConnector(mediaSession)
-    mediaManager.onPlaybackError = { msg -> Handler(Looper.getMainLooper()).post { mediaSessionConnector.setCustomErrorMessage(msg) } }
+    mediaManager.onPlaybackError = { msg ->
+      Handler(Looper.getMainLooper()).post {
+        mediaSessionConnector.setCustomErrorMessage(msg)
+        republishAwaitingSession()
+      }
+    }
     // Without this, the connector's default metadata provider rebuilds metadata from the
     // player's own state on media item transitions/timeline changes, dropping the cover art
     // bitmap that PlaybackSession.resolveCoverBitmapAsync resolves separately.
@@ -762,6 +769,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     metadataArtJob =
             playbackSession.resolveCoverBitmapAsync(ctx, metadataScope) {
               mediaSessionConnector.invalidateMediaSessionMetadata()
+              republishAwaitingSession()
             }
     mediaSessionConnector.invalidateMediaSessionMetadata()
 
@@ -893,6 +901,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       )
     }
     mediaSessionConnector.setCustomActionProviders(*customActionProviders.toTypedArray())
+    republishAwaitingSession()
   }
 
   fun setMediaSessionConnectorPlaybackActions() {
@@ -908,6 +917,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       playbackActions = playbackActions or PlaybackStateCompat.ACTION_SEEK_TO
     }
     mediaSessionConnector.setEnabledPlaybackActions(playbackActions)
+    republishAwaitingSession()
   }
 
   fun handlePlayerPlaybackError(error: PlaybackException) {
@@ -997,11 +1007,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
     resumingTicket = null
     awaitingPresentation.begin(item, display)
-    if (readDisplay) startScope.launch {
-      val read = readAwaitingDisplay(item, serverConfigId)
-      rememberCover(read)
-      publishAwaitingDisplay(item, read?.first)
-    }
+    if (readDisplay) startScope.launch { publishAwaitingDisplay(item, readAwaitingDisplay(item, serverConfigId)) }
     // Checks the server at once instead of at the next backoff step (when there is a network)
     ServerReachability.retryNow()
     return true
@@ -1012,31 +1018,17 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     awaitingPresentation.onRead(item, display, awaiting.blockedItem)
   }
 
-  // Before the display is shown, so everything that draws it finds its cover
-  private fun rememberCover(read: Pair<AwaitingDisplay, AwaitingCover?>?) {
-    val cover = read?.second ?: return
-    awaitingCovers = read.first to cover
-  }
-
-  /**
-   * What the replica knows of [item] for the player while the queue waits on it, and its cover decoded; null without a
-   * row, or when the read takes too long to hold up the start.
-   */
-  private suspend fun readAwaitingDisplay(item: PlaylistQueueItem, serverConfigId: String): Pair<AwaitingDisplay, AwaitingCover?>? = try {
-    withTimeoutOrNull(AWAITING_READ_TIMEOUT_MS) {
-      val progress = progressRow(serverConfigId, item.libraryItemId, item.episodeId)
+  /** What the replica knows of [item] for the player while the queue waits on it (no cover); null without a row. */
+  private suspend fun readAwaitingDisplay(item: PlaylistQueueItem, serverConfigId: String): AwaitingDisplay? = try {
+    readAwaitingDisplayRow(AWAITING_PROGRESS_BUDGET_MS, { progressRow(serverConfigId, item.libraryItemId, item.episodeId) }) { progress ->
       withContext(Dispatchers.IO) {
         val replica = ReplicaDatabase.get(ctx)
         val row = replica.items().get(serverConfigId, item.libraryItemId) ?: return@withContext null
         val episode = item.episodeId?.let { replica.episodes().byIds(serverConfigId, listOf(it)).firstOrNull() }
         // An incomplete copy streams too; its cover is the only one there is offline
         val copy = DeviceManager.dbManager.getLocalLibraryItemByLId(item.libraryItemId)?.takeIf { it.serverConnectionConfigId == serverConfigId }
-        val display = awaitingDisplayOf(CatalogJson.mapper.readTree(row.json), episode?.let { CatalogJson.mapper.readTree(it.json) }, progress,
-                copy?.coverContentUrl, serverConfigId, item.episodeId) ?: return@withContext null
-        // Resolving a cover on an SD card may copy it: never on the main thread
-        val cover = display.coverUri?.let { CoverArt.localCoverUri(ctx, it) }
-                ?.let { uri -> AwaitingCover(uri, CoverArt.decodeLocal(ctx, uri, "awaiting item")) }
-        display to cover
+        awaitingDisplayOf(CatalogJson.mapper.readTree(row.json), episode?.let { CatalogJson.mapper.readTree(it.json) }, progress,
+                copy?.coverContentUrl, serverConfigId, item.episodeId)
       }
     }
   } catch (e: Exception) {
@@ -1044,10 +1036,26 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     null
   }
 
+  // Resolving a cover on an SD card may copy it: off the main thread, after the item is already shown
+  private fun loadCoverOf(display: AwaitingDisplay) {
+    val coverUri = display.coverUri ?: return
+    if (awaitingCovers?.first == display) return
+    startScope.launch {
+      loadAwaitingCover(display, {
+        withContext(Dispatchers.IO) { CoverArt.localCoverUri(this@PlayerNotificationService, coverUri).let { AwaitingCover(it, CoverArt.decodeLocal(this@PlayerNotificationService, it, "awaiting item")) } }
+      }, { awaitingDisplay }) { cover ->
+        awaitingCovers = display to cover
+        refreshNowPlaying(display)
+        DeviceManager.widgetUpdater?.onPlayerChanged(this@PlayerNotificationService)
+      }
+    }
+  }
+
   private fun onAwaitingPresentationChanged(shown: Boolean, display: AwaitingDisplay?) {
     clientEventEmitter?.onAwaitingServer(shown, display)
     refreshNowPlaying(display)
     DeviceManager.widgetUpdater?.onPlayerChanged(this)
+    display?.let { loadCoverOf(it) }
   }
 
   /**
@@ -1058,12 +1066,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     // Not created yet (a bare instance in tests)
     if (!::mediaSessionConnector.isInitialized) return
     if (display != null) {
-      if (!sessionDetachedForAwaiting) {
-        mediaSessionConnector.setPlayer(null)
-        sessionDetachedForAwaiting = true
-      }
-      mediaSession.setMetadata(nowPlayingMetadata(ctx, currentPlaybackSession, display, getString(R.string.waiting_for_server), awaitingCover?.bitmap))
-      mediaSession.setPlaybackState(awaitingPlaybackState(display))
+      sessionDetachedForAwaiting = true
+      republishAwaitingSession()
     } else {
       if (sessionDetachedForAwaiting) {
         mediaSessionConnector.setPlayer(currentPlayer)
@@ -1081,6 +1085,15 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       awaitingNotificationShown = false
       if (!isMediaButtonPlaceholderForeground) NotificationManagerCompat.from(this).cancel(notificationId)
     }
+  }
+
+  // Any connector call publishes the detached connector's empty state: the awaited item is published again after it
+  private fun republishAwaitingSession() {
+    if (!sessionDetachedForAwaiting) return
+    val display = awaitingDisplay ?: return
+    mediaSessionConnector.setPlayer(null)
+    mediaSession.setMetadata(nowPlayingMetadata(this, currentPlaybackSession, display, getString(R.string.waiting_for_server), awaitingCover?.bitmap))
+    mediaSession.setPlaybackState(awaitingPlaybackState(display))
   }
 
   // With nothing prepared the player draws no notification: this one names the awaited item, paused, with Play
@@ -1444,14 +1457,15 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     PlayerListener.lazyIsPlaying = false
     clientEventEmitter?.onPlayingUpdate(false)
     val serverConfigId = ActiveServer.current()?.id
-    var read: Pair<AwaitingDisplay, AwaitingCover?>? = null
     startAwaiting(
-            read = { read = serverConfigId?.let { readAwaitingDisplay(item, it) }; read?.first },
-            stillCurrent = { startGate.admit(ticket) != null && playlistQueue.getOrNull(playlistQueueIndex) == item },
-            block = { display ->
-              rememberCover(read)
-              blockQueue(item, playWhenReady, display, readDisplay = false)
+            read = {
+              serverConfigId?.let { sc ->
+                readWithin(startScope, AWAITING_READ_TIMEOUT_MS, { readAwaitingDisplay(item, sc) }) { publishAwaitingDisplay(item, it) }
+              }
             },
+            stillCurrent = { startGate.admit(ticket) != null && playlistQueue.getOrNull(playlistQueueIndex) == item },
+            // A Pause during the read is kept
+            block = { display -> blockQueue(item, startGate.admitAgain(ticket, playWhenReady) == true, display, readDisplay = false) },
             answer = { started -> onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced) },
             resumeIfOnline = { perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission())) })
   }
@@ -1802,6 +1816,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               mPlayer
             }
 
+    republishAwaitingSession()
     clientEventEmitter?.onMediaPlayerChanged(getMediaPlayer())
 
     currentPlaybackSession?.let {
@@ -2035,6 +2050,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       // restore below: a queue may wait with no session, and the last session is not what it waits on
       val action = awaiting.onUserPlay(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission())
       if (action == null) ServerReachability.retryNow() else perform(action)
+      return
+    }
+    if (awaitingPresentation.isResuming) {
+      // The awaited item is starting: Play is for it, not for the session still open under its title
+      startGate.play()
       return
     }
     if (currentPlaybackSession == null) {
