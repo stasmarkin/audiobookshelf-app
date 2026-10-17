@@ -750,7 +750,11 @@ class CatalogReader(
       val copy = row.expandedJson?.let { mapper.readTree(it) as? ObjectNode }
       val (item, level) = when {
         // The same version may still have new metadata (a joined name, a feed): the row's is current
-        copy != null && row.detailLevel == DetailLevel.EXPANDED -> CatalogJson.overFreshRow(copy, fresh(), keepLinks = true) to DetailLevel.EXPANDED
+        copy != null && row.detailLevel == DetailLevel.EXPANDED -> {
+          val current = fresh()
+          val overlaid = CatalogJson.overFreshRow(copy, current, keepLinks = true)
+          (if (podcast) overlaid else currentLinks(sc, overlaid, current)) to DetailLevel.EXPANDED
+        }
         copy != null && row.detailLevel == DetailLevel.STALE -> CatalogJson.overFreshRow(copy, fresh()) to DetailLevel.STALE
         else -> fresh() to DetailLevel.MINIFIED
       }
@@ -766,6 +770,30 @@ class CatalogReader(
       JSONObject().put("serverConfigId", sc).put("libraryItem", JSONObject(mapper.writeValueAsString(item))).put("detailLevel", level)
               .put("replica", replica(state?.itemsReconciledAt, state?.itemsComplete ?: false))
     }
+  }
+
+  /**
+   * The links of a copy of the row's version against the row ([fresh]), which may have moved on at the same updatedAt:
+   * series as the replica has them; the copy's authors under their current names while those still make up the row's
+   * `authorName` (their ids are exact), else read from the names; the copy's narrators while they make up `narratorName`.
+   */
+  private suspend fun currentLinks(sc: String, item: ObjectNode, fresh: JsonNode): ObjectNode {
+    val metadata = item.path("media").path("metadata") as? ObjectNode ?: return item
+    val freshMetadata = fresh.path("media").path("metadata")
+    metadata.set<JsonNode>("series", freshMetadata.path("series").deepCopy())
+    val authors = metadata.path("authors")
+    val renamed = CatalogJson.mapper.createArrayNode()
+    authors.forEach { author ->
+      val id = author.path("id").takeIf { it.isTextual }?.asText()
+      val name = id?.let { db.authors().get(sc, it)?.name } ?: author.path("name").asText("")
+      renamed.addObject().put("id", id).put("name", name)
+    }
+    val sameAuthors = authors.isArray && renamed.joinToString(", ") { it.path("name").asText() } == freshMetadata.path("authorName").asText("")
+    metadata.set<JsonNode>("authors", if (sameAuthors) renamed else freshMetadata.path("authors").deepCopy())
+    val narrators = metadata.path("narrators")
+    val sameNarrators = narrators.isArray && narrators.joinToString(", ") { it.asText() } == freshMetadata.path("narratorName").asText("")
+    if (!sameNarrators) metadata.set<JsonNode>("narrators", freshMetadata.path("narrators").deepCopy())
+    return item
   }
 
   /** As the other answers by id: an item may be in any library, so every one of them has to have been read. */

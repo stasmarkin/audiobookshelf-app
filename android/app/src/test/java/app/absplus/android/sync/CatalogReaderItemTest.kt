@@ -99,13 +99,15 @@ class CatalogReaderItemTest {
   }
 
   @Test
-  fun expandedCopyTakesTheRowsMetadataButKeepsItsLinks() {
+  fun expandedCopyTakesTheRowsMetadataAndCurrentLinks() {
     runBlocking {
       db.libraries().upsertAll(listOf(libraryRow("srv", "lib1")))
-      db.authors().upsertAll(listOf(authorRow("srv", "a9", name = "New Author")))
-      db.series().upsertAll(listOf(seriesRow("srv", "s2", name = "S2")))
+      // The copy's author a0 was renamed (to a name another author has too); the book moved from S1 to S2: both at the
+      // same updatedAt
+      db.authors().upsertAll(listOf(authorRow("srv", "a0", name = "New Author"), authorRow("srv", "a5", name = "New Author"),
+              authorRow("srv", "a9", name = "New Author 2")))
+      db.series().upsertAll(listOf(seriesRow("srv", "s1", name = "S1"), seriesRow("srv", "s2", name = "S2")))
       db.series().insertMembers(listOf(member("srv", "s2", "li1", "2")))
-      // A rename at the same updatedAt: the row moved on, the copy of that version did not
       db.items().upsertAll(listOf(bookRow("Renamed", "New Author", "S2 #2", "B", listOf("Sci-Fi"))
               .copy(detailLevel = DetailLevel.EXPANDED, expandedJson = oldCopy())))
     }
@@ -116,10 +118,22 @@ class CatalogReaderItemTest {
     assertEquals("Renamed", metadata.path("title").asText())
     assertEquals("B", item.path("media").path("coverPath").asText())
     assertEquals(mapper.readTree("""["Sci-Fi"]"""), metadata.path("genres"))
-    assertEquals("the copy's exact links", mapper.readTree("""[{"id":"s1","name":"S1","sequence":"1"}]"""), metadata.path("series"))
-    assertEquals(mapper.readTree("""[{"id":"a0","name":"Old Author"}]"""), metadata.path("authors"))
+    assertEquals("the series of the replica", mapper.readTree("""[{"id":"s2","name":"S2","sequence":"2"}]"""), metadata.path("series"))
+    assertEquals("the copy's id with the current name", mapper.readTree("""[{"id":"a0","name":"New Author"}]"""), metadata.path("authors"))
+    assertEquals(mapper.readTree("[]"), metadata.path("narrators"))
     assertEquals(listOf("One", "Two"), item.path("media").path("chapters").map { it.path("title").asText() })
     assertTrue(item.has("rssFeed"))
+
+    // Another set of authors and narrators: read from the row's names, as without a copy
+    runBlocking {
+      val row = db.items().get("srv", "li1")!!
+      val json = mapper.readTree(row.json) as ObjectNode
+      (json.path("media").path("metadata") as ObjectNode).put("authorName", "New Author 2, Someone").put("narratorName", "N1, N2")
+      db.items().upsertAll(listOf(row.copy(json = mapper.writeValueAsString(json))))
+    }
+    val changed = tree(read("li1")).path("libraryItem").path("media").path("metadata")
+    assertEquals(mapper.readTree("""[{"id":"a9","name":"New Author 2"},{"id":null,"name":"Someone"}]"""), changed.path("authors"))
+    assertEquals(mapper.readTree("""["N1","N2"]"""), changed.path("narrators"))
   }
 
   @Test

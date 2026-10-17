@@ -435,8 +435,8 @@ object CatalogJson {
   /**
    * An expanded copy with the current row over it ([fresh]: its [pseudoExpanded] item): the top level, the metadata
    * values, genres, cover, tags and duration are the row's, also where the row no longer has them; chapters, tracks and
-   * files the copy's. [keepLinks]: the copy is of the row's version, so its authors, narrators and series (with ids) are
-   * exact and kept.
+   * files the copy's. [keepLinks]: the copy is of the row's version, so its authors, narrators and series are left for the
+   * caller to check against the row.
    */
   fun overFreshRow(copy: ObjectNode, fresh: JsonNode, keepLinks: Boolean = false): ObjectNode {
     ROW_ITEM_KEYS.forEach { key -> if (!fresh.has(key)) copy.remove(key) }
