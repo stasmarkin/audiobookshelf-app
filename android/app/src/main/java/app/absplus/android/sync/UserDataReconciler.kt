@@ -4,7 +4,10 @@ import app.absplus.android.data.ServerConnectionConfig
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
-class SyncFailure(message: String) : Exception(message)
+class SyncFailure(message: String) : Exception(message) {
+  /** Dropped as [HttpOutcome.STALE] after a logout or server switch, not refused by the server. */
+  val stale: Boolean get() = message == HttpOutcome.STALE.message
+}
 
 /** Pulls the user's data from the server into userdata.db. In this release: bookmarks. */
 class UserDataReconciler(private val http: SyncHttp, private val store: UserDataStore) {
