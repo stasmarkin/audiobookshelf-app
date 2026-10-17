@@ -78,7 +78,7 @@ function collectionPage({ absData, localItems = [], activeServerConfigId = 'a', 
   const timers = []
   const fakeDebouncer = (options) => createDebouncer({ ...options, setTimer: (fn, ms) => (timers.push({ fn, ms }), timers.at(-1)), clearTimer: (t) => timers.includes(t) && timers.splice(timers.indexOf(t), 1) })
   const errors = []
-  const sandbox = { console: { ...console, log() {}, error: (...args) => errors.push(args) }, trackCount, fetchCollectionBooks, createDebouncer: fakeDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {} }
+  const sandbox = { console: { ...console, log() {}, error: (...args) => errors.push(args) }, trackCount, fetchCollectionBooks, createDebouncer: fakeDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {}, requiresServer: {} }
   vm.runInNewContext(pageScript, sandbox)
   const component = sandbox.component
   const store = { state: { activeServerConfigId, user: { user }, playerIsPlaying: false }, getters: { getIsMediaStreaming: () => false } }

@@ -9,8 +9,10 @@
 
 <script>
 import { FileSharer } from '@webnativellc/capacitor-filesharer'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     variant: {
       type: Number,
@@ -260,6 +262,7 @@ export default {
       })
     },
     init() {
+      if (!this.isServerOnline) return
       this.$emit('update:processing', true)
       this.$nativeHttp
         .get(`/api/me/stats/year/${this.year}`)

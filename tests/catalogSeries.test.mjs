@@ -117,7 +117,7 @@ test('in the browser series reads go to $axios in native shape', async () => {
 async function seriesPage() {
   const source = await read('../pages/bookshelf/series/_id.vue')
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
-  return new Function('Dialog', 'AbsDownloader', 'cellularPermissionHelpers', 'buildQueueSourceItems', 'downloadMissingItems', script)({}, {}, {}, () => {}, () => {})
+  return new Function('Dialog', 'AbsDownloader', 'cellularPermissionHelpers', 'requiresServer', 'buildQueueSourceItems', 'downloadMissingItems', script)({}, {}, {}, {}, () => {}, () => {})
 }
 
 test('missing series redirects to the series tab', async () => {

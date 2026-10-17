@@ -39,6 +39,7 @@ import { buildQueueSourceItems } from '@/utils/playbackQueue'
 import { trackCount, fetchCollectionBooks } from '@/utils/catalogItem'
 import { createDebouncer } from '@/utils/catalogRefresh'
 import { leavesOnLibraryChange } from '@/utils/libraryScope'
+import requiresServer from '@/mixins/requiresServer'
 
 /**
  * The collection with all its books ($absData: the replica, also offline), each with its downloaded copy of the active
@@ -61,6 +62,7 @@ async function readCollection({ $absData, $db }, id, activeServerConfigId) {
 }
 
 export default {
+  mixins: [requiresServer],
   async asyncData({ store, params, app, redirect }) {
     let collection
     try {
@@ -189,6 +191,7 @@ export default {
       this.startCollectionPlayback(this.pendingQueueItems)
     },
     onDownloadOrStreamDownloadAndPlay() {
+      if (!this.isServerOnline) return
       downloadMissingItems(this, this.pendingQueueItems)
       this.startCollectionPlayback(this.pendingQueueItems)
     },

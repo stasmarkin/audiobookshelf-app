@@ -124,7 +124,7 @@ test('playlist Play of a downloaded book leaves the start position to native', a
   const bus = { $emit: (name, payload) => emitted.push([name, payload]) }
   const item = { libraryItemId: 'li1', episodeId: null, libraryItem: { id: 'li1', media: { numTracks: 1 } }, localLibraryItem: { id: 'local_1' } }
 
-  const pageSandbox = { ...helpers, resolveItemProgress: vuexProgress, downloadMissingItems: () => {} }
+  const pageSandbox = { ...helpers, resolveItemProgress: vuexProgress, downloadMissingItems: () => {}, requiresServer: {} }
   vm.runInNewContext(strip(await read('../pages/playlist/_id.vue')), pageSandbox)
   const page = { playlist: { id: 'pl1' }, playableItems: [item], $store: { commit: () => {} }, $eventBus: bus }
   pageSandbox.component.methods.startPlaylistPlayback.call(page, item)

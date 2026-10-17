@@ -115,7 +115,7 @@ const pageSource = await read('../pages/playlist/_id.vue')
 function playlistPage({ absData, localItems = {}, activeServerConfigId = 'a', user = null, progress = {} } = {}) {
   const timers = []
   const fakeDebouncer = (options) => createDebouncer({ ...options, setTimer: (fn, ms) => (timers.push({ fn, ms }), timers.at(-1)), clearTimer: (t) => timers.includes(t) && timers.splice(timers.indexOf(t), 1) })
-  const component = componentDef(pageSource, { trackCount, fetchPlaylistItems, createDebouncer: fakeDebouncer, downloadMissingItems() {}, queueItemPayload, resolveItemProgress, leavesOnLibraryChange })
+  const component = componentDef(pageSource, { trackCount, fetchPlaylistItems, createDebouncer: fakeDebouncer, downloadMissingItems() {}, queueItemPayload, resolveItemProgress, leavesOnLibraryChange, requiresServer })
   const store = {
     state: { activeServerConfigId, user: { user }, playerIsPlaying: false, playerIsStartingPlayback: false, libraries: { currentLibraryId: 'l1' } },
     getters: {
@@ -952,7 +952,7 @@ test('a sign-in or reconnect does not take the playlist page away', async () => 
 })
 
 test('the collection and item pages leave only for another library or server', async () => {
-  const collectionDef = componentDef(await read('../pages/collection/_id.vue'), { leavesOnLibraryChange, trackCount, createDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {} })
+  const collectionDef = componentDef(await read('../pages/collection/_id.vue'), { leavesOnLibraryChange, trackCount, createDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {}, requiresServer })
   const state = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
   const replaced = []
   const view = bind(collectionDef, { collection: { id: 'c1', libraryId: 'l1' }, $store: { state }, $router: { replace: (to) => replaced.push(to) }, $eventBus: { $on() {} }, $absData: { onDataChanged: () => () => {} } })
@@ -1087,7 +1087,7 @@ test('a collection or playlist without a library id leaves for another library',
   playlist.store.state.libraries.currentLibraryId = 'l2'
   view.libraryChanged()
   assert.deepEqual(playlist.replaced, ['/bookshelf/playlists'])
-  const collectionDef = componentDef(await read('../pages/collection/_id.vue'), { leavesOnLibraryChange, trackCount, createDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {} })
+  const collectionDef = componentDef(await read('../pages/collection/_id.vue'), { leavesOnLibraryChange, trackCount, createDebouncer, downloadMissingItems() {}, buildQueueSourceItems() {}, requiresServer })
   const replaced = []
   const collection = bind(collectionDef, { collection: { id: 'c1', libraryId: '' }, $store: { state: { libraries: { currentLibraryId: 'l2' }, activeServerConfigId: 'a' } }, $router: { replace: (to) => replaced.push(to) }, $eventBus: { $on() {} }, $absData: { onDataChanged: () => () => {} } })
   collectionDef.mounted.call(collection)

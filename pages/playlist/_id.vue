@@ -39,6 +39,7 @@ import { downloadMissingItems } from '@/utils/bulkDownload'
 import { trackCount, fetchPlaylistItems } from '@/utils/catalogItem'
 import { createDebouncer } from '@/utils/catalogRefresh'
 import { leavesOnLibraryChange } from '@/utils/libraryScope'
+import requiresServer from '@/mixins/requiresServer'
 
 /**
  * The playlist with all its items ($absData: the replica, also offline), each with its downloaded copy of the active
@@ -71,6 +72,7 @@ async function readPlaylist({ $absData, $db }, id, activeServerConfigId) {
 }
 
 export default {
+  mixins: [requiresServer],
   async asyncData({ store, params, app, redirect }) {
     let playlist
     try {
@@ -189,6 +191,7 @@ export default {
       this.startPlaylistPlayback(this.pendingNextItem)
     },
     onDownloadOrStreamDownloadAndPlay() {
+      if (!this.isServerOnline) return
       downloadMissingItems(this, this.playableItems)
       this.startPlaylistPlayback(this.pendingNextItem)
     },

@@ -14,36 +14,27 @@
       <p v-if="bookResults.length" class="search-section-label font-semibold text-sm mb-1">{{ $strings.LabelBooks }}</p>
       <template v-for="item in bookResults">
         <div :key="item.libraryItem.id" class="w-full h-16 py-1">
-          <nuxt-link v-if="!isUnavailable(item)" :to="itemLink(item)">
+          <nuxt-link :to="itemLink(item)">
             <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
           </nuxt-link>
-          <div v-else role="link" tabindex="0" @click="showUnavailable" @keydown.enter="showUnavailable">
-            <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
-          </div>
         </div>
       </template>
 
       <p v-if="podcastResults.length" class="search-section-label font-semibold text-sm mb-1 mt-2">{{ $strings.LabelPodcasts }}</p>
       <template v-for="item in podcastResults">
         <div :key="item.libraryItem.id" class="text-fg select-none relative py-1">
-          <nuxt-link v-if="!isUnavailable(item)" :to="itemLink(item)">
+          <nuxt-link :to="itemLink(item)">
             <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
           </nuxt-link>
-          <div v-else role="link" tabindex="0" @click="showUnavailable" @keydown.enter="showUnavailable">
-            <cards-item-search-card :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" :search="lastSearch" />
-          </div>
         </div>
       </template>
 
       <p v-if="episodeResults.length" class="search-section-label font-semibold text-sm mb-1 mt-2">{{ $strings.HeaderEpisodes }}</p>
       <template v-for="item in episodeResults">
         <div :key="item.libraryItem.recentEpisode.id" class="text-fg select-none relative py-1">
-          <nuxt-link v-if="!isUnavailable(item)" :to="episodeLink(item)">
-            <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" :local-episode="item.localEpisode" />
+          <nuxt-link :to="episodeLink(item)">
+            <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" :local-library-item="item.localLibraryItem" />
           </nuxt-link>
-          <div v-else role="link" tabindex="0" @click="showUnavailable" @keydown.enter="showUnavailable">
-            <cards-episode-search-card :episode="item.libraryItem.recentEpisode" :library-item="item.libraryItem" :local-episode="item.localEpisode" />
-          </div>
         </div>
       </template>
 
@@ -236,23 +227,14 @@ export default {
       if ((this.lastSearch || '').trim()) this.runSearch(this.lastSearch)
       else this.searchSeq++
     },
-    /** Offline, a result without a downloaded copy (an episode: without this episode downloaded) opens nothing. */
-    isUnavailable(item) {
-      if (!['offline', 'unauthorized'].includes(this.$store.state.serverState)) return false
-      return item.libraryItem?.recentEpisode ? !item.localEpisode : !item.localLibraryItem
-    },
-    showUnavailable() {
-      this.$toast?.info(this.$strings.LabelNotAvailableOffline)
-    },
     /** A downloaded copy goes along, so the item page can open it without the server. */
     itemLink(item) {
       const id = item.libraryItem.id
       return item.localLibraryItem ? `/item/${id}?localLibraryItemId=${item.localLibraryItem.id}` : `/item/${id}`
     },
-    /** Without the server the episode page reads only a downloaded copy, by its local ids. */
+    /** Without the server a downloaded episode opens its copy; any other opens the server page from the replica. */
     episodeLink(item) {
-      const readsLocal = !this.$store.state.user.serverConnectionConfig || this.$store.state.serverState !== 'online'
-      if (item.localEpisode && readsLocal) return `/item/${item.localLibraryItem.id}/${item.localEpisode.id}`
+      if (item.localEpisode && this.$store.state.serverState !== 'online') return `/item/${item.localLibraryItem.id}/${item.localEpisode.id}`
       return `/item/${item.libraryItem.id}/${item.libraryItem.recentEpisode.id}`
     },
     /** The catalog of the current library changed: the open search is run again a second after the last notice. */

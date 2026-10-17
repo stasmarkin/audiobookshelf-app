@@ -11,7 +11,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     libraryItem: {
       type: Object,
@@ -57,10 +60,9 @@ export default {
       if (this.isPodcast) return this.mediaMetadata.author
       return this.mediaMetadata.authorName
     },
-    /** Offline, a server item without a downloaded copy cannot be opened (the replica finds it anyway). */
+    /** Offline, a server item without a downloaded copy cannot be played (its page opens from the replica). */
     notAvailableOffline() {
-      if (this.localLibraryItem) return false
-      return ['offline', 'unauthorized'].includes(this.$store.state.serverState)
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem)
     }
   },
   methods: {},

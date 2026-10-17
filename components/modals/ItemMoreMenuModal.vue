@@ -55,10 +55,6 @@ export default {
     userIsAdminOrUp() {
       return this.$store.getters['user/getIsAdminOrUp']
     },
-    /** Playlist edits write to the server: offline the item stays visible, disabled and labeled. */
-    serverOnlyItem() {
-      return this.isServerOnline ? {} : { disabled: true, subtext: this.requiresServerLabel() }
-    },
     moreMenuItems() {
       const items = []
 
@@ -109,7 +105,8 @@ export default {
           items.push({
             text: this.$strings.ButtonSendEbookToDevice,
             value: 'sendEbook',
-            icon: 'send'
+            icon: 'send',
+            ...this.serverOnlyItem
           })
         }
       }
@@ -128,7 +125,8 @@ export default {
         items.push({
           text: this.rssFeed ? this.$strings.HeaderRSSFeed : this.$strings.HeaderOpenRSSFeed,
           value: 'rssFeed',
-          icon: 'rss_feed'
+          icon: 'rss_feed',
+          ...this.serverOnlyItem
         })
       }
 
@@ -166,7 +164,8 @@ export default {
         items.push({
           text: this.$strings.ButtonGoToWebClient,
           value: 'openWebClient',
-          icon: 'language'
+          icon: 'language',
+          ...this.serverOnlyItem
         })
       }
 
@@ -338,8 +337,12 @@ export default {
       } else if (action === 'podcastAutoDownload') {
         this.showPodcastAutoDownloadModal = true
       } else if (action === 'openWebClient') {
-        this.$store.dispatch('user/openWebClient', `/item/${this.serverLibraryItemId}`)
+        this.openWebClient()
       }
+    },
+    openWebClient() {
+      if (!this.isServerOnline) return
+      this.$store.dispatch('user/openWebClient', `/item/${this.serverLibraryItemId}`)
     },
     async toggleFinished() {
       await this.$hapticsImpact()
@@ -464,6 +467,7 @@ export default {
       }
     },
     clickRSSFeed() {
+      if (!this.isServerOnline) return
       this.$store.commit('globals/setRSSFeedOpenCloseModal', {
         id: this.serverLibraryItemId,
         name: this.title,
@@ -473,6 +477,7 @@ export default {
       })
     },
     sendEbookToDeviceAction(deviceName) {
+      if (!this.isServerOnline) return
       this.showSendEbookDevicesModal = false
 
       const payload = {

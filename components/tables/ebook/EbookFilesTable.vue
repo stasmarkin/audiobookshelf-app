@@ -30,7 +30,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     libraryItem: {
       type: Object,
@@ -70,7 +73,7 @@ export default {
     showMore({ file, items }) {
       this.showMoreMenu = true
       this.selectedFile = file
-      this.moreMenuItems = items
+      this.moreMenuItems = items.map((item) => (item.value === 'updateStatus' ? { ...item, ...this.serverOnlyItem } : item))
     },
     readEbook(fileIno) {
       this.$store.commit('showReader', { libraryItem: this.libraryItem, keepProgress: false, fileId: fileIno })
@@ -79,6 +82,7 @@ export default {
       this.showFiles = !this.showFiles
     },
     updateEbookStatus() {
+      if (!this.isServerOnline) return
       this.processing = true
       this.$nativeHttp
         .patch(`/api/items/${this.libraryItemId}/ebook/${this.selectedFile.ino}/status`)

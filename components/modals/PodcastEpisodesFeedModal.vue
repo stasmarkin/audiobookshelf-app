@@ -23,14 +23,17 @@
         </template>
       </div>
       <div class="absolute bottom-6 left-0 w-full flex items-center" style="height: 50px">
-        <ui-btn class="w-full" :disabled="!episodesSelected.length" color="success" @click.stop="downloadEpisodes">{{ episodesSelected.length ? `Add ${episodesSelected.length} Episode(s) to Server` : 'No Episodes Selected' }}</ui-btn>
+        <ui-btn class="w-full" :disabled="!episodesSelected.length || !isServerOnline" color="success" @click.stop="downloadEpisodes">{{ !isServerOnline ? requiresServerLabel() : episodesSelected.length ? `Add ${episodesSelected.length} Episode(s) to Server` : 'No Episodes Selected' }}</ui-btn>
       </div>
     </div>
   </modals-modal>
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     value: Boolean,
     libraryItem: {
@@ -85,6 +88,7 @@ export default {
   },
   methods: {
     downloadEpisodes() {
+      if (!this.isServerOnline) return
       const episodesToDownload = this.episodesSelected.map((episodeIndex) => this.episodes[Number(episodeIndex)])
 
       const payloadSize = JSON.stringify(episodesToDownload).length

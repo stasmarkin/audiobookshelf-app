@@ -11,7 +11,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     episode: {
       type: Object,
@@ -21,8 +24,8 @@ export default {
       type: Object,
       default: () => {}
     },
-    /** This episode downloaded on the active server, if it is. */
-    localEpisode: {
+    /** The podcast's downloaded copy on the active server, if any. */
+    localLibraryItem: {
       type: Object,
       default: null
     }
@@ -59,10 +62,9 @@ export default {
     authorName() {
       return this.mediaMetadata.author
     },
-    /** Offline, an episode that is not downloaded cannot be opened, even when others of the podcast are. */
+    /** Offline, an episode that is not downloaded cannot be played, even when others of the podcast are. */
     notAvailableOffline() {
-      if (this.localEpisode) return false
-      return ['offline', 'unauthorized'].includes(this.$store.state.serverState)
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem, this.episode?.id || null)
     }
   },
   methods: {},

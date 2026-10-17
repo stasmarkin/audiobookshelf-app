@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises'
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const { shouldRefreshShelf, createDebouncer, decodeFilterValue, isReplicaIncomplete } = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/catalogRefresh.js')).toString('base64')}`)
 const { findLocalCopy: localCopyOf } = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/localCopy.js')).toString('base64')}`)
+const requiresServer = (await import(`data:text/javascript;base64,${Buffer.from(await read('../mixins/requiresServer.js')).toString('base64')}`)).default
 const encode = (text) => encodeURIComponent(Buffer.from(text).toString('base64'))
 
 const flush = async (n = 20) => {
@@ -233,7 +234,7 @@ test('pages larger than 100 are split without gaps', async () => {
 async function card(path, { serverState, localLibraryItem = null, queueSource = { sourceType: 'series' } }) {
   const source = await read(path)
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
-  const component = new Function('Capacitor', script)({ isNativePlatform: () => true, getPlatform: () => 'android' })
+  const component = new Function('Capacitor', 'requiresServer', script)({ isNativePlatform: () => true, getPlatform: () => 'android' }, requiresServer)
   const view = {
     ...component.data(),
     queueSource,
@@ -242,7 +243,10 @@ async function card(path, { serverState, localLibraryItem = null, queueSource = 
     isSelectionMode: false,
     $store: { state: { serverState, isCasting: false, playerIsPlaying: false, globals: {} }, getters: new Proxy({}, { get: () => () => null }) }
   }
-  for (const [name, def] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: (def.get || def).bind(view), configurable: true })
+  for (const part of [...(component.mixins || []), component]) {
+    for (const [name, def] of Object.entries(part.computed || {})) Object.defineProperty(view, name, { get: (def.get || def).bind(view), configurable: true })
+    for (const [name, fn] of Object.entries(part.methods || {})) view[name] = fn.bind(view)
+  }
   return view
 }
 
@@ -282,7 +286,7 @@ test('a re-read card loses the downloaded copy of the book that was on it', asyn
 test('a series-filtered item can be set on a card twice', async () => {
   const source = await read('../components/cards/LazyBookCard.vue')
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
-  const component = new Function('Capacitor', script)({})
+  const component = new Function('Capacitor', 'requiresServer', script)({}, requiresServer)
   const view = { ...component.data() }
   for (const [name, def] of Object.entries(component.computed)) Object.defineProperty(view, name, { get: (def.get || def).bind(view), configurable: true })
   const item = (sequence) => ({ id: 'li1', media: { metadata: { title: 'A', series: { id: 's1', name: 'S', sequence } } } })
@@ -470,7 +474,7 @@ async function loadScript(path) {
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1]
   const names = [...script.matchAll(/^import\s+(?:\{([^}]+)\}|(\w+))\s+from/gm)].flatMap((m) => (m[1] ? m[1].split(',').map((n) => n.split(' as ').pop().trim()) : [m[2]]))
   const body = script.replace(/^import .*$/gm, '').replace('export default', 'return')
-  return new Function(...names, body)(...names.map(() => ({})))
+  return new Function(...names, body)(...names.map((name) => (name === 'requiresServer' ? requiresServer : {})))
 }
 
 test('a downloaded book opens from a catalog card without a server connection', async () => {
@@ -488,21 +492,24 @@ test('a downloaded book opens from a catalog card without a server connection', 
   assert.match(list, /else if \(this\.localLibraryItem\) router\.push\(`\/item\/\$\{this\.libraryItemId\}\?localLibraryItemId=\$\{this\.localLibraryItemId\}`\)/)
 })
 
-test('an undownloaded card offline says it is not available instead of leaving for Home', async () => {
+test('an undownloaded card offline opens the item page', async () => {
   for (const path of ['../components/cards/LazyBookCard.vue', '../components/cards/LazyListBookCard.vue']) {
     const component = await loadScript(path)
-    for (const [serverState, localLibraryItem, opens] of [
-      ['offline', null, false],
-      ['offline', { id: 'local_li1' }, true],
-      ['online', null, true]
+    for (const [serverState, localLibraryItem, target] of [
+      ['offline', null, '/item/li1'],
+      ['offline', { id: 'local_li1' }, '/item/li1?localLibraryItemId=local_li1'],
+      ['online', null, '/item/li1']
     ]) {
       const view = await card(path, { serverState, localLibraryItem })
       const pushed = []
       const toasts = []
       Object.assign(view, { $router: { push: (to) => pushed.push(to) }, $toast: { info: (text) => toasts.push(text) }, $strings: { LabelNotAvailableOffline: 'Not available offline' } })
-      component.methods.clickCard.call(view, {})
-      assert.equal(pushed.length, opens ? 1 : 0, `${path} ${serverState} ${!!localLibraryItem}`)
-      assert.deepEqual(toasts, opens ? [] : ['Not available offline'])
+      await component.methods.clickCard.call(view, {})
+      assert.deepEqual(pushed, [target], `${path} ${serverState} ${!!localLibraryItem}`)
+      assert.deepEqual(toasts, [], 'no toast instead of the page')
+      // The marker and the hidden Play stay as they were
+      assert.equal(view.notAvailableOffline, serverState === 'offline' && !localLibraryItem, path)
+      assert.equal(!!view.showPlayButton, !view.notAvailableOffline, path)
     }
   }
 })

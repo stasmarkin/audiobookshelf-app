@@ -111,8 +111,10 @@
 
 <script>
 import { Capacitor } from '@capacitor/core'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     index: Number,
     queueSource: Object,
@@ -421,13 +423,10 @@ export default {
     readsLocalEpisodePage() {
       return !this.store.state.user?.serverConnectionConfig || this.store.state.serverState !== 'online'
     },
-    /** Offline, a server item without a downloaded copy cannot be opened or played (the replica lists it anyway). */
+    /** Offline, a server item without a downloaded copy cannot be played; its page opens from the replica. */
     notAvailableOffline() {
-      if (this.isLocal || this.collapsedSeries || !this.libraryItem) return false
-      // An episode card plays and opens this very episode: another downloaded episode of the podcast does not help
-      if (this.recentEpisode ? this.localEpisode : this.localLibraryItem) return false
-      // Not while the first check is pending ('unknown'): only a server known to be away
-      return ['offline', 'unauthorized'].includes(this.store.state.serverState)
+      if (this.collapsedSeries || !this.libraryItem) return false
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem, this.recentEpisode?.id || null)
     }
   },
   methods: {
@@ -514,11 +513,6 @@ export default {
         e.preventDefault()
         this.selectBtnClick()
       } else {
-        // Offline a book without a downloaded copy has no page to open yet: say so instead of landing on Home
-        if (this.notAvailableOffline && !this.collapsedSeries) {
-          this.$toast?.info(this.$strings.LabelNotAvailableOffline)
-          return
-        }
         const router = this.$router || this.$nuxt.$router
         if (router) {
           // Without the server the episode page reads only a downloaded copy, by its local ids
