@@ -8,6 +8,7 @@ import app.absplus.android.MainActivity
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.media.MediaEventManager
+import app.absplus.android.player.AwaitingDisplay
 import app.absplus.android.player.CastManager
 import app.absplus.android.player.PlaybackSource
 import app.absplus.android.player.StartRequest
@@ -119,8 +120,8 @@ class AbsAudioPlayer : Plugin() {
           emit("onPlaybackSpeedChanged", playbackSpeed)
         }
 
-        override fun onAwaitingServer(awaiting: Boolean) {
-          notifyListeners("onAwaitingServer", JSObject().put("awaiting", awaiting))
+        override fun onAwaitingServer(awaiting: Boolean, display: AwaitingDisplay?) {
+          notifyListeners("onAwaitingServer", JSObject().put("awaiting", awaiting).put("display", display?.toJson() ?: JSONObject.NULL))
         }
       })
 
@@ -168,6 +169,8 @@ class AbsAudioPlayer : Plugin() {
     queue.put("currentIndex", pns.playlistQueueIndex)
     ret.put("queue", queue)
     ret.put("awaitingServer", pns.awaiting.isAwaiting)
+    // A UI recreated after the wait began missed its event: the player shows the awaited item from this
+    ret.put("awaitingDisplay", pns.awaitingDisplay?.toJson() ?: JSONObject.NULL)
     DLog.i("PlaybackRestore", "UI requested native playback state | hasSession=${session != null} | isPlaying=${session != null && pns.currentPlayer.isPlaying} | queue=${pns.playlistQueue.size}")
     call.resolve(ret)
   }
@@ -290,8 +293,9 @@ class AbsAudioPlayer : Plugin() {
           }
           // The call must resolve; another start took over and reports itself
           PlayerNotificationService.StartResult.Replaced -> call.resolve(JSObject())
-          // The queue stays and waits on this item; the player reports onAwaitingServer
-          PlayerNotificationService.StartResult.AwaitingServer -> call.resolve(JSObject().put("awaitingServer", true))
+          // The queue stays and waits on this item; the app shows its display, or a toast without one
+          is PlayerNotificationService.StartResult.AwaitingServer ->
+            call.resolve(JSObject().put("awaitingServer", true).put("display", result.display?.toJson() ?: JSONObject.NULL))
           is PlayerNotificationService.StartResult.Started ->
             if (result.session.isLocal) call.resolve(JSObject()) else call.resolve(JSObject(jacksonMapper.writeValueAsString(result.session)))
         }

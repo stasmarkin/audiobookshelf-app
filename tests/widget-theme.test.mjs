@@ -410,8 +410,10 @@ test('Gate F freeze: standard widget layouts, sizing, artwork planning, provider
     // RICE customization: the renderer reads WidgetTheme.look() (layout family + optional RICE palette) instead of
     // WidgetTheme.current() and calls WidgetPaint.apply() once after building; WidgetPaint does nothing without a RICE
     // palette, so built-in widgets render exactly as before. Layouts, ids, actions, sizing and artwork are unchanged.
-    'widget/WidgetRenderer.kt': '82402bced6e5d820b50120dc7e6ad18acaca3ab2f336d31d3ace298a8b0be2d0',
-    'MediaPlayerWidget.kt': '95e635491a752cb9fa734a052fdca99784cd183a9d20da503c845f3974917341'
+    // Offline-first 6.8: State carries the book a waiting queue is on (title, author, cover from AwaitingDisplay) and
+    // updateAppWidget takes a whole State; layouts, ids, actions, sizing and artwork bounds are unchanged.
+    'widget/WidgetRenderer.kt': 'f37da28cbb9ac281783141c71369c326dcf1b808f393b55828ec04b7dd9d200d',
+    'MediaPlayerWidget.kt': '7da12e737c8c666b4e9c5be96125eb6dfa4ef1acbbfb876282d33596bc7033e8'
   }
   for (const [file, hash] of Object.entries(code)) assert.equal(await sha256(WIDGET_SRC + file), hash, `${file} changed`)
 })
