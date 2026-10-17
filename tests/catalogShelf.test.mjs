@@ -481,7 +481,7 @@ test('a downloaded book opens from a catalog card without a server connection', 
   const page = await loadScript('../pages/item/_id/index.vue')
   const run = async (query) => {
     let target = null
-    await page.asyncData({ store: { state: { user: { serverConnectionConfig: null } } }, params: { id: 'li1' }, query, redirect: (to) => (target = to), app: {} })
+    await page.asyncData({ store: { state: { user: { serverConnectionConfig: null } }, getters: {} }, params: { id: 'li1' }, query, redirect: (to) => (target = to), app: {} })
     return target
   }
   assert.equal(await run({ localLibraryItemId: 'local_li1' }), '/item/local_li1?noredirect=1')

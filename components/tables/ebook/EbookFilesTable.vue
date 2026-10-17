@@ -38,7 +38,9 @@ export default {
     libraryItem: {
       type: Object,
       default: () => {}
-    }
+    },
+    /** Offline without a downloaded copy: the files are listed but cannot be read. */
+    notAvailableOffline: Boolean
   },
   data() {
     return {
@@ -76,6 +78,7 @@ export default {
       this.moreMenuItems = items.map((item) => (item.value === 'updateStatus' ? { ...item, ...this.serverOnlyItem } : item))
     },
     readEbook(fileIno) {
+      if (this.notAvailableOffline) return
       this.$store.commit('showReader', { libraryItem: this.libraryItem, keepProgress: false, fileId: fileIno })
     },
     clickBar() {

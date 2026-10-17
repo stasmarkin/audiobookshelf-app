@@ -51,15 +51,15 @@
         <!-- action buttons -->
         <div class="col-span-full">
           <div v-if="showPlay || showRead" class="flex mt-4 -mx-1">
-            <ui-btn v-if="showPlay" color="success" class="flex items-center justify-center flex-grow mx-1" :loading="playerIsStartingForThisMedia" :padding-x="4" @click="playClick">
+            <ui-btn v-if="showPlay" color="success" class="flex items-center justify-center flex-grow mx-1" :loading="playerIsStartingForThisMedia" :disabled="playDisabled && !playerIsPlaying" :padding-x="4" @click="playClick">
               <span class="material-symbols text-2xl fill">{{ playerIsPlaying ? 'pause' : 'play_arrow' }}</span>
               <span class="px-1 text-sm">{{ playerIsPlaying ? $strings.ButtonPause : isPodcast ? $strings.ButtonNextEpisode : hasLocal ? $strings.ButtonPlay : $strings.ButtonStream }}</span>
             </ui-btn>
-            <ui-btn v-if="showRead" color="info" class="flex items-center justify-center mx-1" :class="showPlay ? '' : 'flex-grow'" :padding-x="2" @click="readBook">
+            <ui-btn v-if="showRead" color="info" class="flex items-center justify-center mx-1" :class="showPlay ? '' : 'flex-grow'" :disabled="notAvailableOffline" :padding-x="2" @click="readBook">
               <span class="material-symbols text-2xl">auto_stories</span>
               <span v-if="!showPlay" class="px-2 text-base">{{ $strings.ButtonRead }} {{ ebookFormat }}</span>
             </ui-btn>
-            <ui-btn v-if="showDownload" :color="downloadItem ? 'warning' : 'primary'" class="flex items-center justify-center mx-1" :padding-x="2" @click="downloadClick">
+            <ui-btn v-if="showDownload" :color="downloadItem ? 'warning' : 'primary'" class="flex items-center justify-center mx-1" :disabled="!isServerOnline && !downloadItem" :padding-x="2" @click="downloadClick">
               <span class="material-symbols text-2xl" :class="downloadItem || startingDownload ? 'animate-pulse' : ''">{{ downloadItem || startingDownload ? 'downloading' : 'download' }}</span>
             </ui-btn>
             <ui-btn color="primary" class="flex items-center justify-center mx-1" :padding-x="2" @click="moreButtonPress">
@@ -70,6 +70,10 @@
             <span class="material-symbols">error</span>
             <span class="px-1 text-base">{{ $strings.LabelMissing }}</span>
           </ui-btn>
+          <template v-if="showPlay || showRead">
+            <p v-if="(showPlay && playDisabled) || (showRead && notAvailableOffline)" class="not-offline-label text-xs text-fg-muted text-center mt-1">{{ notAvailableOfflineLabel() }}</p>
+            <p v-else-if="showDownload && !isServerOnline && !downloadItem" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
+          </template>
 
           <div v-if="!isPodcast && progressPercent > 0" class="detail-progress px-4 py-2 bg-primary text-sm font-semibold rounded-md text-fg mt-4 text-center">
             <p>{{ $strings.LabelYourProgress }}: {{ Math.round(progressPercent * 100) }}%</p>
@@ -94,8 +98,9 @@
           <div v-if="podcastAuthor" class="text-sm">{{ podcastAuthor }}</div>
           <div v-else-if="bookAuthors?.length" class="text-sm">
             <template v-for="(author, index) in bookAuthors">
-              <nuxt-link :key="author.id" :to="`/bookshelf/library?filter=authors.${$encode(author.id)}`" class="underline whitespace-nowrap">{{ author.name }}</nuxt-link
-              ><span :key="`${author.id}-comma`" v-if="index < bookAuthors.length - 1">, </span>
+              <nuxt-link v-if="author.id" :key="author.id" :to="`/bookshelf/library?filter=authors.${$encode(author.id)}`" class="underline whitespace-nowrap">{{ author.name }}</nuxt-link
+              ><span v-else :key="`name-${index}`" class="whitespace-nowrap">{{ author.name }}</span
+              ><span :key="`${author.id || index}-comma`" v-if="index < bookAuthors.length - 1">, </span>
             </template>
           </div>
 
@@ -153,11 +158,12 @@
         <!-- tables -->
         <tables-podcast-episodes-table v-if="isPodcast" :library-item="libraryItem" :local-library-item-id="localLibraryItemId" :episodes="episodes" :local-episodes="localLibraryItemEpisodes" :is-local="isLocal" />
 
-        <tables-chapters-table v-if="numChapters" :library-item="libraryItem" @playAtTimestamp="playAtTimestamp" />
+        <tables-chapters-table v-if="chapters.length" :library-item="chaptersLibraryItem" @playAtTimestamp="playAtTimestamp" />
+        <p v-else-if="showChaptersHint" class="chapters-hint text-sm text-fg-muted py-2">{{ $strings.MessageChaptersAfterOnline }}</p>
 
-        <tables-tracks-table v-if="numTracks" :tracks="tracks" :library-item-id="libraryItemId" />
+        <tables-tracks-table v-if="tracks.length" :tracks="tracks" :library-item-id="libraryItemId" />
 
-        <tables-ebook-files-table v-if="ebookFiles.length" :library-item="libraryItem" />
+        <tables-ebook-files-table v-if="ebookFiles.length" :library-item="libraryItem" :not-available-offline="notAvailableOffline" />
       </div>
     </div>
 
@@ -184,11 +190,23 @@ import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { downloadState, DownloadState } from '@/utils/downloadState'
 import { leavesOnLibraryChange, copyLeavesOnLibraryChange } from '@/utils/libraryScope'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
+import requiresServer from '@/mixins/requiresServer'
+import { findLocalCopy } from '@/utils/localCopy'
+import { isCopyOfActiveServer } from '@/utils/progressTarget'
+import { createDebouncer } from '@/utils/catalogRefresh'
+
+/** The item with the downloaded copy of the active server joined (replicas of two accounts share item ids). */
+async function withLocalCopy($db, store, libraryItem) {
+  const localItems = await $db.getLocalLibraryItems().catch(() => [])
+  libraryItem.localLibraryItem = findLocalCopy(localItems, libraryItem, store.state.activeServerConfigId)
+  return libraryItem
+}
 
 export default {
   async asyncData({ store, params, redirect, app, query }) {
     const libraryItemId = params.id
     let libraryItem = null
+    let detailLevel = null
 
     if (libraryItemId.startsWith('local')) {
       libraryItem = await app.$db.getLocalLibraryItem(libraryItemId)
@@ -209,15 +227,28 @@ export default {
         }
         return redirect(`/item/${libraryItem.libraryItemId}?${queryParams.toString()}`)
       }
-    } else if (!store.state.user.serverConnectionConfig) {
-      // Not connected to server: a downloaded copy still opens (cold start offline, from a catalog card)
+    } else if (store.getters.getHasActiveServer) {
+      // The replica answers at once, also offline; mounted() then asks native to refresh it from the server
+      const answer = await app.$absData.getLibraryItem({ id: libraryItemId }).catch((error) => {
+        console.error('[item] Could not read the item', error)
+        return null
+      })
+      if (answer?.libraryItem) {
+        libraryItem = await withLocalCopy(app.$db, store, answer.libraryItem)
+        detailLevel = answer.detailLevel || null
+      } else if (query.localLibraryItemId) {
+        return redirect(`/item/${encodeURIComponent(query.localLibraryItemId)}?noredirect=1`)
+      }
+    } else {
+      // No server signed in: a downloaded copy still opens
       if (query.localLibraryItemId) return redirect(`/item/${encodeURIComponent(query.localLibraryItemId)}?noredirect=1`)
       return redirect('/?error=No server connection to get library item')
     }
 
     return {
       libraryItem,
-      libraryItemId
+      libraryItemId,
+      detailLevel
     }
   },
   data() {
@@ -233,10 +264,13 @@ export default {
       descriptionClamped: false,
       showFullDescription: false,
       episodeStartingPlayback: null,
-      startingDownload: false
+      startingDownload: false,
+      detailLevel: null,
+      stopDataChanged: null,
+      refreshDebouncer: null
     }
   },
-  mixins: [cellularPermissionHelpers],
+  mixins: [cellularPermissionHelpers, requiresServer],
   computed: {
     // Header color for the theme's presentation.cover-color policy (theme/coverPresentation.js):
     // legacy = the sampled cover color (previous behavior), theme = the theme's own surface
@@ -273,12 +307,8 @@ export default {
     },
     serverLibraryItemId() {
       if (!this.isLocal) return this.libraryItem.id
-      // Check if local library item is connected to the current server
-      if (!this.libraryItem.serverAddress || !this.libraryItem.libraryItemId) return null
-      if (this.currentServerAddress === this.libraryItem.serverAddress) {
-        return this.libraryItem.libraryItemId
-      }
-      return null
+      // By the active server, not the signed-in address (empty offline)
+      return isCopyOfActiveServer(this.libraryItem, this.$store.state.activeServerConfigId) ? this.libraryItem.libraryItemId : null
     },
     localLibraryItemServerConnectionConfigId() {
       return this.localLibraryItem?.serverConnectionConfigId
@@ -440,12 +470,35 @@ export default {
     tracks() {
       return this.media.tracks || []
     },
+    /** A minified item (never opened online) has counters instead of the arrays. */
     numTracks() {
-      return this.tracks.length || 0
+      return Array.isArray(this.media.tracks) ? this.media.tracks.length : this.media.numTracks || 0
+    },
+    /** A downloaded book never opened online takes the chapters of its copy. */
+    chapters() {
+      if (Array.isArray(this.media.chapters)) return this.media.chapters
+      if (!this.isLocal && this.detailLevel === 'minified') return this.localLibraryItem?.media?.chapters || []
+      return []
+    },
+    chaptersLibraryItem() {
+      if (this.media.chapters === this.chapters) return this.libraryItem
+      return { ...this.libraryItem, media: { ...this.media, chapters: this.chapters } }
     },
     numChapters() {
-      if (!this.media.chapters) return 0
-      return this.media.chapters.length || 0
+      return Array.isArray(this.media.chapters) ? this.media.chapters.length : this.chapters.length || this.media.numChapters || 0
+    },
+    showChaptersHint() {
+      return !this.isLocal && this.detailLevel === 'minified' && !this.chapters.length && this.numChapters > 0
+    },
+    notAvailableOffline() {
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem)
+    },
+    /** Offline a podcast plays only its downloaded episodes. */
+    playableEpisodes() {
+      return this.episodes.filter((ep) => !this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem, ep.id))
+    },
+    playDisabled() {
+      return this.isPodcast ? !this.playableEpisodes.length : this.notAvailableOffline
     },
     isMissing() {
       return this.libraryItem.isMissing
@@ -460,14 +513,14 @@ export default {
       return !!this.mediaMetadata.abridged
     },
     showPlay() {
-      return !this.isMissing && !this.isInvalid && (this.numTracks || this.episodes.length)
+      return !this.isMissing && !this.isInvalid && !!(this.numTracks || this.episodes.length)
     },
     showRead() {
-      return this.ebookFile
+      return !!(this.ebookFile || this.media.ebookFormat)
     },
     showDownload() {
       if (this.isPodcast || this.hasLocal) return false
-      return this.user && this.userCanDownload && (this.showPlay || this.showRead)
+      return !!this.userCanDownload && (this.showPlay || this.showRead)
     },
     libraryFiles() {
       return this.libraryItem.libraryFiles || []
@@ -479,8 +532,7 @@ export default {
       return this.media.ebookFile
     },
     ebookFormat() {
-      if (!this.ebookFile) return null
-      return this.ebookFile.ebookFormat
+      return this.ebookFile?.ebookFormat || this.media.ebookFormat || null
     },
     downloadItem() {
       return this.$store.getters['globals/getDownloadItem'](this.libraryItemId)
@@ -528,6 +580,7 @@ export default {
       this.showMoreMenu = true
     },
     readBook() {
+      if (this.notAvailableOffline) return
       if (this.localLibraryItem?.media?.ebookFile) {
         // Has local ebook file
         this.$store.commit('showReader', { libraryItem: this.localLibraryItem, keepProgress: true })
@@ -547,12 +600,12 @@ export default {
       }
     },
     async play(startTime = null) {
-      if (this.playerIsStartingPlayback) return
+      if (this.playerIsStartingPlayback || this.playDisabled) return
 
       if (this.isPodcast) {
         // Next episode and the auto-advance queue follow the same order as the episode list
         const { orderBy, desc } = resolvePodcastEpisodeSort(this.$store.state.user.settings, podcastSortOverrideKey(this.libraryItem, this.isLocal), this.podcastType)
-        const episodes = sortPodcastEpisodes(this.episodes, orderBy, desc)
+        const episodes = sortPodcastEpisodes(this.playableEpisodes, orderBy, desc)
 
         const startIndex = episodes.findIndex((ep) => {
           var podcastProgress = null
@@ -642,13 +695,6 @@ export default {
         this.$eventBus.$emit('play-item', { libraryItemId, serverLibraryItemId: this.serverLibraryItemId, startTime })
       }
     },
-    itemUpdated(libraryItem) {
-      if (libraryItem.id === this.serverLibraryItemId) {
-        console.log('Item Updated')
-        this.libraryItem = libraryItem
-        this.checkDescriptionClamped()
-      }
-    },
     async selectFolder() {
       // Select and save the local folder for media type
       var folderObj = await AbsFileSystem.selectFolder({ mediaType: this.mediaType })
@@ -662,6 +708,7 @@ export default {
       this.download(localFolder)
     },
     async downloadClick() {
+      if (!this.isServerOnline && !this.downloadItem) return
       // An existing download is managed (Cancel, Retry, Clear) on the Downloads screen
       if (this.downloadItem) return this.$router.push('/downloading')
       if (this.startingDownload) return
@@ -769,18 +816,6 @@ export default {
       this.windowWidth = window.innerWidth
       this.checkDescriptionClamped()
     },
-    rssFeedOpen(data) {
-      if (data.entityId === this.serverLibraryItemId) {
-        console.log('RSS Feed Opened', data)
-        this.rssFeed = data
-      }
-    },
-    rssFeedClosed(data) {
-      if (data.entityId === this.serverLibraryItemId) {
-        console.log('RSS Feed Closed', data)
-        this.rssFeed = null
-      }
-    },
     async setLibrary() {
       if (!this.libraryItem.libraryId) return
       await this.$store.dispatch('libraries/fetch', this.libraryItem.libraryId)
@@ -797,9 +832,7 @@ export default {
       this.loadedServerConfigId = this.$store.state.activeServerConfigId
       this.$eventBus.$on('library-changed', this.libraryChanged)
       this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
-      this.$socket.$on('item_updated', this.itemUpdated)
-      this.$socket.$on('rss_feed_open', this.rssFeedOpen)
-      this.$socket.$on('rss_feed_closed', this.rssFeedClosed)
+      if (!this.isLocal) this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
       this.checkDescriptionClamped()
 
       // Set height of page below cover image
@@ -811,33 +844,53 @@ export default {
         window['item-page'].scrollTop = this.$store.state.lastItemScrollData.scrollTop || 0
       }
     },
-    async loadServerLibraryItem() {
-      console.log(`Fetching library item "${this.libraryItemId}" from server`)
-      const libraryItem = await this.$nativeHttp.get(`/api/items/${this.libraryItemId}?expanded=1&include=rssfeed`, { connectTimeout: 5000 }).catch((error) => {
-        console.error('Failed', error)
-        return null
-      })
-
-      if (libraryItem) {
-        const localLibraryItem = await this.$db.getLocalLibraryItemByLId(this.libraryItemId)
-        if (localLibraryItem) {
-          console.log('Library item has local library item also', localLibraryItem.id)
-          libraryItem.localLibraryItem = localLibraryItem
-        }
-        this.libraryItem = libraryItem
-      } else if (this.$route.query.localLibraryItemId) {
-        // Failed to get server library item but is local library item so redirect
-        return this.$router.replace(`/item/${this.$route.query.localLibraryItemId}?noredirect=1`)
-      } else {
-        this.$toast.error('Failed to get library item from server')
-        return this.$router.replace('/bookshelf')
+    /** The catalog of this item's library changed (an edit, a removal, a feed): read the item again, a second later. */
+    dataChanged(change) {
+      const libraryId = this.libraryItem?.libraryId
+      if (change?.scope !== 'catalog' || !libraryId) return
+      const topics = this.isPodcast ? [`items:${libraryId}`, `episodes:${libraryId}`] : [`items:${libraryId}`]
+      if (!topics.some((topic) => (change.ids || []).includes(topic))) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(() => this.readItem())
+    },
+    /**
+     * `refresh`: native may ask the server for the expanded copy. A failed read keeps the shown page; an item that is
+     * gone leaves for its downloaded copy or the bookshelf. Returns whether the page stays.
+     */
+    async readItem(refresh = false) {
+      let answer
+      try {
+        answer = await this.$absData.getLibraryItem({ id: this.libraryItemId, ...(refresh ? { refresh: true } : {}) })
+      } catch (error) {
+        console.error('[item] Could not read the item', error)
+        if (this.libraryItem) return true
       }
+      if (this._isDestroyed) return false
+      const libraryItem = answer?.libraryItem
+      if (!libraryItem) {
+        this.leaveMissingItem()
+        return false
+      }
+      const copy = this.libraryItem?.localLibraryItem
+      if (copy) libraryItem.localLibraryItem = copy
+      else await withLocalCopy(this.$db, this.$store, libraryItem)
+      if (this._isDestroyed) return false
+      this.libraryItem = libraryItem
+      this.detailLevel = answer.detailLevel || null
+      this.$nextTick?.(this.checkDescriptionClamped)
+      return true
+    },
+    leaveMissingItem() {
+      const localLibraryItemId = this.$route.query.localLibraryItemId || this.libraryItem?.localLibraryItem?.id
+      if (localLibraryItemId) return this.$router.replace(`/item/${localLibraryItemId}?noredirect=1`)
+      this.$toast.error(this.isServerOnline ? 'Failed to get library item from server' : this.$strings.LabelNotAvailableOffline)
+      this.$router.replace('/bookshelf')
     }
   },
   async mounted() {
-    if (!this.libraryItem) {
-      await this.loadServerLibraryItem()
-    }
+    // A downloaded copy's page (local_*) has no server item to read
+    if (!this.libraryItemId.startsWith('local') && !(await this.readItem(true))) return
+    if (this.$route.query.error === 'episode') this.$toast.info(this.$strings.ToastEpisodeNotAvailable)
     this.init()
     const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
     // Left the page before the listener was registered
@@ -852,9 +905,9 @@ export default {
     window.removeEventListener('resize', this.windowResized)
     this.$eventBus.$off('library-changed', this.libraryChanged)
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
-    this.$socket.$off('item_updated', this.itemUpdated)
-    this.$socket.$off('rss_feed_open', this.rssFeedOpen)
-    this.$socket.$off('rss_feed_closed', this.rssFeedClosed)
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
 
     // Set scroll position
     if (window['item-page']) {

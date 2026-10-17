@@ -968,7 +968,7 @@ test('the collection and item pages leave only for another library or server', a
   assert.equal(replaced.length, 2)
 
   const itemSource = await read('../pages/item/_id/index.vue')
-  const itemDef = componentDef(itemSource, { leavesOnLibraryChange, copyLeavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {} })
+  const itemDef = componentDef(itemSource, { leavesOnLibraryChange, copyLeavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {}, requiresServer })
   const itemState = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
   const left = []
   const item = bind({ methods: { libraryChanged: itemDef.methods.libraryChanged }, computed: { isLocal: itemDef.computed.isLocal } }, { libraryItem: { id: 'li1', libraryId: 'l1' }, loadedServerConfigId: 'a', $store: { state: itemState }, $router: { replace: (to) => left.push(to) } })
@@ -1038,7 +1038,7 @@ test('the catalog-partial note stays pinned over every row', async () => {
 })
 
 test('a downloaded copy\'s page stays on a reconnect and leaves only for another server', async () => {
-  const itemDef = componentDef(await read('../pages/item/_id/index.vue'), { leavesOnLibraryChange, copyLeavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {} })
+  const itemDef = componentDef(await read('../pages/item/_id/index.vue'), { leavesOnLibraryChange, copyLeavesOnLibraryChange, cellularPermissionHelpers: {}, coverPresentation: {}, Dialog: {}, AbsFileSystem: {}, AbsDownloader: {}, requiresServer })
   const page = (copy) => {
     const state = { libraries: { currentLibraryId: 'l1' }, activeServerConfigId: 'a' }
     const left = []

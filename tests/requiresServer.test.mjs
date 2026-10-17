@@ -74,6 +74,7 @@ test('requiresServer mixin works on an instance without $store', () => {
  * in `serverOnlyItem`).
  */
 const SERVER_ACTIONS = [
+  { file: 'pages/item/_id/index.vue', bind: [/<ui-btn v-if="showDownload"[^>]*:disabled="!isServerOnline && !downloadItem"/], gates: ['downloadClick'] },
   {
     file: 'components/modals/ItemMoreMenuModal.vue',
     bind: [/value: 'sendEbook',[^}]*\.\.\.this\.serverOnlyItem/, /value: 'rssFeed',[^}]*\.\.\.this\.serverOnlyItem/, /value: 'openWebClient',[^}]*\.\.\.this\.serverOnlyItem/],
