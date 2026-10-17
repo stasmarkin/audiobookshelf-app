@@ -156,9 +156,12 @@ suspend fun readAwaitingDisplayRow(progressBudgetMs: Long, progress: suspend () 
  */
 suspend fun <T> readWithin(scope: CoroutineScope, timeoutMs: Long, read: suspend () -> T?, late: (T?) -> Unit): T? {
   val reading = scope.async { read() }
-  val now = withTimeoutOrNull(timeoutMs) { reading.await() }
-  if (now == null && !reading.isCompleted) scope.launch { late(reading.await()) }
-  return now
+  // Boxed, so a timeout is told apart from a read that found nothing; after a timeout the read may already be done
+  val now = withTimeoutOrNull(timeoutMs) { listOf(reading.await()) } ?: run {
+    scope.launch { late(reading.await()) }
+    return null
+  }
+  return now.single()
 }
 
 /**

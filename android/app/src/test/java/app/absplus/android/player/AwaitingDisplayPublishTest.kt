@@ -211,4 +211,16 @@ class AwaitingDisplayPublishTest {
     loadAwaitingCover(displayB, { cover }, { presentation.display }) { applied.add(it) }
     assertEquals(listOf(cover), applied)
   }
+
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  @Test
+  fun aReadThatFinishesAtTheTimeoutIsStillDelivered() = kotlinx.coroutines.test.runTest {
+    // The read's own delay is registered first, so it finishes in the same instant the timeout fires, before the caller
+    // resumes: the caller sees a timeout although the read is already done
+    val readScope = CoroutineScope(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler))
+    var late: AwaitingDisplay? = null
+    val now = readWithin(readScope, 100, { kotlinx.coroutines.delay(100); displayB }) { late = it }
+    testScheduler.advanceUntilIdle()
+    assertEquals("delivered now or late, never lost", displayB, now ?: late)
+  }
 }

@@ -145,4 +145,15 @@ class AwaitingServiceTest {
     exo.release()
     session.release()
   }
+
+  @Test
+  fun stopOfALostStreamPausesAndKeepsTheSession() {
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    pns.currentPlaybackSession = sessionA()
+    pns.awaiting.onStreamLost("book-a", null, 15.0, wasPlaying = true, serverConfigId = "config-1")
+    MediaSessionCallback(pns).onStop()
+    assertEquals("session-a", pns.currentPlaybackSession?.id)
+    assertTrue("the lost stream still waits", pns.awaiting.isStreamLost)
+    assertTrue(playerCalls.contains("pause"))
+  }
 }
