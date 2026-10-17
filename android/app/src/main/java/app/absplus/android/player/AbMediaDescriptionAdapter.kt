@@ -34,9 +34,8 @@ class AbMediaDescriptionAdapter (private val controller: MediaControllerCompat, 
     player: Player,
     callback: PlayerNotificationManager.BitmapCallback
   ): Bitmap? {
-    playerNotificationService.awaitingDisplay?.let { display ->
-      return display.coverUri?.let { CoverArt.decodeLocal(playerNotificationService, CoverArt.localCoverUri(playerNotificationService, it), "notification") }
-    }
+    // Decoded off the main thread when the awaited item was read
+    if (playerNotificationService.awaitingDisplay != null) return playerNotificationService.awaitingCover?.bitmap
     val albumArtUri = controller.metadata.description.iconUri
     val albumBitmap = controller.metadata.description.iconBitmap
       ?: controller.metadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART)

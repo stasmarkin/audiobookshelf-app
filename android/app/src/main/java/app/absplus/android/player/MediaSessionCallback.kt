@@ -52,23 +52,31 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
     playerNotificationService.pause()
   }
 
+  // While a queue waits on another item, the system controls show that item: nothing may move the open session
+  private val showsAwaitedItem get() = playerNotificationService.awaitingDisplay != null
+
   override fun onSkipToPrevious() {
+    if (showsAwaitedItem) return
     playerNotificationService.skipToPrevious()
   }
 
   override fun onSkipToNext() {
+    if (showsAwaitedItem) return
     playerNotificationService.skipToNext()
   }
 
   override fun onFastForward() {
+    if (showsAwaitedItem) return
     playerNotificationService.jumpForward()
   }
 
   override fun onRewind() {
+    if (showsAwaitedItem) return
     playerNotificationService.jumpBackward()
   }
 
   override fun onSeekTo(pos: Long) {
+    if (showsAwaitedItem) return
     val currentTrackStartOffset = playerNotificationService.getCurrentTrackStartOffsetMs()
     playerNotificationService.seekPlayer(currentTrackStartOffset + pos)
   }
@@ -235,11 +243,11 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
     override fun handleMessage(msg: Message) {
       super.handleMessage(msg)
       if (2 == msg.what) {
-        playerNotificationService.jumpBackward()
+        onRewind()
         playerNotificationService.play()
       }
       else if (msg.what >= 3) {
-        playerNotificationService.jumpForward()
+        onFastForward()
         playerNotificationService.play()
       }
     }
@@ -247,6 +255,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onCustomAction(action: String?, extras: Bundle?) {
     super.onCustomAction(action, extras)
+    if (showsAwaitedItem) return
 
     when (action) {
       CUSTOM_ACTION_JUMP_FORWARD -> onFastForward()

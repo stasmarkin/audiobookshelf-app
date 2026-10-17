@@ -175,4 +175,4 @@ Waiting respects the cellular streaming setting on a metered network: "Never" ke
 
 Rollback to the previous version: a queue saved with server IDs is still read by it; it streams those entries (or, after a restart, does not reattach the queue to a downloaded session). No data is lost.
 
-Tests: `PlaybackSourceResolverTest`, `QueueIdentityTest`, `AwaitingServerTest`, `AwaitingDisplayTest`, `AwaitingDisplayPublishTest`, `WidgetAwaitingTest`, `PlaybackRestoreStoreTest`; JS `tests/playbackSource.test.mjs`, `tests/playbackQueue.test.mjs`, `tests/queue-restoration.test.mjs`, `tests/player-layout.test.mjs` (the label), `tests/awaitingPlayer.test.mjs` (the awaited book).
+Tests: `PlaybackSourceResolverTest`, `QueueIdentityTest`, `AwaitingServerTest`, `AwaitingDisplayTest`, `AwaitingDisplayPublishTest`, `AwaitingServiceTest`, `WidgetAwaitingTest`, `PlaybackRestoreStoreTest`; JS `tests/playbackSource.test.mjs`, `tests/playbackQueue.test.mjs`, `tests/queue-restoration.test.mjs`, `tests/player-layout.test.mjs` (the label), `tests/awaitingPlayer.test.mjs` (the awaited book).

@@ -412,7 +412,7 @@ test('Gate F freeze: standard widget layouts, sizing, artwork planning, provider
     // palette, so built-in widgets render exactly as before. Layouts, ids, actions, sizing and artwork are unchanged.
     // Offline-first 6.8: State carries the book a waiting queue is on (title, author, cover from AwaitingDisplay) and
     // updateAppWidget takes a whole State; layouts, ids, actions, sizing and artwork bounds are unchanged.
-    'widget/WidgetRenderer.kt': 'f37da28cbb9ac281783141c71369c326dcf1b808f393b55828ec04b7dd9d200d',
+    'widget/WidgetRenderer.kt': '488ef2776cf83b8a3c8b295e1762168a29a0bbb5fe6fde524a2e71045bafaeba',
     'MediaPlayerWidget.kt': '7da12e737c8c666b4e9c5be96125eb6dfa4ef1acbbfb876282d33596bc7033e8'
   }
   for (const [file, hash] of Object.entries(code)) assert.equal(await sha256(WIDGET_SRC + file), hash, `${file} changed`)

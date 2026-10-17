@@ -45,6 +45,14 @@ class AwaitingDisplayTest {
   }
 
   @Test
+  fun anEpisodeMissingFromTheReplicaShowsNothing() {
+    // The podcast's episodes are not synced yet: its title would name the wrong thing
+    assertNull(awaitingDisplayOf(fixture("podcast-minified.json"), null, null, null, "srv", episodeId = "ep-new"))
+    val episode = fixture("podcast-expanded.json")["media"]["episodes"][0]
+    assertEquals("ep-queued", awaitingDisplayOf(fixture("podcast-minified.json"), episode, null, null, "srv", episodeId = "ep-queued")!!.episodeId)
+  }
+
+  @Test
   fun aFinishedBookIsShownFromTheStart() {
     val book = awaitingDisplayOf(fixture("book-minified.json"), null, progress(7.0, isFinished = true), null, "srv")!!
     assertEquals(0.0, book.currentTime, 0.0)

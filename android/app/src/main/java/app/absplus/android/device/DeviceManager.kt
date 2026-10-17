@@ -242,7 +242,7 @@ object DeviceManager {
     val playbackSession = pns.getCurrentPlaybackSessionCopy() ?: deviceData.lastPlaybackSession
     pns.awaitingDisplay?.let { awaiting ->
       return WidgetRenderer.State(playbackSession, false, true, (awaiting.currentTime * 1000).toLong(),
-              (awaiting.duration * 1000).toLong().takeIf { it > 0 }, awaiting)
+              (awaiting.duration * 1000).toLong().takeIf { it > 0 }, awaiting, pns.awaitingCover?.uri)
     }
     // A position-only redraw keeps the play state the player intends: a seek briefly buffers
     // (isPlaying=false), which the play-state events also ignore

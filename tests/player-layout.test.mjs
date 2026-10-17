@@ -567,7 +567,8 @@ test('Full-player bookmark key: shown for every server book whether or not the s
   const key = src.match(/<span v-if="([^"]*)" class="player-key utility-key bookmark-key[^"]*"[^>]*>bookmark<\/span>/)
   assert.ok(key, 'the bookmark key exists in the utility row')
   // A downloaded copy of another saved server has bookmarks without the active server's ids (bookmarkable)
-  assert.equal(key[1], '!isPodcast && (serverLibraryItemId || bookmarkable)')
+  // Hidden while a queue waits on another book (the bookmarks would be the open book's)
+  assert.equal(key[1], '!isPodcast && !awaitingDisplay && (serverLibraryItemId || bookmarkable)')
   assert.match(key[0], /@click="\$emit\('showBookmarks'\)"/)
   // Order in the row: queue, bookmark, speed, sleep, chapters
   const row = src.slice(src.indexOf('class="utility-row'), src.indexOf('chapters-key'))

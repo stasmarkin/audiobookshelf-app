@@ -307,7 +307,7 @@ class AwaitingServerTest {
   /** runStart is not unit-tested (a service); its source shows a replaced start is not reported as waiting. */
   @Test fun aReplacedQueueStartIsNotReportedAsWaiting() {
     val source = java.io.File("src/main/java/app/absplus/android/player/PlayerNotificationService.kt").readText()
-    assertTrue(source.contains("onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced)"))
-    assertTrue(Regex("""private suspend fun awaitQueueStart\(ticket: StartGate.Ticket, item: PlaylistQueueItem\): AwaitingStart\? \{[\s\S]{0,400}?startGate.admit\(ticket\) \?: return@startAwaiting false""").containsMatchIn(source))
+    assertTrue(source.contains("answer = { started -> onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced) }"))
+    assertTrue(Regex("""private suspend fun awaitQueueStart\(ticket: StartGate.Ticket, item: PlaylistQueueItem, onResult: \(StartResult\) -> Unit\) \{\s*//[^\n]*\n\s*val playWhenReady = startGate.admit\(ticket\) \?: return onResult\(StartResult.Replaced\)""").containsMatchIn(source))
   }
 }

@@ -1,7 +1,10 @@
 package app.absplus.android.player
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import app.absplus.android.data.PlaybackSession
 import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
@@ -38,10 +41,12 @@ data class AwaitingDisplay(
 
 /**
  * The display of a replica row ([itemJson], the minified item) and, for a podcast, its episode row; the position is
- * [progress]'s. Null when the replica has no row (the app then says it waits with a toast).
+ * [progress]'s. Null when the replica has no row (the app then says it waits with a toast), also for an awaited
+ * [episodeId] whose episode is not in the replica yet.
  */
-fun awaitingDisplayOf(itemJson: JsonNode?, episodeJson: JsonNode?, progress: MediaProgressEntity?, coverUri: String?, serverConfigId: String): AwaitingDisplay? {
-  if (itemJson == null) return null
+fun awaitingDisplayOf(itemJson: JsonNode?, episodeJson: JsonNode?, progress: MediaProgressEntity?, coverUri: String?, serverConfigId: String,
+                      episodeId: String? = null): AwaitingDisplay? {
+  if (itemJson == null || (episodeId != null && episodeJson == null)) return null
   val libraryItemId = itemJson.text("id") ?: return null
   val metadata = itemJson.path("media").path("metadata")
   val title = (if (episodeJson != null) episodeJson.text("title") else metadata.text("title")) ?: return null
@@ -52,7 +57,7 @@ fun awaitingDisplayOf(itemJson: JsonNode?, episodeJson: JsonNode?, progress: Med
   }
   // A finished book starts again from the beginning (preparePlayer does the same)
   val currentTime = progress?.takeIf { !it.isFinished }?.currentTime ?: 0.0
-  return AwaitingDisplay(libraryItemId, episodeJson?.text("id"), serverConfigId, title,
+  return AwaitingDisplay(libraryItemId, episodeId ?: episodeJson?.text("id"), serverConfigId, title,
           metadata.text("authorName") ?: metadata.text("author"), coverUri, duration, currentTime)
 }
 
@@ -70,6 +75,12 @@ class AwaitingPresentation(private val onChange: (awaiting: Boolean, display: Aw
   var display: AwaitingDisplay? = null
     private set
   private var displayItem: PlaylistQueueItem? = null
+
+  /** The wait ended because its item starts, and its display stays until that session or a cancel. */
+  val isResuming: Boolean get() = !awaiting && display != null
+
+  /** The queue item the display shows. */
+  val item: PlaylistQueueItem? get() = displayItem
 
   /**
    * A wait began on [item] (null: a lost stream). Without a [read] display, the one already read for the same item
@@ -113,21 +124,38 @@ class AwaitingPresentation(private val onChange: (awaiting: Boolean, display: Aw
 /** The answer of a queue start that waits: the display it showed, if the replica had one. */
 data class AwaitingStart(val display: AwaitingDisplay?)
 
+/** The cover of an awaited item, resolved and decoded off the main thread. */
+data class AwaitingCover(val uri: Uri, val bitmap: Bitmap?)
+
 /**
- * A queue start on an item that can only wait: the display is read before [block] begins the wait, so the start's
- * answer and the wait's first event carry it. Null when [block] found the start replaced meanwhile.
+ * A queue start on an item that can only wait, after what played was paused: the display is read before [block]
+ * begins the wait, so the [answer] and the wait's first event carry it. Not when the start was replaced or the queue
+ * left the item meanwhile ([stillCurrent]): [answer] gets null. A server that came back during the read sent its
+ * online event before the wait existed, so [resumeIfOnline] checks again once the answer is out.
  */
-suspend fun startAwaiting(read: suspend () -> AwaitingDisplay?, block: (AwaitingDisplay?) -> Boolean): AwaitingStart? {
+suspend fun startAwaiting(read: suspend () -> AwaitingDisplay?, stillCurrent: () -> Boolean, block: (AwaitingDisplay?) -> Boolean,
+                          answer: (AwaitingStart?) -> Unit, resumeIfOnline: () -> Unit) {
   val display = read()
-  return if (block(display)) AwaitingStart(display) else null
+  if (!stillCurrent() || !block(display)) return answer(null)
+  answer(AwaitingStart(display))
+  resumeIfOnline()
 }
 
-/** The media session's metadata: the awaited item while a queue waits on it, else the open session. */
-fun nowPlayingMetadata(ctx: Context, session: PlaybackSession?, display: AwaitingDisplay?, waitingLabel: String): MediaMetadataCompat {
+/** The media session's state while an item is awaited: paused at its position; Play (try the server) and Stop only. */
+fun awaitingPlaybackState(display: AwaitingDisplay): PlaybackStateCompat = PlaybackStateCompat.Builder()
+        .setState(PlaybackStateCompat.STATE_PAUSED, (display.currentTime * 1000).toLong(), 0f)
+        .setActions(PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_STOP)
+        .build()
+
+/**
+ * The media session's metadata: the awaited item while a queue waits on it, else the open session. [cover]: the
+ * awaited item's, decoded beforehand (this runs on the main thread).
+ */
+fun nowPlayingMetadata(ctx: Context, session: PlaybackSession?, display: AwaitingDisplay?, waitingLabel: String, cover: Bitmap? = null): MediaMetadataCompat {
   if (display == null) return session?.getMediaMetadataCompat(ctx) ?: MediaMetadataCompat.Builder().build()
-  val cover = display.coverUri?.let { CoverArt.localCoverUri(ctx, it) }?.takeIf { !CoverArt.isUnavailable(it) } ?: CoverArt.defaultUri()
+  val coverUri = CoverArt.defaultUri()
   val author = display.author.orEmpty()
-  return MediaMetadataCompat.Builder()
+  val builder = MediaMetadataCompat.Builder()
           .putString(MediaMetadataCompat.METADATA_KEY_TITLE, display.title)
           .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, display.title)
           .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, waitingLabel)
@@ -137,8 +165,12 @@ fun nowPlayingMetadata(ctx: Context, session: PlaybackSession?, display: Awaitin
           .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, author)
           .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, display.episodeId ?: display.libraryItemId)
           .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, (display.duration * 1000).toLong())
-          .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, cover.toString())
-          .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, cover.toString())
-          .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, cover.toString())
-          .build()
+  if (cover != null) {
+    builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, cover).putBitmap(MediaMetadataCompat.METADATA_KEY_ART, cover)
+  } else {
+    builder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, coverUri.toString())
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, coverUri.toString())
+            .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, coverUri.toString())
+  }
+  return builder.build()
 }

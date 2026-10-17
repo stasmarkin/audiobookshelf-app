@@ -263,7 +263,7 @@ test('a downloaded copy of another server keeps its bookmark button and its own 
   assert.match(container, /<modals-bookmarks-modal [^>]*:library-item-id="bookmarkLibraryItemId" :server-config-id="bookmarkServerConfigId"/)
   assert.match(container, /:bookmarkable="!!bookmarkLibraryItemId"/)
   const player = (await readFile(new URL('../components/app/AudioPlayer.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
-  assert.match(player, /v-if="!isPodcast && \(serverLibraryItemId \|\| bookmarkable\)" class="player-key utility-key bookmark-key/)
+  assert.match(player, /v-if="!isPodcast && !awaitingDisplay && \(serverLibraryItemId \|\| bookmarkable\)" class="player-key utility-key bookmark-key/)
 
   const own = context('server-a')
   assert.equal(own.serverLibraryItemId, 'li-server')

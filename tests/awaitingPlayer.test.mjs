@@ -60,8 +60,8 @@ function playerView(store, playbackSession = store.state.currentPlaybackSession,
   const sandbox = { AbsAudioPlayer: native, console: { ...console, log: () => {} }, Capacitor: { convertFileSrc: (v) => `converted:${v}` }, Dialog: {}, getAverageColorFromCoverUrl: () => null, normalizePlaybackRate: (v) => v, formatPlaybackRate: String, coverPresentation: {}, playerLayout: {}, WrappingMarquee: function () {}, jumpLabelMixin: {}, COARSE_STEP_S: 60, coarseTime: (v) => v, coarseClock: String, sleepRemainingLabel: String, createPainter: () => () => {} }
   vm.runInNewContext(strip(playerSource), sandbox)
   const { computed, methods } = sandbox.component
-  const view = { $store: store, $strings: { LabelWaitingForServer: 'Waiting for server' }, $platform: 'android', playbackSession, showFullscreen: false, currentChapterTitle: '', isLoading: false, isCheckingServerProgress: false }
-  for (const name of ['awaitingDisplay', 'awaitingServer', 'isPlayerOpen', 'mediaMetadata', 'libraryItem', 'localLibraryItem', 'localLibraryItemCoverSrc', 'coverLibraryItem', 'coverDownloadSrc', 'title', 'authorName', 'authorLine']) {
+  const view = { $store: store, $strings: { LabelWaitingForServer: 'Waiting for server', ButtonHistory: 'History' }, $platform: 'android', playbackSession, showFullscreen: false, currentChapterTitle: '', isLoading: false, isCheckingServerProgress: false, playerSettings: {} }
+  for (const name of ['awaitingDisplay', 'awaitingServer', 'isPlayerOpen', 'mediaMetadata', 'libraryItem', 'localLibraryItem', 'localLibraryItemCoverSrc', 'coverLibraryItem', 'coverDownloadSrc', 'title', 'authorName', 'authorLine', 'mediaType', 'isPodcast', 'mediaId', 'chapters', 'menuItems']) {
     Object.defineProperty(view, name, { get: () => computed[name].call(view), configurable: true })
   }
   for (const [name, fn] of Object.entries(methods)) view[name] = fn.bind(view)
@@ -157,4 +157,19 @@ test('the player template opens for a session or an awaited book', () => {
   const template = playerSource.slice(0, playerSource.indexOf('</template>'))
   assert.match(template, /<div v-if="isPlayerOpen" id="streamContainer"/)
   assert.match(template, /<covers-book-cover v-if="coverLibraryItem \|\| coverDownloadSrc"[^>]*:library-item="coverLibraryItem"[^>]*:download-cover="coverDownloadSrc"/)
+})
+
+test("the open book's own actions are hidden under the awaited book", () => {
+  const store = newStore()
+  store.commit('setPlaybackSession', { ...sessionA, chapters: [{ id: 0, start: 0, end: 10, title: 'One' }] })
+  const actions = (view) => view.menuItems.map((item) => item.value)
+  assert.ok(actions(playerView(store)).includes('history'), 'book A alone has its history')
+  assert.equal(playerView(store).chapters.length, 1)
+  container(store, {}).onAwaitingServer({ awaiting: true, display: displayB })
+  const view = playerView(store)
+  assert.ok(!actions(view).includes('history'), "no history of book A under book B's title")
+  assert.equal(view.chapters.length, 0, "book A's chapters are not B's")
+  assert.ok(actions(view).includes('close'), 'Close still ends the wait')
+  const template = playerSource.slice(0, playerSource.indexOf('</template>'))
+  assert.match(template, /<span v-if="!isPodcast && !awaitingDisplay && \(serverLibraryItemId \|\| bookmarkable\)" class="player-key utility-key bookmark-key/)
 })

@@ -95,6 +95,8 @@ const val PLAYER_EXO = "exo-player"
 const val NO_AUDIO_FILES_MESSAGE = "No audio files found on device. Download book again to fix."
 private const val PROGRESS_ROW_TIMEOUT_MS = 3_000L
 private const val SERVER_PROGRESS_TIMEOUT_MS = 10_000L
+// A queue start waits this long at most for the awaited item's display; without one the app shows a toast
+private const val AWAITING_READ_TIMEOUT_MS = 1_000L
 
 class PlayerNotificationService : MediaBrowserServiceCompat() {
 
@@ -168,9 +170,16 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   // A stream that lost its server, or a queue stopped at an item it can only stream, waits here instead of closing
   val awaiting = AwaitingServer()
-  private val awaitingPresentation = AwaitingPresentation { shown, display -> onAwaitingPresentationChanged(shown, display) }
+  internal val awaitingPresentation = AwaitingPresentation { shown, display -> onAwaitingPresentationChanged(shown, display) }
   /** The book a waiting queue is on, shown instead of the open session (or of nothing). */
   val awaitingDisplay: AwaitingDisplay? get() = awaitingPresentation.display
+  private var awaitingCovers: Pair<AwaitingDisplay, AwaitingCover>? = null
+  /** The cover of [awaitingDisplay], resolved off the main thread when it was read. */
+  val awaitingCover: AwaitingCover? get() = awaitingCovers?.takeIf { it.first == awaitingDisplay }?.second
+  // The start that resumes the awaited item, while its display stays on screen
+  private var resumingTicket: StartGate.Ticket? = null
+  // The connector would publish the open session's state and positions under the awaited item's title
+  private var sessionDetachedForAwaiting = false
   // The notification of a wait with no session to draw one (same id: a prepared session's notification replaces it)
   private var awaitingNotificationShown = false
   private var lastStreamError = ""
@@ -607,10 +616,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     startScope.launch {
       var previous: String? = null
       ServerReachability.serverConfigId.collect { id ->
-        if (previous != null && previous != id) startGate.invalidate()
+        onActiveServerChanged(previous, id)
         previous = id
-        val waitingFor = awaiting.serverConfigId
-        if (waitingFor != null && waitingFor != id) onServerSwitchedWhileAwaiting()
       }
     }
   }
@@ -761,6 +768,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     AbsLogger.info("PlayerNotificationService", "preparePlayer: Started playback session for item ${currentPlaybackSession?.mediaItemId}. MediaPlayer ${currentPlaybackSession?.mediaPlayer}")
     // Notify client
     clientEventEmitter?.onPlaybackSession(playbackSession)
+    resumingTicket = null
     awaitingPresentation.end()
 
     // Update widget
@@ -987,8 +995,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       perform(action)
       return false
     }
+    resumingTicket = null
     awaitingPresentation.begin(item, display)
-    if (readDisplay) startScope.launch { publishAwaitingDisplay(item, readAwaitingDisplay(item, serverConfigId)) }
+    if (readDisplay) startScope.launch {
+      val read = readAwaitingDisplay(item, serverConfigId)
+      rememberCover(read)
+      publishAwaitingDisplay(item, read?.first)
+    }
     // Checks the server at once instead of at the next backoff step (when there is a network)
     ServerReachability.retryNow()
     return true
@@ -999,23 +1012,36 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     awaitingPresentation.onRead(item, display, awaiting.blockedItem)
   }
 
-  /** What the replica knows of [item] for the player while the queue waits on it; null without a row. */
-  private suspend fun readAwaitingDisplay(item: PlaylistQueueItem, serverConfigId: String): AwaitingDisplay? {
-    val progress = progressRow(serverConfigId, item.libraryItemId, item.episodeId)
-    return try {
+  // Before the display is shown, so everything that draws it finds its cover
+  private fun rememberCover(read: Pair<AwaitingDisplay, AwaitingCover?>?) {
+    val cover = read?.second ?: return
+    awaitingCovers = read.first to cover
+  }
+
+  /**
+   * What the replica knows of [item] for the player while the queue waits on it, and its cover decoded; null without a
+   * row, or when the read takes too long to hold up the start.
+   */
+  private suspend fun readAwaitingDisplay(item: PlaylistQueueItem, serverConfigId: String): Pair<AwaitingDisplay, AwaitingCover?>? = try {
+    withTimeoutOrNull(AWAITING_READ_TIMEOUT_MS) {
+      val progress = progressRow(serverConfigId, item.libraryItemId, item.episodeId)
       withContext(Dispatchers.IO) {
         val replica = ReplicaDatabase.get(ctx)
         val row = replica.items().get(serverConfigId, item.libraryItemId) ?: return@withContext null
         val episode = item.episodeId?.let { replica.episodes().byIds(serverConfigId, listOf(it)).firstOrNull() }
         // An incomplete copy streams too; its cover is the only one there is offline
         val copy = DeviceManager.dbManager.getLocalLibraryItemByLId(item.libraryItemId)?.takeIf { it.serverConnectionConfigId == serverConfigId }
-        awaitingDisplayOf(CatalogJson.mapper.readTree(row.json), episode?.let { CatalogJson.mapper.readTree(it.json) }, progress,
-                copy?.coverContentUrl, serverConfigId)
+        val display = awaitingDisplayOf(CatalogJson.mapper.readTree(row.json), episode?.let { CatalogJson.mapper.readTree(it.json) }, progress,
+                copy?.coverContentUrl, serverConfigId, item.episodeId) ?: return@withContext null
+        // Resolving a cover on an SD card may copy it: never on the main thread
+        val cover = display.coverUri?.let { CoverArt.localCoverUri(ctx, it) }
+                ?.let { uri -> AwaitingCover(uri, CoverArt.decodeLocal(ctx, uri, "awaiting item")) }
+        display to cover
       }
-    } catch (e: Exception) {
-      DLog.w(tag, "Could not read the replica for ${item.libraryItemId}: $e")
-      null
     }
+  } catch (e: Exception) {
+    DLog.w(tag, "Could not read the replica for ${item.libraryItemId}: $e")
+    null
   }
 
   private fun onAwaitingPresentationChanged(shown: Boolean, display: AwaitingDisplay?) {
@@ -1024,11 +1050,28 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     DeviceManager.widgetUpdater?.onPlayerChanged(this)
   }
 
-  // The media session, and the notification: the player's own with a session, else the wait's
+  /**
+   * The media session and the notification. While an item is awaited the connector is detached: it would publish the
+   * open session's state, whose seeks would move that session under the awaited item's title.
+   */
   private fun refreshNowPlaying(display: AwaitingDisplay?) {
     // Not created yet (a bare instance in tests)
     if (!::mediaSessionConnector.isInitialized) return
-    mediaSessionConnector.invalidateMediaSessionMetadata()
+    if (display != null) {
+      if (!sessionDetachedForAwaiting) {
+        mediaSessionConnector.setPlayer(null)
+        sessionDetachedForAwaiting = true
+      }
+      mediaSession.setMetadata(nowPlayingMetadata(ctx, currentPlaybackSession, display, getString(R.string.waiting_for_server), awaitingCover?.bitmap))
+      mediaSession.setPlaybackState(awaitingPlaybackState(display))
+    } else {
+      if (sessionDetachedForAwaiting) {
+        mediaSessionConnector.setPlayer(currentPlayer)
+        sessionDetachedForAwaiting = false
+      }
+      mediaSessionConnector.invalidateMediaSessionMetadata()
+      mediaSessionConnector.invalidateMediaSessionPlaybackState()
+    }
     if (currentPlaybackSession != null) {
       awaitingNotificationShown = false
       playerNotificationManager.invalidate()
@@ -1037,31 +1080,24 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     } else if (awaitingNotificationShown) {
       awaitingNotificationShown = false
       if (!isMediaButtonPlaceholderForeground) NotificationManagerCompat.from(this).cancel(notificationId)
-      mediaSessionConnector.invalidateMediaSessionPlaybackState()
     }
   }
 
   // With nothing prepared the player draws no notification: this one names the awaited item, paused, with Play
   private fun showAwaitingNotification(display: AwaitingDisplay) {
     if (isMediaButtonPlaceholderForeground) return
-    val cover = display.coverUri?.let { CoverArt.decodeLocal(this, CoverArt.localCoverUri(this, it), "awaiting notification") }
     val play = MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_PLAY)
     val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.icon_monochrome)
             .setContentTitle(display.title)
             .setContentText(getString(R.string.waiting_for_server))
-            .setLargeIcon(cover)
+            .setLargeIcon(awaitingCover?.bitmap)
             .setContentIntent(mediaSession.controller.sessionActivity)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSilent(true)
             .addAction(androidx.mediarouter.R.drawable.ic_media_play_dark, getString(R.string.widget_play_pause), play)
             .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0))
             .build()
-    // The player is idle with nothing to report: the lock screen shows the item paused until a session replaces it
-    mediaSession.setPlaybackState(PlaybackStateCompat.Builder()
-            .setState(PlaybackStateCompat.STATE_PAUSED, (display.currentTime * 1000).toLong(), 0f)
-            .setActions(PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PLAY_PAUSE)
-            .build())
     try {
       NotificationManagerCompat.from(this).notify(notificationId, notification)
       awaitingNotificationShown = true
@@ -1070,9 +1106,24 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
   }
 
-  // The queue left the item a resume was starting without preparing it: nothing shows it any more
-  private fun dropResumingDisplay() {
-    if (!awaiting.isAwaiting) awaitingPresentation.end()
+  // The resume start [ticket] ended without preparing its item (replaced, failed, the queue moved on): nothing shows it
+  private fun dropResumingDisplay(ticket: StartGate.Ticket) {
+    if (ticket !== resumingTicket) return
+    resumingTicket = null
+    if (awaitingPresentation.isResuming) awaitingPresentation.end()
+  }
+
+  internal fun onActiveServerChanged(previous: String?, id: String?) {
+    if (previous != null && previous != id) {
+      startGate.invalidate()
+      // The resume of the old server's item went with its start
+      if (awaitingPresentation.isResuming) {
+        resumingTicket = null
+        awaitingPresentation.end()
+      }
+    }
+    val waitingFor = awaiting.serverConfigId
+    if (waitingFor != null && waitingFor != id) onServerSwitchedWhileAwaiting()
   }
 
   private fun onServerSwitchedWhileAwaiting() {
@@ -1130,11 +1181,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       val current = playlistQueue.getOrNull(playlistQueueIndex)
       if (current != queued) {
         DLog.i(tag, "Server is back but the queue moved on from ${queued.libraryItemId} - not resuming it")
-        dropResumingDisplay()
+        awaitingPresentation.end()
         return
       }
       DLog.i(tag, "Server is back - continuing the queue with ${current.libraryItemId}")
-      startQueueItem(current, action.playWhenReady)
+      resumingTicket = startQueueItem(current, action.playWhenReady)
       return
     }
     DLog.i(tag, "Server is back - resuming ${action.libraryItemId} at ${action.position}s (playWhenReady=${action.playWhenReady})")
@@ -1199,8 +1250,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   /** The app replaced or cleared the queue: a queue that waited on an item no longer current stops waiting. */
   fun onQueueReplaced() {
-    val blocked = awaiting.blockedItem ?: return
-    if (playlistQueue.getOrNull(playlistQueueIndex) != blocked) stopAwaiting(CancelReason.OTHER_ITEM_STARTED)
+    val current = playlistQueue.getOrNull(playlistQueueIndex)
+    val blocked = awaiting.blockedItem
+    if (blocked != null) {
+      if (current != blocked) stopAwaiting(CancelReason.OTHER_ITEM_STARTED)
+    } else if (awaitingPresentation.isResuming && awaitingPresentation.item != current) {
+      resumingTicket = null
+      awaitingPresentation.end()
+    }
   }
 
   fun onPlaybackReady() = awaiting.onPlaybackReady()
@@ -1347,8 +1404,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         // Without an active server there is nothing to wait for: the start fails as before
         val queued = ActiveServer.current()?.let { queueItemToAwait(request, plan, playlistQueue, playlistQueueIndex, ServerReachability.state.value) }
         if (queued != null) {
-          val started = awaitQueueStart(ticket, queued)
-          onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced)
+          awaitQueueStart(ticket, queued, onResult)
           return@launch
         }
         val payload = getPlayItemRequestPayload(false)
@@ -1374,23 +1430,30 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   /**
    * The app started the queue on an item it cannot stream now: what plays stops, the queue waits on the item, shown
-   * from the replica. Null when another start, Close or a server switch replaced this one.
+   * from the replica. [onResult] gets Replaced when another start, Close, a server switch or a queue change came first.
    */
-  private suspend fun awaitQueueStart(ticket: StartGate.Ticket, item: PlaylistQueueItem): AwaitingStart? {
-    val serverConfigId = ActiveServer.current()?.id
-    return startAwaiting({ serverConfigId?.let { readAwaitingDisplay(item, it) } }) { display ->
-      // Read before the pause below, which would turn the intent of this start into a paused one
-      val playWhenReady = startGate.admit(ticket) ?: return@startAwaiting false
-      if (currentPlayer.playWhenReady) {
-        pauseOrigin.beforeSelfPause(true)
-        currentPlayer.pause()
-        mainHandler.post { pauseOrigin.settle() }
-      }
-      if (mediaProgressSyncer.listeningTimerRunning) mediaProgressSyncer.pause {}
-      PlayerListener.lazyIsPlaying = false
-      clientEventEmitter?.onPlayingUpdate(false)
-      blockQueue(item, playWhenReady, display, readDisplay = false)
+  private suspend fun awaitQueueStart(ticket: StartGate.Ticket, item: PlaylistQueueItem, onResult: (StartResult) -> Unit) {
+    // Read before the pause below, which would turn the intent of this start into a paused one
+    val playWhenReady = startGate.admit(ticket) ?: return onResult(StartResult.Replaced)
+    if (currentPlayer.playWhenReady) {
+      pauseOrigin.beforeSelfPause(true)
+      currentPlayer.pause()
+      mainHandler.post { pauseOrigin.settle() }
     }
+    if (mediaProgressSyncer.listeningTimerRunning) mediaProgressSyncer.pause {}
+    PlayerListener.lazyIsPlaying = false
+    clientEventEmitter?.onPlayingUpdate(false)
+    val serverConfigId = ActiveServer.current()?.id
+    var read: Pair<AwaitingDisplay, AwaitingCover?>? = null
+    startAwaiting(
+            read = { read = serverConfigId?.let { readAwaitingDisplay(item, it) }; read?.first },
+            stillCurrent = { startGate.admit(ticket) != null && playlistQueue.getOrNull(playlistQueueIndex) == item },
+            block = { display ->
+              rememberCover(read)
+              blockQueue(item, playWhenReady, display, readDisplay = false)
+            },
+            answer = { started -> onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced) },
+            resumeIfOnline = { perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission())) })
   }
 
   private fun prepareAdmitted(ticket: StartGate.Ticket, session: PlaybackSession, request: StartRequest) {
@@ -1494,7 +1557,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     startQueueItem(nextItem, true)
   }
 
-  private fun startQueueItem(nextItem: PlaylistQueueItem, playWhenReady: Boolean) {
+  private fun startQueueItem(nextItem: PlaylistQueueItem, playWhenReady: Boolean): StartGate.Ticket {
     val playbackRate = initialPlaybackRate ?: 1f
 
     // Acquire a temporary WakeLock to keep the CPU alive during playlist advancement
@@ -1507,6 +1570,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       val plan = planFor(StartRequest.forQueueItem(nextItem, playWhenReady, playbackRate))
       // A newer start, Close or a server switch came first: leave everything to it
       if (startGate.admit(ticket) == null) {
+        dropResumingDisplay(ticket)
         if (wakeLock.isHeld) wakeLock.release()
         return@launch
       }
@@ -1518,18 +1582,20 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             playlistQueue = emptyList()
             playlistQueueIndex = -1
           }
-          dropResumingDisplay()
+          dropResumingDisplay(ticket)
           if (wakeLock.isHeld) wakeLock.release()
         }
         is PlaybackSource.Local -> {
           val startTime = localStartTime(plan.item, plan.episode, nextItem.libraryItemId)
           if (startGate.admit(ticket) == null) {
+            dropResumingDisplay(ticket)
             if (wakeLock.isHeld) wakeLock.release()
             return@launch
           }
           val pinned = pinLocal(plan, ticket)
           if (startGate.admit(ticket) == null) {
             releaseStalePin(ticket)
+            dropResumingDisplay(ticket)
             if (wakeLock.isHeld) wakeLock.release()
             return@launch
           }
@@ -1539,7 +1605,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               playlistQueue = emptyList()
               playlistQueueIndex = -1
             }
-            dropResumingDisplay()
+            dropResumingDisplay(ticket)
             if (wakeLock.isHeld) wakeLock.release()
             return@launch
           }
@@ -1551,6 +1617,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               prepareQueued(ticket, playbackSession, playbackRate)
             } else {
               releaseStalePin(ticket)
+              dropResumingDisplay(ticket)
             }
             if (wakeLock.isHeld) wakeLock.release()
           }
@@ -1595,6 +1662,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         }
       }
     }
+    return ticket
   }
 
   private fun prepareQueued(ticket: StartGate.Ticket, session: PlaybackSession, playbackRate: Float) {
@@ -1602,6 +1670,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (playWhenReady == null) {
       DLog.i(tag, "advancePlaylistQueue: replaced by another start - not preparing")
       releaseStalePin(ticket)
+      dropResumingDisplay(ticket)
       return
     }
     sessionExpectedTracks = session.id to playlistQueue.getOrNull(playlistQueueIndex)?.expectedTracks
@@ -1611,12 +1680,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   // Waits on the queue item, unless another start or Close replaced this one meanwhile
   private fun blockQueueFor(ticket: StartGate.Ticket, item: PlaylistQueueItem) {
-    val playWhenReady = startGate.admit(ticket) ?: return
+    val playWhenReady = startGate.admit(ticket) ?: return dropResumingDisplay(ticket)
     blockQueue(item, playWhenReady)
   }
 
   private fun advancePlaylistQueueServerItem(nextItem: PlaylistQueueItem, plan: PlaybackSource.Stream, ticket: StartGate.Ticket, playbackRate: Float, wakeLock: PowerManager.WakeLock, wifiLock: WifiManager.WifiLock, retryCount: Int) {
     if (playlistQueue.getOrNull(playlistQueueIndex) !== nextItem || startGate.admit(ticket) == null) {
+      dropResumingDisplay(ticket)
       if (wifiLock.isHeld) wifiLock.release()
       if (wakeLock.isHeld) wakeLock.release()
       return
@@ -1640,7 +1710,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         DLog.d(tag, "advancePlaylistQueue: Got server session, calling preparePlayer for ${plan.libraryItemId}")
         startScope.launch {
           if (startGate.admit(ticket) != null) applyStreamStart(session, null)
-          if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) prepareQueued(ticket, session, playbackRate)
+          if (playlistQueue.getOrNull(playlistQueueIndex) === nextItem) prepareQueued(ticket, session, playbackRate) else dropResumingDisplay(ticket)
           if (wifiLock.isHeld) wifiLock.release()
           if (wakeLock.isHeld) wakeLock.release()
         }
@@ -1650,7 +1720,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         } else {
           // The server answered with an error: nothing to wait for
           DLog.e(tag, "advancePlaylistQueue: Server play request failed for ${plan.libraryItemId} after ${retryCount + 1} attempts, giving up")
-          dropResumingDisplay()
+          dropResumingDisplay(ticket)
         }
         if (wifiLock.isHeld) wifiLock.release()
         if (wakeLock.isHeld) wakeLock.release()
@@ -2166,8 +2236,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   /** Notification FF/RW must use current settings, rather than the increments captured at player creation. */
   internal fun notificationControls(player: Player): Player = object : ForwardingPlayer(player) {
-    override fun seekForward() = jumpForward()
-    override fun seekBack() = jumpBackward()
+    // While an item is awaited its notification shows it: the keys must not move or play the open session
+    override fun seekForward() { if (awaitingDisplay == null) jumpForward() }
+    override fun seekBack() { if (awaitingDisplay == null) jumpBackward() }
+    override fun play() { if (awaiting.isAwaiting || awaitingDisplay != null) this@PlayerNotificationService.play() else super.play() }
     override fun getSeekForwardIncrement(): Long = deviceSettings.jumpForwardTimeMs
     override fun getSeekBackIncrement(): Long = deviceSettings.jumpBackwardsTimeMs
   }

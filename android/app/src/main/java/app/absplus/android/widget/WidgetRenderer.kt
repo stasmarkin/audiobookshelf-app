@@ -49,7 +49,7 @@ object WidgetRenderer {
 
   /**
    * What the widget shows; positions are milliseconds from the start of the item. [awaiting]: the item a waiting queue
-   * is on, shown over [session].
+   * is on, shown over [session], with its cover resolved beforehand ([awaitingCoverUri]; null: the app icon).
    */
   data class State(
     val session: PlaybackSession?,
@@ -57,7 +57,8 @@ object WidgetRenderer {
     val showControls: Boolean,
     val positionMs: Long?,
     val durationMs: Long?,
-    val awaiting: AwaitingDisplay? = null
+    val awaiting: AwaitingDisplay? = null,
+    val awaitingCoverUri: Uri? = null
   ) {
     val title: String? get() = awaiting?.title ?: session?.displayTitle
     val author: String? get() = if (awaiting != null) awaiting.author else session?.displayAuthor
@@ -235,8 +236,8 @@ object WidgetRenderer {
   }
 
   private fun artworkUri(context: Context, state: State): Uri {
-    val awaiting = state.awaiting ?: return state.session?.getCoverUri(context) ?: CoverArt.defaultUri()
-    return awaiting.coverUri?.let { CoverArt.localCoverUri(context, it) } ?: CoverArt.defaultUri()
+    if (state.awaiting == null) return state.session?.getCoverUri(context) ?: CoverArt.defaultUri()
+    return state.awaitingCoverUri ?: CoverArt.defaultUri()
   }
 
   // Loads the cover off the main thread (same Glide source as before), then redraws with it. A responsive
