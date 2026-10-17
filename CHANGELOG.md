@@ -7,6 +7,21 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Book, podcast and episode pages offline:** every book, podcast and episode page opens from the catalog copy,
+  online at once and offline too, also after a cold start in airplane mode. Online the page then fills in the
+  chapters, tracks and files within a second; the full copy is fetched once per version of the book, so opening it
+  again costs no request, and it stays available offline. Tapping a card or a search result that is not downloaded
+  now opens its page instead of a "Not available offline" toast; there Play and Read are shown disabled with "Not
+  available offline". A downloaded book plays from the phone with its chapters, even if it was never opened online.
+  A podcast offline lists its episodes; downloaded episodes play, the others are marked, and the podcast's Play picks
+  the next downloaded episode. Latest episodes open offline. A book deleted on the server returns to the bookshelf,
+  or opens its downloaded copy. Known limits: a book never opened online shows "Chapters appear after you open this
+  book online once" instead of its chapters; an episode edited on the server shows the change offline only after the
+  podcast itself changes next.
+- **Server-only buttons say so offline:** downloads (book, episode, series, "Download & Play", Retry), playlists,
+  removing an episode from the server, RSS feeds, sending an e-book to a device, e-book file status, the web client,
+  statistics and Year in Review, adding a podcast and searching its feed stay visible offline, greyed out with
+  "Requires the server", and do nothing when tapped.
 - **Android Auto without a reachable server** (issue #33, Discussion #30): the Android Auto menu now opens at once
   with Downloads, instead of waiting for the server checks. With a server that was unreachable or stalled, the menu used
   to appear only after the connection attempts gave up (about 3 s per saved server, or about 30 s when the server
