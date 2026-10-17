@@ -88,7 +88,8 @@ export function catalogTopics(event, payload, currentLibraryId) {
  *   Paper progress of downloaded copies. Writes ("finished", reset, e-book position) go to native and work offline.
  * - Another saved server becoming active clears the user's data in the store and reads that server's; an answer that
  *   was asked for the previous server is dropped.
- * - The catalog (libraries, items, series, authors, collections, the user's playlists, the home shelves and search) is read from native replica.db, at most 100 entities a call. While a library was
+ * - The catalog (libraries, items, series, authors, collections, the user's playlists, the home shelves, search, one
+ *   item and the latest episodes) is read from native replica.db, at most 100 entities a call. While a library was
  *   never reconciled (or the filter needs data the replica lacks) and the server is online, the same request goes to
  *   the server instead. `onDataChanged {scope:'catalog'}` keeps the libraries in the store current.
  * - In the browser (`platform: 'web'`, development only) there is no native side: everything goes straight to the
@@ -544,6 +545,32 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
     return withServerFallback(answer, `${libraryPath(libraryId)}/search?q=${encodeURIComponent(q)}&limit=${limit}`, searchShape(libraryId, q), () => search(args))
   }
 
+  /**
+   * Native reads the server itself when asked to `refresh` (the expanded copy of the active server's item), so there is
+   * no fallback here.
+   */
+  const getLibraryItem = async ({ id, refresh = false, force = false }) => {
+    if (isWeb) {
+      let libraryItem = null
+      try {
+        libraryItem = await $axios.$get(`/api/items/${encodeURIComponent(id)}?expanded=1&include=rssfeed`)
+      } catch (error) {
+        if (error?.response?.status !== 404) throw error
+      }
+      return { serverConfigId: activeServer(), libraryItem, detailLevel: libraryItem ? 'expanded' : null, replica: webReplica() }
+    }
+    return fromNative(() => plugin.getLibraryItem({ id, refresh: !!refresh, force: !!force }))
+  }
+
+  const getRecentEpisodes = async (args) => {
+    const { libraryId, limit, page = 0 } = args
+    const path = `${libraryPath(libraryId)}/recent-episodes?limit=${limit}&page=${page}`
+    const shape = (data) => ({ episodes: data?.episodes || [], total: data?.total ?? (data?.episodes || []).length, limit, page })
+    if (isWeb) return { ...shape(await $axios.$get(path)), serverConfigId: activeServer(), replica: webReplica() }
+    const answer = await fromNative(() => plugin.getRecentEpisodes({ libraryId, limit, page }))
+    return withServerFallback(answer, path, shape, () => getRecentEpisodes(args))
+  }
+
   // Without this the indicator stays hidden until something else asks
   getServerState().catch((error) => console.error('[data] Could not read the server state', error))
   if (!isWeb && plugin.getSyncState) {
@@ -692,6 +719,19 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
      * `podcast`, `episodes`, `series`, `authors`, `narrators`, `tags`, `genres`); `limit` (a group) 1..25.
      */
     search,
+    /**
+     * One item in the expanded shape: `{ serverConfigId, libraryItem, detailLevel, replica, fromServer?, removed? }`.
+     * `detailLevel` 'expanded' | 'stale' (a copy of an older version under the current metadata) | 'minified' (no
+     * chapters or tracks, only their counts) | null (not in the replica). `refresh`: the user opened it, so native asks
+     * the server for the expanded copy while online when the replica lacks it (`force`: always); `removed` when the
+     * server no longer has it. A podcast carries all its episodes.
+     */
+    getLibraryItem,
+    /**
+     * A page of a podcast library's latest unfinished episodes: `{ serverConfigId, episodes, total, limit, page, replica,
+     * fromServer? }`, each episode with `libraryId` and its `podcast`; `limit` at most 100.
+     */
+    getRecentEpisodes,
     /** The library native reconciles first. */
     async setCurrentLibrary({ libraryId }) {
       if (isWeb || !plugin.setCurrentLibrary) return

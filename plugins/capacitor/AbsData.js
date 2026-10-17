@@ -94,6 +94,14 @@ class AbsDataWeb extends WebPlugin {
     return { serverConfigId: null, libraryId, q, results, replica: { reconciledAt: null, complete: false } }
   }
 
+  async getLibraryItem() {
+    return { serverConfigId: null, libraryItem: null, detailLevel: null, replica: { reconciledAt: null, complete: false } }
+  }
+
+  async getRecentEpisodes({ limit, page }) {
+    return { serverConfigId: null, episodes: [], total: 0, limit, page, replica: { reconciledAt: null, complete: false } }
+  }
+
   async setCurrentLibrary() {}
 }
 
