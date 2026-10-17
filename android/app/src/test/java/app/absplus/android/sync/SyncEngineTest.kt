@@ -413,7 +413,7 @@ class SyncEngineTest {
       if (request.method == "GET" && bumps.getAndDecrement() > 0) ApiHandler.invalidateAuthRequests()
       if (request.method == "GET") 200 to serverBookmarks else 200 to "{}"
     }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the redone pull applies the bookmarks") { db.bookmarks().getVisible("srv").size == 2 }
     settle()
@@ -430,7 +430,7 @@ class SyncEngineTest {
         200 to serverBookmarks
       } else 200 to "{}"
     }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the pull and its redo") { gets() == 2 }
     settle()
