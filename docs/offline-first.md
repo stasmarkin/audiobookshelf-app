@@ -280,11 +280,11 @@ Audiobookshelf+ works without its server: the catalog, Home, search and item pag
 - **Reconcile while Auto is in use:** a request of Android Auto or Automotive (not a watch or the Google app) opens a 10-minute lease (`SyncRuntime.onAutoActivity`, `AUTO_RECONCILE_LEASE_MS`); while it runs, `SyncRuntime.mayReconcile` lets a reconcile run as in the foreground. A new lease syncs as a foreground return does, so a reconcile deferred in the background (a process Auto started defers its start's reconcile) runs on the first connection. A pass that outlives the lease is finished, and the next one waits for the foreground or a new lease. This extends "reconcile only in the foreground": in the car Android Auto is the user's foreground. Mobile data is allowed, as for the app.
 - **Cover icons:** an item's icon is the cover cache's file (`content://`, `FileProvider` path `cover_cache`, granted to the browser that asked and to the Auto hosts), else the saved active server's URL unless it is away, else the app icon (`autoCoverUri`). After a node's answer online, up to 50 covers its items lack are downloaded into the cache (`CoverCache.prefetch`, the same single download and parallelism as the WebView's; one still queued when the server is switched is dropped).
 - **Decisions:**
-  - Р18: an undownloaded item chosen offline shows "Not available offline" at once; it does not wait for the server.
-  - Р19: an undownloaded item is marked offline in its subtitle (Auto has no disabled state for an item).
-  - Р20: the catalog reconciles while Android Auto is in use (10-minute lease), as in the foreground.
-  - Р21: "play <title>" by voice without the server prefers a downloaded match, otherwise the first match.
-  - Р22: Play without a choice resumes the latest started book or episode, otherwise the first downloaded book.
+  - An undownloaded item chosen offline shows "Not available offline" at once; it does not wait for the server.
+  - An undownloaded item is marked offline in its subtitle (Auto has no disabled state for an item).
+  - The catalog reconciles while Android Auto is in use (10-minute lease), as in the foreground.
+  - "play <title>" by voice without the server prefers a downloaded match, otherwise the first match.
+  - Play without a choice resumes the latest started book or episode, otherwise the first downloaded book.
 
 ## Risks
 
