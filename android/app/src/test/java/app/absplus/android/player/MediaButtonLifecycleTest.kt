@@ -112,6 +112,16 @@ class MediaButtonLifecycleTest {
   }
 
   @Test
+  fun aStartAfterAStopTheBindingOutlivedIsNotGoingAway() {
+    val system = FakeSystem()
+    val stopper = ServiceStopper(system::stopSelfResult)
+    stopper.onStartCommand(system.issueStart())
+    assertTrue(stopper.stop())
+    stopper.onStartCommand(system.issueStart())
+    assertFalse(stopper.isStopPending)
+  }
+
+  @Test
   fun repeatedRapidPressesOnlyStopAfterTheLastDeliveredStart() {
     val system = FakeSystem()
     val stopper = ServiceStopper(system::stopSelfResult)
