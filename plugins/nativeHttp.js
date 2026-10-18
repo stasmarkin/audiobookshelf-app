@@ -13,7 +13,10 @@ const UNREACHABLE_ERROR_CODES = new Set([
   'SSLHandshakeException',
   'SSLPeerUnverifiedException',
   'InterruptedIOException',
-  'SocketException'
+  'SocketException',
+  // A connection dropped mid-exchange ("unexpected end of stream"): native ApiHandler counts it as unreachable too
+  'IOException',
+  'EOFException'
 ])
 
 export default function ({ store, $authRenewal }, inject) {
