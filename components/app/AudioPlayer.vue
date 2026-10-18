@@ -24,7 +24,7 @@
       </div>
 
       <!-- Playback method indicator (Direct/Local/Transcode) -->
-      <p class="playback-method top-4 absolute left-0 right-0 mx-auto text-center uppercase tracking-widest text-opacity-75 z-50" :class="{ 'text-black text-opacity-75': coverChrome.darkForeground }" style="font-size: 10px">{{ isDirectPlayMethod ? $strings.LabelPlaybackDirect : isLocalPlayMethod ? $strings.LabelPlaybackLocal : $strings.LabelPlaybackTranscode }}</p>
+      <p v-if="playbackMethodLabel" class="playback-method top-4 absolute left-0 right-0 mx-auto text-center uppercase tracking-widest text-opacity-75 z-50" :class="{ 'text-black text-opacity-75': coverChrome.darkForeground }" style="font-size: 10px">{{ playbackMethodLabel }}</p>
     </div>
 
     <!-- Overall book progress bar -->
@@ -447,6 +447,11 @@ export default {
     },
     isDirectPlayMethod() {
       return this.playMethod == this.$constants.PlayMethod.DIRECTPLAY
+    },
+    playbackMethodLabel() {
+      // The open session's method is not the awaited book's, which only the server's answer decides
+      if (this.awaitingDisplay) return ''
+      return this.isDirectPlayMethod ? this.$strings.LabelPlaybackDirect : this.isLocalPlayMethod ? this.$strings.LabelPlaybackLocal : this.$strings.LabelPlaybackTranscode
     },
     title() {
       if (this.awaitingDisplay) return this.awaitingDisplay.title

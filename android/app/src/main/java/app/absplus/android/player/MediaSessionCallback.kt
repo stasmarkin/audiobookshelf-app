@@ -216,9 +216,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
             if (0 == mediaButtonClickCount) playerNotificationService.pause()
             handleMediaButtonClickCount()
           }
-          KeyEvent.KEYCODE_MEDIA_STOP -> {
-            playerNotificationService.pause()
-          }
+          KeyEvent.KEYCODE_MEDIA_STOP -> onStop()
           else -> {
             DLog.d(tag, "KeyCode:${keyEvent.keyCode}")
             return false
