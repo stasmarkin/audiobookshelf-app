@@ -1,6 +1,8 @@
 package app.absplus.android.player
 
 import android.content.Context
+import android.content.Intent
+import android.view.KeyEvent
 import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.data.DeviceData
 import app.absplus.android.data.DeviceInfo
@@ -152,6 +154,32 @@ class AwaitingServiceTest {
     pns.currentPlaybackSession = sessionA()
     pns.awaiting.onStreamLost("book-a", null, 15.0, wasPlaying = true, serverConfigId = "config-1")
     MediaSessionCallback(pns).onStop()
+    assertEquals("session-a", pns.currentPlaybackSession?.id)
+    assertTrue("the lost stream still waits", pns.awaiting.isStreamLost)
+    assertTrue(playerCalls.contains("pause"))
+  }
+
+  private fun stopKey(action: Int) = Intent(Intent.ACTION_MEDIA_BUTTON).putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(action, KeyEvent.KEYCODE_MEDIA_STOP))
+
+  @Test
+  fun stopKeyWhileWaitingEndsTheWait() {
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    showB()
+    val callback = MediaSessionCallback(pns)
+    callback.onMediaButtonEvent(stopKey(KeyEvent.ACTION_DOWN))
+    assertTrue("the DOWN of Stop does nothing yet", pns.awaiting.isAwaiting)
+    callback.onMediaButtonEvent(stopKey(KeyEvent.ACTION_UP))
+    assertNull(pns.awaitingDisplay)
+    assertFalse(pns.awaiting.isAwaiting)
+    assertTrue(pns.playlistQueue.isEmpty())
+  }
+
+  @Test
+  fun stopKeyOfALostStreamPausesAndKeepsTheSession() {
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    pns.currentPlaybackSession = sessionA()
+    pns.awaiting.onStreamLost("book-a", null, 15.0, wasPlaying = true, serverConfigId = "config-1")
+    MediaSessionCallback(pns).onMediaButtonEvent(stopKey(KeyEvent.ACTION_UP))
     assertEquals("session-a", pns.currentPlaybackSession?.id)
     assertTrue("the lost stream still waits", pns.awaiting.isStreamLost)
     assertTrue(playerCalls.contains("pause"))
