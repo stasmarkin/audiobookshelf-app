@@ -21,7 +21,16 @@ Audiobookshelf+ works without its server: the catalog, Home, search and item pag
 | 5 | Home and search computed from the replica; podcast episodes in the replica | Done |
 | 6 | Book, podcast and episode pages; server-only actions disabled with a reason | This release |
 | 7 | Covers offline | Planned |
-| 8 | Android Auto from the replica | Planned |
+| 8 | Android Auto from the replica | In progress |
+
+## Release 8: Android Auto
+
+- **Replica first:** `MediaManager` answers the browse tree through `AutoCatalog`, which reads `CatalogReader` (the same filters, sorts, collapsed series, shelves and search as the tabs) and parses its server-shaped answers into the classes Android Auto already used. Progress in every description is `media_progress` of the active server (`MediaManager.progressOf`), not `/api/authorize`.
+- **Server fallback per answer:** an answer whose `replica.reconciledAt` is set never reaches the server; an unreconciled one goes to the server while it is `ONLINE`, otherwise the replica's partial answer is shown (`replicaOr`). Node ids are unchanged, so the host's remembered ids keep working.
+- **Root at once:** the root is built from `AutoSnapshot` (libraries with audio, reconciled libraries, Continue as the union of the `continue-listening` shelves, the progress map), recomputed only on `catalog`/`progress`/`user` changes or another active server; playback ticks reread only the progress, at most every 10 s. Upstream's `AutoRootLoader` still loads the server in the background for streaming and never reconciled libraries; nodes of reconciled libraries are served before it finishes (`servableWithoutServer`).
+- **No I/O on the browser thread:** `onLoadChildren`, `onSearch` and resolving a chosen id run on IO coroutines. A chosen id is found in memory, then in the replica (books and episodes after a process restart), then on the server while reachable.
+- **Downloaded mark:** the start's rule (`PlaybackSourceResolver`): same server, `ino`, a partial copy does not count. Podcast nodes keep their server id, so their episode list stays complete.
+- **Not yet (release 8b):** marking and refusing undownloaded items offline, refreshing open lists on changes, reconciling while Auto is connected, cached cover icons.
 
 ## Release 6: item pages
 

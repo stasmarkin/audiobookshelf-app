@@ -44,7 +44,7 @@ Items marked **emulator-covered** already pass on an AOSP API 35 emulator (see t
 1. The media notification and lock-screen controls show play/pause, jump back and jump forward, and they update when playback advances to the next queue item.
 2. Samsung's Now Bar or media card (One UI) matches the playing book, and its controls work.
 3. Bluetooth disconnect pauses playback, and a reconnect doesn't resume it on its own.
-4. Android Auto, if available: browsing and playback start.
+4. Android Auto, if available: browsing and playback start. The root shows Continue, Recent, Libraries and Downloads at once, online and in airplane mode; a book in Continue shows the same progress as in the app. See section 9 for the offline checks.
 5. A downloaded book whose cover file is missing or damaged still restores and plays. Rename or truncate the cover after closing the app, then restore with the widget or a media key. The notification and lock screen show the Audiobookshelf+ artwork, and `adb logcat -b crash` stays empty. Fixed on `plus` after v0.15.1 (`CoverArt`).
 
 ## 5. Downloads
@@ -151,6 +151,10 @@ Needs a test server on the LAN that you can stop and start (for example its cont
 71. **New episode online:** publish a new episode on the server and open it (from Latest or a link) before the next sync: the episode page opens; in airplane mode the podcast page opens with "This episode isn't available yet".
 72. **Timings (S22, release 6):** time from tapping a book card to the drawn page in airplane mode (≤ 300 ms) and online with the copy fetched; time and answer size of `getLibraryItem` for the podcast with the most episodes on the test server (≤ 1 s). Above a threshold: stop and report. Scroll a podcast with thousands of episodes: no stalls.
 73. **Player on the awaited book:** airplane mode on, force-stop and start the app, open a series, collection or playlist whose first unfinished book is not downloaded and press Play. The player opens on that book (its title and author, "Waiting for server", its saved position; the cover placeholder with its title), without a toast; the notification, the lock screen and the widget show it too. While it still waits, change the system font size (the app's screen is recreated): the player shows that book again. Turn airplane mode off: it plays that book from the saved position. Repeat while another book plays: the player, notification, lock screen and widget all switch to the awaited book; Close in the player's menu ends the wait and the widget shows the last played book again.
+74. **Android Auto online (S22 + Desktop Head Unit, or a car):** with the server running, the root opens at once with all sections; authors, series, collections, Discovery, Recent, podcasts (more than 100: all of them) and search work. The server log shows no `GET /api/libraries/<id>/items` or `/series` while browsing (only the background root load and streams).
+75. **Android Auto in airplane mode, cold start:** `adb shell am force-stop`, airplane mode on, connect Auto. The root, Continue with the right percentage, libraries, series, authors, collections and search work from the catalog copy; a downloaded book and a downloaded episode play; Downloads works as before.
+76. **Android Auto before the first catalog copy:** with the catalog copy removed (`adb shell run-as app.absplus.android.debug rm databases/replica.db*`) and the server running, the lists come from the server as before; in airplane mode Downloads works and the other sections are empty, without a crash.
+77. **Android Auto timings (S22 + DHU):** time from connecting to the full root, online and in airplane mode, and opening Authors of a library with 10 000 books. Thresholds: root ≤ 1 s, node ≤ 1.5 s. Above a threshold: stop and report.
 
 ## Emulator baseline (for comparison)
 

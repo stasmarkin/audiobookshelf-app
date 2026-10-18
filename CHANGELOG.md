@@ -7,6 +7,15 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Android Auto reads the catalog copy:** Android Auto opens with every section at once and browses your libraries
+  from the device's copy of the catalog, also without the server. Continue, Recent, Libraries, authors, series,
+  collections, Discovery, podcasts and search come from the same copy and the same rules as the app's tabs, with the
+  progress kept on the phone, so they open instantly online and after a cold start in airplane mode; all podcasts,
+  series and authors are listed (before, only the first 100 podcasts). Search now also finds podcasts. A book or episode
+  chosen after Android Auto restarted the app plays instead of doing nothing; "play <title>" by voice offline prefers a
+  downloaded match; Play without a choice resumes the latest started book or episode. The downloaded mark follows the
+  same rule as playback, so a copy downloaded with another account of the same server is not marked. A library that was
+  never copied is read from the server as before.
 - **The player opens on the book a queue waits for:** pressing Play on a series, collection or playlist whose next
   book is not downloaded while the server is away now opens the player on that book (title, author, its position, the
   downloaded cover if there is one, "Waiting for server"), instead of only a "Waiting for the server" toast, or of the
