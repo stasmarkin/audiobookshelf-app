@@ -220,6 +220,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var isMediaButtonPlaceholderForeground = false
   // Stops name the latest start id, so a queued start (a key's UP) keeps the service (see ServiceStopper)
   private val serviceStopper = ServiceStopper { startId -> stopSelfResult(startId) }
+  // Foreground only for a queue that waits with nothing prepared (see holdForegroundForWait)
+  private var waitHoldsForeground = false
+  // Android refused a start from the background: the wait's notification asks for a Play (see onBackgroundStartRefused)
+  private var startRefusedNoticeShown = false
+  // Tests replace it with a refusal
+  internal var startSelfInForeground: () -> Unit = { ContextCompat.startForegroundService(this, Intent(this, PlayerNotificationService::class.java)) }
   private val mainHandler = Handler(Looper.getMainLooper())
   // Releases a placeholder whose key-up never arrived (see MediaButtonLifecycle.KEY_UP_GRACE_MS)
   private val missingKeyUpRelease = Runnable {
@@ -401,6 +407,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     isClosed = true
     isMediaButtonPlaceholderForeground = false
     PlayerNotificationListener.isForegroundService = false
+    waitHoldsForeground = false
     DeviceManager.widgetUpdater?.onPlayerChanged(this)
     if (awaitingNotificationShown) NotificationManagerCompat.from(this).cancel(notificationId)
 
@@ -692,6 +699,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           playWhenReady: Boolean,
           playbackRate: Float?
   ) {
+    if (!isStarted && !startAsForegroundService()) return onBackgroundStartRefused(playbackSession, playWhenReady)
+    // The player's notification takes the id of a waiting queue's one, and the foreground it held: ending the wait
+    // below must not drop it
+    val heldForWait = waitHoldsForeground
+    val refusedNotice = startRefusedNoticeShown
+    waitHoldsForeground = false
+    startRefusedNoticeShown = false
     // A resume hands out its action (and ends the wait) before it prepares; anything else replaces what waited. The
     // awaited item's display goes once this session is out, so the app's player never closes in between
     if (awaiting.isAwaiting) {
@@ -704,12 +718,6 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (queuedItem != null && !queuedItem.matches(playbackSession)) {
       playlistQueue = emptyList()
       playlistQueueIndex = -1
-    }
-    if (!isStarted) {
-      DLog.i(tag, "preparePlayer: foreground service not started - Starting service --")
-      Intent(ctx, PlayerNotificationService::class.java).also { intent ->
-        ContextCompat.startForegroundService(ctx, intent)
-      }
     }
 
     // Before the finished-item reset below: this is the position the server gave the session
@@ -782,6 +790,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       DLog.e(tag, "Invalid playback session no media items to play")
       currentPlaybackSession = null
       if (!keepPlaybackPin) LocalItemLocks.clearPlaybackPin()
+      // Nothing took the wait's notification over
+      waitHoldsForeground = heldForWait
+      startRefusedNoticeShown = refusedNotice
+      dropWaitNotice()
       return
     }
     if (playbackSession.localLibraryItem == null && !keepPlaybackPin) {
@@ -1003,6 +1015,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
     resumingTicket = null
     awaitingPresentation.begin(item, display)
+    holdForegroundForWait()
     if (readDisplay) startScope.launch { publishAwaitingDisplay(item, readAwaitingDisplay(item, serverConfigId)) }
     // Checks the server at once instead of at the next backoff step (when there is a network)
     ServerReachability.retryNow()
@@ -1060,22 +1073,26 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
    */
   private fun refreshNowPlaying(display: AwaitingDisplay?) {
     // Not created yet (a bare instance in tests)
-    if (!::mediaSessionConnector.isInitialized) return
-    if (display != null) {
-      sessionDetachedForAwaiting = true
-      republishAwaitingSession()
-    } else {
-      if (sessionDetachedForAwaiting) {
-        mediaSessionConnector.setPlayer(currentPlayer)
-        sessionDetachedForAwaiting = false
+    if (::mediaSessionConnector.isInitialized) {
+      if (display != null) {
+        sessionDetachedForAwaiting = true
+        republishAwaitingSession()
+      } else {
+        if (sessionDetachedForAwaiting) {
+          mediaSessionConnector.setPlayer(currentPlayer)
+          sessionDetachedForAwaiting = false
+        }
+        mediaSessionConnector.invalidateMediaSessionMetadata()
+        mediaSessionConnector.invalidateMediaSessionPlaybackState()
       }
-      mediaSessionConnector.invalidateMediaSessionMetadata()
-      mediaSessionConnector.invalidateMediaSessionPlaybackState()
+      if (currentPlaybackSession != null) {
+        awaitingNotificationShown = false
+        playerNotificationManager.invalidate()
+        return
+      }
     }
-    if (currentPlaybackSession != null) {
-      awaitingNotificationShown = false
-      playerNotificationManager.invalidate()
-    } else if (display != null) {
+    if (currentPlaybackSession != null) return
+    if (display != null || showsWaitNotice) {
       showAwaitingNotification(display)
     } else if (awaitingNotificationShown) {
       awaitingNotificationShown = false
@@ -1092,27 +1109,39 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaSession.setPlaybackState(awaitingPlaybackState(display))
   }
 
-  // With nothing prepared the player draws no notification: this one names the awaited item, paused, with Play
-  private fun showAwaitingNotification(display: AwaitingDisplay) {
+  // A wait the notification shows without its item's display: one that holds the foreground, or a refused start
+  private val showsWaitNotice get() = awaiting.isAwaiting && (waitHoldsForeground || startRefusedNoticeShown)
+
+  // With nothing prepared the player draws no notification: this one names the awaited item (or only the wait), paused
+  private fun showAwaitingNotification(display: AwaitingDisplay?) {
     if (isMediaButtonPlaceholderForeground) return
-    val play = MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_PLAY)
-    val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.icon_monochrome)
-            .setContentTitle(display.title)
-            .setContentText(getString(R.string.waiting_for_server))
-            .setLargeIcon(awaitingCover?.bitmap)
-            .setContentIntent(mediaSession.controller.sessionActivity)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setSilent(true)
-            .addAction(androidx.mediarouter.R.drawable.ic_media_play_dark, getString(R.string.widget_play_pause), play)
-            .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0))
-            .build()
     try {
-      NotificationManagerCompat.from(this).notify(notificationId, notification)
+      NotificationManagerCompat.from(this).notify(notificationId, awaitingNotification(display))
       awaitingNotificationShown = true
     } catch (e: SecurityException) {
       DLog.w(tag, "Cannot post the waiting notification: $e")
     }
+  }
+
+  // Its Play is a media button, which may start the service; Play/Pause because that key acts on its DOWN, the only
+  // event such an intent carries
+  private fun awaitingNotification(display: AwaitingDisplay?): Notification {
+    val play = MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_PLAY_PAUSE)
+    val text = getString(if (startRefusedNoticeShown) R.string.tap_play_to_continue else R.string.waiting_for_server)
+    val builder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.icon_monochrome)
+            .setContentTitle(display?.title ?: getString(R.string.app_name))
+            .setContentText(text)
+            .setLargeIcon(display?.let { awaitingCover?.bitmap })
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSilent(true)
+            .addAction(androidx.mediarouter.R.drawable.ic_media_play_dark, getString(R.string.widget_play_pause), play)
+    // Not created yet in a bare instance (tests)
+    if (::mediaSession.isInitialized) {
+      builder.setContentIntent(mediaSession.controller.sessionActivity)
+              .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0))
+    }
+    return builder.build()
   }
 
   // The resume start [ticket] ended without preparing its item (replaced, failed, the queue moved on): nothing shows it
@@ -1133,6 +1162,84 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
     val waitingFor = awaiting.serverConfigId
     if (waitingFor != null && waitingFor != id) onServerSwitchedWhileAwaiting()
+  }
+
+  /**
+   * A queue that waits with the service in the background could not start its item there once the server is back:
+   * Android 12+ lets only an app in the foreground start a foreground service. So the wait keeps the service in the
+   * foreground from the start the user made (the app's Play, or a media button that already made it foreground).
+   */
+  internal fun holdForegroundForWait() {
+    // With a session the player's notification keeps the foreground (a placeholder gives it back)
+    if (currentPlaybackSession != null) return
+    if (PlayerNotificationListener.isForegroundService && !isMediaButtonPlaceholderForeground) return
+    if (!PlayerNotificationListener.isForegroundService && !isStarted && !startAsForegroundService()) return
+    try {
+      val notification = awaitingNotification(awaitingDisplay)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+      } else {
+        startForeground(notificationId, notification)
+      }
+      PlayerNotificationListener.isForegroundService = true
+      isMediaButtonPlaceholderForeground = false
+      waitHoldsForeground = true
+      awaitingNotificationShown = true
+    } catch (e: IllegalStateException) {
+      DLog.w(tag, "Cannot keep the player service foreground while the queue waits: $e")
+    }
+  }
+
+  /** False when Android refuses: on 12+ from the background (ForegroundServiceStartNotAllowedException is an IllegalStateException). */
+  private fun startAsForegroundService(): Boolean = try {
+    startSelfInForeground()
+    true
+  } catch (e: IllegalStateException) {
+    DLog.w(tag, "Cannot start the player service in the foreground: $e")
+    false
+  }
+
+  /**
+   * Android refused [session] the service from the background, so nothing is prepared: the queue waits on its item
+   * again, and the notification's Play (a notification action may start the service) or the app continues it.
+   */
+  private fun onBackgroundStartRefused(session: PlaybackSession, playWhenReady: Boolean) {
+    DLog.w(tag, "preparePlayer: ${session.mediaItemId} cannot start from the background - waiting for a Play")
+    // A start opens its server session and pins its copy; the Play that continues it makes its own
+    if (!session.isLocal && ::apiHandler.isInitialized) {
+      apiHandler.closePlaybackSession(session.id, DeviceManager.getServerConnectionConfig(session.serverConnectionConfigId)) {}
+    }
+    if (!keepPlaybackPin) LocalItemLocks.clearPlaybackPin()
+    val item = playlistQueue.getOrNull(playlistQueueIndex)?.takeIf { it.matches(session) }
+    val serverConfigId = session.serverConnectionConfigId ?: ActiveServer.current()?.id
+    if (item == null || serverConfigId == null) {
+      clientEventEmitter?.onPlaybackFailed("Playback cannot start in the background")
+      dropWaitNotice()
+      return
+    }
+    val action = awaiting.onQueueBlocked(item, serverConfigId, playWhenReady)
+    if (action != null) return perform(action)
+    startRefusedNoticeShown = true
+    resumingTicket = null
+    awaitingPresentation.begin(item, null)
+    // The same item stays on display, so begin may not redraw: the notification's text changed
+    refreshNowPlaying(awaitingDisplay)
+    DeviceManager.widgetUpdater?.onPlayerChanged(this)
+  }
+
+  /** A wait ended with nothing prepared (no-op otherwise): its notification goes, and the foreground it held. */
+  private fun dropWaitNotice() {
+    if (currentPlaybackSession != null || awaiting.isAwaiting) return
+    // The notification itself goes with the awaited item's display (refreshNowPlaying)
+    startRefusedNoticeShown = false
+    if (!waitHoldsForeground) return
+    waitHoldsForeground = false
+    PlayerNotificationListener.isForegroundService = false
+    stopForeground(Service.STOP_FOREGROUND_REMOVE)
+    awaitingNotificationShown = false
+    // An awaited item still shown (its start is on its way) keeps a plain notification
+    awaitingDisplay?.let { showAwaitingNotification(it) }
+    if (serviceStopper.stop()) isStarted = false
   }
 
   private fun onServerSwitchedWhileAwaiting() {
@@ -1202,6 +1309,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       if (current != queued) {
         DLog.i(tag, "Server is back but the queue moved on from ${queued.libraryItemId} - not resuming it")
         awaitingPresentation.end()
+        dropWaitNotice()
         return
       }
       DLog.i(tag, "Server is back - continuing the queue with ${current.libraryItemId}")
@@ -1259,13 +1367,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaProgressSyncer.stop(true) {
       replacedStream?.let { stream -> apiHandler.closePlaybackSession(stream.id, config) { DLog.d(tag, "Closed streamed session ${stream.id}") } }
     }
-    startItem(request) { if (it is StartResult.Failed) DLog.e(tag, "Switch to the download of ${action.libraryItemId} failed: ${it.message}") }
+    startItem(request) {
+      if (it is StartResult.Failed) {
+        DLog.e(tag, "Switch to the download of ${action.libraryItemId} failed: ${it.message}")
+        mainHandler.post { dropWaitNotice() }
+      }
+    }
   }
 
   internal fun stopAwaiting(reason: CancelReason) {
     DLog.i(tag, "Stopped waiting for the server ($reason)")
     awaiting.cancel(reason)
     awaitingPresentation.end()
+    dropWaitNotice()
   }
 
   /** The app replaced or cleared the queue: a queue that waited on an item no longer current stops waiting. */
@@ -1604,6 +1718,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             playlistQueueIndex = -1
           }
           dropResumingDisplay(ticket)
+          dropWaitNotice()
           if (wakeLock.isHeld) wakeLock.release()
         }
         is PlaybackSource.Local -> {
@@ -1627,6 +1742,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               playlistQueueIndex = -1
             }
             dropResumingDisplay(ticket)
+            dropWaitNotice()
             if (wakeLock.isHeld) wakeLock.release()
             return@launch
           }
@@ -1742,6 +1858,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           // The server answered with an error: nothing to wait for
           DLog.e(tag, "advancePlaylistQueue: Server play request failed for ${plan.libraryItemId} after ${retryCount + 1} attempts, giving up")
           dropResumingDisplay(ticket)
+          dropWaitNotice()
         }
         if (wifiLock.isHeld) wifiLock.release()
         if (wakeLock.isHeld) wakeLock.release()
@@ -2053,6 +2170,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   fun play() {
     if (awaiting.isAwaiting) {
+      // A media button made the service foreground for this Play: the wait keeps that, so its item may start later
+      if (isMediaButtonPlaceholderForeground) holdForegroundForWait()
       // The player has nothing to play while waiting: start again now if the server is back, else probe it. Before the
       // restore below: a queue may wait with no session, and the last session is not what it waits on
       val action = awaiting.onUserPlay(ServerReachability.state.value, readyServer(), streamPermission())
@@ -2330,6 +2449,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
 
     currentPlaybackSession = null
+    dropWaitNotice()
     mediaProgressSyncer.reset()
     clientEventEmitter?.onPlaybackClosed()
 
