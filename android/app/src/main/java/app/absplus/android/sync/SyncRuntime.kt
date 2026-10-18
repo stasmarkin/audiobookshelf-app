@@ -2,6 +2,7 @@ package app.absplus.android.sync
 
 import android.content.Context
 import app.absplus.android.managers.DbManager
+import app.absplus.android.media.CoverCache
 import app.absplus.android.server.ApiHandler
 import kotlinx.coroutines.flow.MutableSharedFlow
 
@@ -31,6 +32,7 @@ object SyncRuntime {
     ActiveServer.init(app)
     ServerReachability.start(app)
     SyncEngine.init(app) { ApiHandler(app) }
+    CoverCache.init(app)
     initialized = true
   }
 
