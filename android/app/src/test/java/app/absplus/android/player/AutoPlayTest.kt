@@ -22,7 +22,10 @@ class AutoPlayTest {
 
   @Test fun offlineStreamFailsFastOnlyForAuto() {
     assertTrue(autoStreamRefusal(autoRequest, stream, ServerState.OFFLINE, null))
-    assertTrue("no active server: nothing to stream from", autoStreamRefusal(autoRequest, stream, ServerState.UNKNOWN, null))
+    assertFalse("a cold start before the first probe answers: the play request may work",
+      autoStreamRefusal(autoRequest, stream, ServerState.UNKNOWN, null))
+    assertTrue("no active server: nothing to stream from",
+      autoStreamRefusal(autoRequest, stream, ServerState.UNKNOWN, null, hasActiveServer = false))
     assertFalse(autoStreamRefusal(autoRequest, stream, ServerState.ONLINE, null))
     assertFalse("the server answers: the start fails as before", autoStreamRefusal(autoRequest, stream, ServerState.UNAUTHORIZED, null))
     assertFalse("the app's queue waits instead", autoStreamRefusal(StartRequest.forQueueItem(queueItem, true), stream, ServerState.OFFLINE, null))
@@ -53,7 +56,8 @@ class AutoPlayTest {
   @Test fun subtitleMarksOnlyUndownloadedOffline() {
     assertEquals("Author · $label", offlineSubtitle("Author", downloaded = false, ServerState.OFFLINE, label).toString())
     assertEquals(label, offlineSubtitle(null, downloaded = false, ServerState.OFFLINE, label).toString())
-    assertEquals(label, offlineSubtitle("", downloaded = false, ServerState.UNKNOWN, label).toString())
+    assertEquals(label, offlineSubtitle("", downloaded = false, ServerState.OFFLINE, label).toString())
+    assertEquals("the first probe has not answered yet", "Author", offlineSubtitle("Author", downloaded = false, ServerState.UNKNOWN, label))
     assertEquals("Author", offlineSubtitle("Author", downloaded = true, ServerState.OFFLINE, label))
     assertEquals("Author", offlineSubtitle("Author", downloaded = false, ServerState.ONLINE, label))
     assertEquals("Author", offlineSubtitle("Author", downloaded = false, ServerState.UNAUTHORIZED, label))

@@ -176,7 +176,10 @@ object DeviceManager {
    * serverVersion=2.26.1
    * isServerVersionGreaterThanOrEqualTo("2.26.0") = true
    */
-  fun isServerVersionGreaterThanOrEqualTo(compareVersion:String):Boolean {
+  fun isServerVersionGreaterThanOrEqualTo(compareVersion:String):Boolean = isVersionAtLeast(serverVersion, compareVersion)
+
+  /** [isServerVersionGreaterThanOrEqualTo] for a saved server that may not be the live session's. */
+  fun isVersionAtLeast(serverVersion: String, compareVersion: String): Boolean {
     if (serverVersion == "") return false
     if (compareVersion == "") return true
 

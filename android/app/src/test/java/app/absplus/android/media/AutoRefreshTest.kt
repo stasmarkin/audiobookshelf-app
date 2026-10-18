@@ -70,9 +70,18 @@ class AutoRefreshTest {
     assertEquals("the first state is where the lists were drawn", emptySet<String>(), refresh.onServerState(ServerState.ONLINE))
     assertEquals(setOf("__LIBRARY__l1__AUTHOR__a1"), refresh.onServerState(ServerState.OFFLINE))
     assertEquals(emptySet<String>(), refresh.onServerState(ServerState.OFFLINE))
-    assertEquals("still no stream", emptySet<String>(), refresh.onServerState(ServerState.UNKNOWN))
-    assertEquals(setOf("__LIBRARY__l1__AUTHOR__a1"), refresh.onServerState(ServerState.UNAUTHORIZED))
-    assertEquals("both take play requests", emptySet<String>(), refresh.onServerState(ServerState.ONLINE))
+    assertEquals("a probe under way is not away", setOf("__LIBRARY__l1__AUTHOR__a1"), refresh.onServerState(ServerState.UNKNOWN))
+    assertEquals(emptySet<String>(), refresh.onServerState(ServerState.UNAUTHORIZED))
+    assertEquals(emptySet<String>(), refresh.onServerState(ServerState.ONLINE))
+  }
+
+  @Test fun finishedDownloadRefreshesMarks() {
+    refresh.served("__LIBRARY__l1__SERIES__s1")
+    assertEquals(setOf(AUTO_BROWSE_ROOT, "__LIBRARY__l1__SERIES__s1"), refresh.onLocalCopy())
+    now += 500
+    assertEquals("throttled with the catalog", emptySet<String>(), refresh.onLocalCopy())
+    now += 1_500
+    assertEquals(setOf(AUTO_BROWSE_ROOT, "__LIBRARY__l1__SERIES__s1"), refresh.due())
   }
 
   @Test fun userChangeRefreshesShelves() {

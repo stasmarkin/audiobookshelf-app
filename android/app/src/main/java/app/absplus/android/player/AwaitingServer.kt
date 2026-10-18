@@ -82,11 +82,17 @@ fun queueItemToAwait(request: StartRequest, plan: PlaybackSource, queue: List<Pl
 fun serverTakesRequests(state: ServerState): Boolean = state == ServerState.ONLINE || state == ServerState.UNAUTHORIZED
 
 /**
- * An Android Auto start ([StartRequest.offlineFailsFast]) that could only stream while the server is away, and that no
- * queue waits on: refused at once (Р18). Without an active server the state is UNKNOWN, and there is nothing to stream from.
+ * The server is known to be away: Android Auto marks and refuses what only streams. Not UNKNOWN, which is also a cold
+ * start whose first probe has not answered yet: a play request may still work.
  */
-fun autoStreamRefusal(request: StartRequest, plan: PlaybackSource, state: ServerState, queued: PlaylistQueueItem?): Boolean =
-        request.offlineFailsFast && plan is PlaybackSource.Stream && queued == null && !serverTakesRequests(state)
+fun serverAway(state: ServerState): Boolean = state == ServerState.OFFLINE
+
+/**
+ * An Android Auto start ([StartRequest.offlineFailsFast]) that could only stream while the server is away, and that no
+ * queue waits on: refused at once (Р18). Without an active server there is nothing to stream from either.
+ */
+fun autoStreamRefusal(request: StartRequest, plan: PlaybackSource, state: ServerState, queued: PlaylistQueueItem?, hasActiveServer: Boolean = true): Boolean =
+        request.offlineFailsFast && plan is PlaybackSource.Stream && queued == null && (serverAway(state) || !hasActiveServer)
 
 /** A stream start: [refuse] answers [message] without asking the server, otherwise [play] sends the play request. */
 fun streamStart(refuse: Boolean, message: String, play: () -> Unit, onResult: (PlayerNotificationService.StartResult) -> Unit) {

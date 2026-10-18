@@ -10,8 +10,9 @@ import app.absplus.android.R
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.player.CoverArt
 import app.absplus.android.player.autoCoverUri
+import app.absplus.android.player.serverAway
+import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.ServerReachability
-import app.absplus.android.sync.ServerState
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
@@ -52,8 +53,8 @@ class LibraryItem(
   val authorName get() = media.metadata.getAuthorDisplayName()
 
   /**
-   * With [ctx] (Android Auto): the cover cache's file first, offline the app icon rather than a URL the host cannot
-   * fetch ([autoCoverUri]). Without it: the server's URL.
+   * With [ctx] (Android Auto): the cover cache's file first, the active server's URL unless it is away, else the app
+   * icon rather than a URL the host cannot fetch ([autoCoverUri]). Without it: the live session's URL.
    */
   @JsonIgnore
   fun getCoverUri(ctx: Context? = null): Uri {
@@ -62,20 +63,20 @@ class LibraryItem(
       return icon
     }
     if (ctx != null) {
-      // Before the root load sets the live session there is no address to build the URL from
-      val serverUri = if (DeviceManager.serverAddress.isEmpty()) null else serverCoverUri()
-      return autoCoverUri(CoverArt.cachedCoverUri(ctx, id, updatedAt), serverUri, ServerReachability.state.value == ServerState.ONLINE, icon)
+      // The saved active server: a process Auto started has no live session until its root load
+      val serverUri = ActiveServer.current()?.let { coverUrl(it.address, it.version.orEmpty(), it.token) }
+      return autoCoverUri(CoverArt.cachedCoverUri(ctx, id, updatedAt), serverUri, !serverAway(ServerReachability.state.value), icon)
     }
-    return serverCoverUri()
+    return coverUrl(DeviceManager.serverAddress, DeviceManager.serverVersion, DeviceManager.token)
   }
 
-  private fun serverCoverUri(): Uri {
+  private fun coverUrl(address: String, version: String, token: String): Uri {
     // As of v2.17.0 token is not needed with cover image requests
-    if (DeviceManager.isServerVersionGreaterThanOrEqualTo("2.17.0")) {
-      return Uri.parse("${DeviceManager.serverAddress}/api/items/$id/cover")
+    if (DeviceManager.isVersionAtLeast(version, "2.17.0")) {
+      return Uri.parse("$address/api/items/$id/cover")
     }
 
-    return Uri.parse("${DeviceManager.serverAddress}/api/items/$id/cover?token=${DeviceManager.token}")
+    return Uri.parse("$address/api/items/$id/cover?token=$token")
   }
 
   @JsonIgnore

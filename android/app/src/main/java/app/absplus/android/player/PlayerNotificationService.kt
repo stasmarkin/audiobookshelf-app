@@ -544,9 +544,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
     mediaSessionConnector = MediaSessionConnector(mediaSession)
     mediaManager.onPlaybackError = { msg ->
-      Handler(Looper.getMainLooper()).post {
+      mainHandler.post {
+        mainHandler.removeCallbacks(clearPlaybackError)
         mediaSessionConnector.setCustomErrorMessage(msg)
         republishAwaitingSession()
+        // The error state would freeze the controls of a session that plays on (an Auto choice it refused)
+        if (currentPlaybackSession != null) mainHandler.postDelayed(clearPlaybackError, PLAYBACK_ERROR_SHOWN_MS)
       }
     }
     // Without this, the connector's default metadata provider rebuilds metadata from the
@@ -1097,6 +1100,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   // Any connector call publishes the detached connector's empty state: the awaited item is published again after it
+  private val clearPlaybackError = Runnable {
+    mediaSessionConnector.setCustomErrorMessage(null)
+    republishAwaitingSession()
+  }
+
   private fun republishAwaitingSession() {
     if (!sessionDetachedForAwaiting) return
     val display = awaitingDisplay ?: return
@@ -1440,7 +1448,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           awaitQueueStart(ticket, queued, onResult)
           return@launch
         }
-        val refuse = autoStreamRefusal(request, plan, ServerReachability.state.value, queued)
+        val refuse = autoStreamRefusal(request, plan, ServerReachability.state.value, queued, hasActiveServer = ActiveServer.current() != null)
         streamStart(refuse, getString(R.string.not_available_offline), play = { streamFromServer(request, plan, ticket, ::replaced, onResult) }, onResult)
       }
     }
@@ -2439,6 +2447,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   private val AUTO_MEDIA_ROOT = "/"
   private val MAX_GRANTED_AUTO_ICONS = 2_000
+  private val PLAYBACK_ERROR_SHOWN_MS = 5_000L
   private val LIBRARIES_ROOT = "__LIBRARIES__"
   private val RECENTLY_ROOT = "__RECENTLY__"
   private val DOWNLOADS_ROOT = "__DOWNLOADS__"
@@ -2487,12 +2496,15 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
     }.toMutableList()
 
-  /** What Android Auto gets for a node or a search: playable items it cannot stream now are marked (Р19). */
-  private fun autoAnswer(items: List<MediaBrowserCompat.MediaItem>?): MutableList<MediaBrowserCompat.MediaItem>? {
+  /**
+   * What a media browser ([requester]) gets for a node or a search: playable items it cannot stream now are marked
+   * (Р19), and it may read the `content://` icons.
+   */
+  private fun autoAnswer(items: List<MediaBrowserCompat.MediaItem>?, requester: String?): MutableList<MediaBrowserCompat.MediaItem>? {
     if (items == null) return null
     val state = ServerReachability.state.value
     val label = getString(R.string.not_available_offline)
-    grantAutoIcons(items)
+    grantAutoIcons(items, requester)
     return items.map { withOfflineMark(it, state, label) }.toMutableList()
   }
 
@@ -2502,10 +2514,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }))
   private val autoGrantFailures: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
-  /** The Auto host reads a cached cover or a download's cover (`content://`) only with a grant. */
-  private fun grantAutoIcons(items: List<MediaBrowserCompat.MediaItem>) {
-    items.mapNotNull { it.description.iconUri }.filter { it.scheme == "content" && grantedAutoIcons.add(it.toString()) }.forEach { uri ->
-      AUTO_HOST_PACKAGES.forEach { pkg ->
+  /** A browser reads a cached cover or a download's cover (`content://`) only with a grant; Auto's hosts get them too. */
+  private fun grantAutoIcons(items: List<MediaBrowserCompat.MediaItem>, requester: String?) {
+    val packages = (AUTO_HOST_PACKAGES + listOfNotNull(requester)).distinct()
+    items.mapNotNull { it.description.iconUri }.filter { it.scheme == "content" }.forEach { uri ->
+      packages.filter { grantedAutoIcons.add("$it|$uri") }.forEach { pkg ->
         try {
           grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (e: Exception) {
@@ -2534,6 +2547,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     // From MediaManager's own subscription, after it marked the snapshot stale
     mediaManager.onDataChange = { notifyAuto(autoRefresh.onData(it)) }
     autoIOScope.launch { ServerReachability.state.collect { notifyAuto(autoRefresh.onServerState(it)) } }
+    autoIOScope.launch { SyncRuntime.localCopyReady.collect { notifyAuto(autoRefresh.onLocalCopy()) } }
     autoIOScope.launch {
       var previous = ServerReachability.serverConfigId.value
       ServerReachability.serverConfigId.collect { id ->
@@ -2654,13 +2668,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     AbsLogger.info(tag, "onLoadChildren: parentMediaId: $parentMediaId (${DeviceManager.serverConnectionConfigString})")
 
     result.detach()
-    noteAutoActivity(browserPackage())
-    autoIOScope.launch { loadAutoChildren(parentMediaId, result) }
+    val requester = browserPackage()
+    noteAutoActivity(requester)
+    autoIOScope.launch { loadAutoChildren(parentMediaId, result, requester) }
   }
 
-  private suspend fun loadAutoChildren(parentMediaId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+  private suspend fun loadAutoChildren(parentMediaId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>, requester: String?) {
     autoRefresh.served(parentMediaId)
-    val send = { items: List<MediaBrowserCompat.MediaItem>? -> result.sendResult(autoAnswer(items)) }
+    val send = { items: List<MediaBrowserCompat.MediaItem>? -> result.sendResult(autoAnswer(items, requester)) }
     // The root and Continue wait for a stale snapshot; a deep node takes the current one of the same server (after a
     // restart the host may ask a deep node first, which then waits for the first one)
     val snap = if (parentMediaId == AUTO_MEDIA_ROOT || parentMediaId == CONTINUE_ROOT) mediaManager.refreshSnapshot() else mediaManager.snapshotForNode()
@@ -3288,7 +3303,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           result: Result<MutableList<MediaBrowserCompat.MediaItem>>
   ) {
     result.detach()
-    noteAutoActivity(browserPackage())
+    val requester = browserPackage()
+    noteAutoActivity(requester)
     autoIOScope.launch {
       // A reconcile or another server since the last search makes the cached results stale
       val snap = mediaManager.refreshSnapshot()
@@ -3299,7 +3315,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         cachedSearchResults = listOf("book", "podcast", "series", "authors").flatMap { found[it].orEmpty() }.toMutableList()
         cachedSearch = key
       }
-      result.sendResult(autoAnswer(cachedSearchResults))
+      result.sendResult(autoAnswer(cachedSearchResults, requester))
       DLog.d(tag, "onSearch: Done")
     }
   }

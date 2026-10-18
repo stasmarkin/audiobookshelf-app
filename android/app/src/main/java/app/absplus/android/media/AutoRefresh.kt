@@ -2,7 +2,7 @@ package app.absplus.android.media
 
 import app.absplus.android.player.AUTO_BROWSE_ROOT
 import app.absplus.android.player.CONTINUE_ROOT
-import app.absplus.android.player.serverTakesRequests
+import app.absplus.android.player.serverAway
 import app.absplus.android.sync.DataChange
 import app.absplus.android.sync.ServerState
 
@@ -21,8 +21,8 @@ class AutoRefresh(private val clock: () -> Long, private val catalogEveryMs: Lon
   private var progressPending = false
   private var catalogAt: Long? = null
   private var progressAt: Long? = null
-  // Whether the server took play requests when the lists were drawn; null before the first state
-  private var serverTookRequests: Boolean? = null
+  // Whether the server was away when the lists were drawn; null before the first state
+  private var serverWasAway: Boolean? = null
 
   val hasPending: Boolean
     @Synchronized get() = catalogPending || progressPending
@@ -44,12 +44,18 @@ class AutoRefresh(private val clock: () -> Long, private val catalogEveryMs: Lon
     return dueNow()
   }
 
-  /** The "Not available offline" marks follow whether the server takes play requests. */
+  /** The "Not available offline" marks follow whether the server is away ([serverAway]). */
   @Synchronized fun onServerState(state: ServerState): Set<String> {
-    val takes = serverTakesRequests(state)
-    val previous = serverTookRequests
-    serverTookRequests = takes
-    return if (previous != null && previous != takes) servedNodes.toSet() else emptySet()
+    val away = serverAway(state)
+    val previous = serverWasAway
+    serverWasAway = away
+    return if (previous != null && previous != away) servedNodes.toSet() else emptySet()
+  }
+
+  /** A download finished: its "Not available offline" mark goes (throttled with the catalog). */
+  @Synchronized fun onLocalCopy(): Set<String> {
+    catalogPending = true
+    return dueNow()
   }
 
   /** Another active server: its root at once, and what is open answers for it. */

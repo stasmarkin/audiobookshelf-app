@@ -9,6 +9,7 @@ import app.absplus.android.data.MediaTypeMetadata
 import app.absplus.android.data.ServerConnectionConfig
 import app.absplus.android.managers.DbManager
 import app.absplus.android.media.COVER_CACHE_DIR
+import app.absplus.android.media.COVER_PREFETCH_LIMIT
 import app.absplus.android.media.CoverCache
 import app.absplus.android.media.CoverFetcher
 import app.absplus.android.media.CoverStore
@@ -107,5 +108,25 @@ class AutoCoverTest {
     cache.prefetch(listOf("li4" to 1L))
     idle()
     assertEquals("offline nothing is fetched", listOf("li2"), fetched.toList())
+  }
+
+  @Test fun prefetchTakesTheTopOfALongList() = runBlocking {
+    cache.prefetch((1..200).map { "li$it" to 1L })
+    idle()
+    assertEquals(COVER_PREFETCH_LIMIT, fetched.size)
+    assertEquals((1..COVER_PREFETCH_LIMIT).map { "li$it" }.toSet(), fetched.toSet())
+  }
+
+  @Test fun prefetchQueuedForAnotherServerIsDropped() {
+    val paused = kotlinx.coroutines.test.StandardTestDispatcher()
+    var active: ServerConnectionConfig? = server
+    val queued = CoverCache(store, CoverFetcher { _, itemId, _ ->
+      fetched += itemId
+      null
+    }, { active }, { state }, { _, _ -> null }, CoroutineScope(SupervisorJob() + paused))
+    queued.prefetch(listOf("li1" to 1L))
+    active = server.let { ServerConnectionConfig("other", 1, "Other", "https://other.example", "2.20.0", "u2", "user", "tok2", null) }
+    paused.scheduler.advanceUntilIdle()
+    assertEquals("the item of the previous server is not asked of the new one", emptyList<String>(), fetched.toList())
   }
 }

@@ -35,6 +35,8 @@ const val COVER_CONNECT_TIMEOUT_MS = 10_000L
 const val COVER_READ_TIMEOUT_MS = 20_000L
 // The read timeout is per read: a server trickling bytes would otherwise hold a fetch slot without end
 const val COVER_CALL_TIMEOUT_MS = 30_000L
+/** Covers one Android Auto list asks to cache at a time. */
+const val COVER_PREFETCH_LIMIT = 50
 private const val REFUSAL_LOG_EVERY_MS = 5 * 60 * 1000L
 
 private val MIME_TO_EXT = mapOf("image/jpeg" to "jpg", "image/png" to "png", "image/webp" to "webp", "image/gif" to "gif")
@@ -162,15 +164,18 @@ class CoverCache(
 
   /**
    * Downloads in the background the standard covers of [items] (item id, updatedAt) the cache lacks, so they show later
-   * without the server (Android Auto lists). Online only; the same single download per version and parallelism as
-   * [standard]. A version older than a cached one is skipped, as [standard] would answer the cached one.
+   * without the server (Android Auto lists): the first [COVER_PREFETCH_LIMIT] missing ones, the top of a list. Online
+   * only; the same single download per version and parallelism as [standard]. A version older than a cached one is
+   * skipped, as [standard] would answer the cached one. A download still queued when the server is switched is dropped.
    */
   fun prefetch(items: List<Pair<String, Long>>) {
     if (!isOnline()) return
-    val missing = items.distinct().filter { (itemId, updatedAt) ->
-      DownloadIdentifiers.isSafe(itemId) && cached(itemId, updatedAt) == null && (store.newest(itemId)?.updatedAt ?: Long.MIN_VALUE) < updatedAt
-    }
-    missing.forEach { (itemId, updatedAt) -> scope.launch { fetchOnce(itemId, updatedAt) } }
+    val serverConfigId = activeServer()?.id ?: return
+    val missing = items.asSequence().distinct().filter { (itemId, updatedAt) ->
+      // Not marked as used: the list shows the server's URL until the file is there
+      DownloadIdentifiers.isSafe(itemId) && (store.newest(itemId)?.updatedAt ?: Long.MIN_VALUE) < updatedAt
+    }.take(COVER_PREFETCH_LIMIT).toList()
+    missing.forEach { (itemId, updatedAt) -> scope.launch { fetchOnce(itemId, updatedAt, serverConfigId) } }
   }
 
   /** The newest cached version, marked as used; no network (offline WebView answers). */
@@ -196,10 +201,11 @@ class CoverCache(
     return CoverAnswer.Stream(fetched.mime, fetched.body)
   }
 
-  private suspend fun fetchOnce(itemId: String, version: Long): Fetched? {
+  /** [serverConfigId]: the server the request is for; null is whichever is active when a slot frees up. */
+  private suspend fun fetchOnce(itemId: String, version: Long, serverConfigId: String? = null): Fetched? {
     val key = "${itemId}_$version"
     val job = synchronized(inFlight) {
-      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { permits.withPermit { download(itemId, version) } }.also { job ->
+      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { permits.withPermit { download(itemId, version, serverConfigId) } }.also { job ->
         inFlight[key] = job
         job.invokeOnCompletion { synchronized(inFlight) { if (inFlight[key] === job) inFlight.remove(key) } }
       }
@@ -207,10 +213,10 @@ class CoverCache(
     return job.await()
   }
 
-  private fun download(itemId: String, version: Long): Fetched? {
-    // The server may have gone away while this request waited for a free slot
+  private fun download(itemId: String, version: Long, serverConfigId: String?): Fetched? {
+    // The server may have gone away, or another one become active, while this request waited for a free slot
     if (!mayFetch()) return null
-    val config = activeServer() ?: return null
+    val config = activeServer()?.takeIf { serverConfigId == null || it.id == serverConfigId } ?: return null
     val fetched = fetcher.fetch(config, itemId, raw = false) ?: return null
     return fetched.body.use { body ->
       val ext = fetched.ext
