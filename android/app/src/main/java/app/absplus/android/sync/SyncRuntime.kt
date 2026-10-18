@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 /** A download of [libraryItemId] (server ids; [episodeId] for a podcast episode) for [serverConfigId] is on the device. */
 data class LocalCopyReady(val serverConfigId: String, val libraryItemId: String, val episodeId: String?)
 
-/** How long after Android Auto's last request a reconcile may run without the app in the foreground (Р20). */
+/** How long after Android Auto's last request a reconcile may run without the app in the foreground. */
 const val AUTO_RECONCILE_LEASE_MS = 10 * 60_000L
 
 /**

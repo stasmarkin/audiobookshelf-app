@@ -71,7 +71,7 @@ data class AutoSnapshot(
 
 const val AUTO_CONTINUE_LIMIT = 25
 
-/** Р19: an item that is not downloaded says so in its subtitle while the server is away ([serverAway]). */
+/** An item that is not downloaded says so in its subtitle while the server is away ([serverAway]). */
 fun offlineSubtitle(subtitle: CharSequence?, downloaded: Boolean, state: ServerState, label: String): CharSequence? = when {
   downloaded || !serverAway(state) -> subtitle
   subtitle.isNullOrEmpty() -> label

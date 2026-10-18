@@ -89,7 +89,7 @@ fun serverAway(state: ServerState): Boolean = state == ServerState.OFFLINE
 
 /**
  * An Android Auto start ([StartRequest.offlineFailsFast]) that could only stream while the server is away, and that no
- * queue waits on: refused at once (Р18). Without an active server there is nothing to stream from either.
+ * queue waits on: refused at once. Without an active server there is nothing to stream from either.
  */
 fun autoStreamRefusal(request: StartRequest, plan: PlaybackSource, state: ServerState, queued: PlaylistQueueItem?, hasActiveServer: Boolean = true): Boolean =
         request.offlineFailsFast && plan is PlaybackSource.Stream && queued == null && (serverAway(state) || !hasActiveServer)

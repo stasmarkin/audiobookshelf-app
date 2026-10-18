@@ -2497,8 +2497,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }.toMutableList()
 
   /**
-   * What a media browser ([requester]) gets for a node or a search: playable items it cannot stream now are marked
-   * (Р19), and it may read the `content://` icons.
+   * What a media browser ([requester]) gets for a node or a search: playable items it cannot stream now are marked,
+   * and it may read the `content://` icons.
    */
   private fun autoAnswer(items: List<MediaBrowserCompat.MediaItem>?, requester: String?): MutableList<MediaBrowserCompat.MediaItem>? {
     if (items == null) return null
@@ -2536,7 +2536,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     null
   }
 
-  /** A request of Android Auto keeps the catalog reconciling while it is in use (Р20). */
+  /** A request of Android Auto keeps the catalog reconciling while it is in use. */
   private fun noteAutoActivity(packageName: String?) {
     if (opensReconcileLease(packageName)) SyncRuntime.onAutoActivity()
   }

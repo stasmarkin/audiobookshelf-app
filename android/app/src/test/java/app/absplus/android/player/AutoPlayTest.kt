@@ -11,7 +11,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Android Auto without the server: an item it cannot stream is refused at once and marked in the lists (Р18, Р19). */
+/** Android Auto without the server: an item it cannot stream is refused at once and marked in the lists. */
 class AutoPlayTest {
   private val label = "Not available offline"
   private val book = LibraryItem("li1", "42", "lib", "f", "", "", 0L, 0L, 0L, 0L, 0L, null, null, false, false, "book",
