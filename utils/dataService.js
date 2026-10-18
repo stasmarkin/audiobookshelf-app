@@ -98,6 +98,8 @@ export function catalogTopics(event, payload, currentLibraryId) {
  * @param {{ plugin: object, store: { commit: Function, dispatch?: Function }, platform?: string, $axios?: object,
  *   eventBus?: { $emit: Function }, nativeHttp?: () => object }} deps `nativeHttp` returns $nativeHttp (injected later)
  */
+export const COVER_READY_BATCH_MS = 250
+
 export function createDataService({ plugin, store, platform = null, $axios = null, eventBus = null, nativeHttp = null }) {
   const isWeb = platform === 'web'
   const listeners = new Set()
@@ -253,9 +255,19 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   }
 
   plugin.addListener('onDataChanged', dataChanged)
-  // A cover the route refused is stored now: its <img>s ask again (the epoch is part of their src)
+  // A cover the route refused is stored now: its <img>s ask again (the epoch is part of their src). Notices are applied
+  // together every COVER_READY_BATCH_MS, so a shelf filling up re-renders a few times, not once per cover
+  const readyCovers = new Set()
   plugin.addListener('onCoverReady', (payload) => {
-    if (payload?.itemId) store.commit('globals/bumpCoverEpoch', payload.itemId)
+    if (!payload?.itemId) return
+    if (!readyCovers.size) {
+      setTimeout(() => {
+        const itemIds = [...readyCovers]
+        readyCovers.clear()
+        store.commit('globals/bumpCoverEpochs', itemIds)
+      }, COVER_READY_BATCH_MS)
+    }
+    readyCovers.add(payload.itemId)
   })
   plugin.addListener('onSyncState', applySyncState)
 

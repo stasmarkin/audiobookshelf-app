@@ -170,6 +170,9 @@ class AbsData : Plugin() {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+  // A cover the WebView was refused is stored now: the app asks for it again
+  private val coverReady: (String) -> Unit = { itemId -> scope.launch { notifyListeners("onCoverReady", JSObject().put("itemId", itemId)) } }
+
   override fun load() {
     SyncRuntime.ensureInit(context)
     scope.launch {
@@ -184,12 +187,12 @@ class AbsData : Plugin() {
       }
     }
     scope.launch { SyncEngine.syncState.collect { notifyListeners("onSyncState", syncState(it)) } }
-    // A cover the WebView was refused is stored now: the app asks for it again
-    CoverCache.instance?.onCoverReady = { itemId -> scope.launch { notifyListeners("onCoverReady", JSObject().put("itemId", itemId)) } }
+    CoverCache.instance?.onCoverReady = coverReady
   }
 
   override fun handleOnDestroy() {
-    CoverCache.instance?.onCoverReady = null
+    // Only our own listener: a newer plugin instance may have set its own already
+    CoverCache.instance?.let { if (it.onCoverReady === coverReady) it.onCoverReady = null }
     scope.cancel()
     io.cancel()
     super.handleOnDestroy()

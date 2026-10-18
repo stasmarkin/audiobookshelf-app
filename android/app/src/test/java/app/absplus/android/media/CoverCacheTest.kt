@@ -7,7 +7,6 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,12 +39,13 @@ class CoverCacheTest {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val fetcher = FakeFetcher()
   private val store by lazy { CoverStore(File(tmp.root, COVER_CACHE_DIR)) }
-  private val now = AtomicLong(1_000_000L)
   private val announced = CopyOnWriteArrayList<String>()
 
-  private fun cache(fetch: CoverFetcher = fetcher, workers: Int = COVER_FETCH_PARALLELISM) =
-    CoverCache(store, fetch, { active }, { state }, { _, id -> replica[id] }, scope, clock = { now.get() }, workers = workers)
-      .also { it.onCoverReady = { id -> announced += id } }
+  private val errors = CopyOnWriteArrayList<String>()
+
+  private fun cache(fetch: CoverFetcher = fetcher, workers: Int = COVER_FETCH_PARALLELISM, queueMax: Int = COVER_QUEUE_MAX) =
+    CoverCache(store, fetch, { active }, { state }, { _, id -> replica[id] }, scope, workers = workers, queueMax = queueMax,
+      logError = { errors += it }).also { it.onCoverReady = { id -> announced += id } }
 
   private fun seed(itemId: String, updatedAt: Long) {
     store.put(itemId, updatedAt, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!
@@ -178,20 +178,80 @@ class CoverCacheTest {
   }
 
   @Test
-  fun staleQueuedJobsAreDropped() {
+  fun aFullQueueShedsTheOldestRequest() {
     val release = CountDownLatch(1)
     fetcher.answer = { id, _ -> if (id == "H") release.await(5, TimeUnit.SECONDS); image() }
+    val cache = cache(workers = 1, queueMax = 2)
+
+    cache.standard("H", 1)
+    waitUntil { fetcher.calls.size == 1 }
+    for (id in listOf("A", "B", "C")) cache.standard(id, 1)
+    release.countDown()
+    cache.idle()
+
+    assertEquals("the request asked for longest ago is dropped", listOf("H", "C", "B"), fetcher.calls.map { it.first })
+  }
+
+  @Test
+  fun aVersionedFetchIsAnnouncedAfterALatestCheckFoundNothingNewer() {
+    val release = CountDownLatch(1)
+    fetcher.answer = { id, _ -> if (id == "H") release.await(5, TimeUnit.SECONDS); image() }
+    seed("B", 3)
+    replica = mapOf("B" to 3L)
     val cache = cache(workers = 1)
 
     cache.standard("H", 1)
     waitUntil { fetcher.calls.size == 1 }
-    cache.standard("A", 1)
-    now.addAndGet(COVER_QUEUE_MAX_AGE_MS + 1)
-    cache.standard("B", 1)
+    cache.standard("B", 7)
+    cache.standard("B", null) // newest first: this check runs before the versioned fetch and finds nothing newer
     release.countDown()
     cache.idle()
 
-    assertEquals("the card that asked a minute ago is gone", listOf("H", "B"), fetcher.calls.map { it.first })
+    assertEquals(setOf("B_7.jpg", "H_1.jpg"), files())
+    assertEquals(listOf("H", "B"), announced.toList())
+  }
+
+  @Test
+  fun rawSeedingTheStandardCoverIsNotAnnounced() = runBlocking {
+    val cache = cache()
+    cache.raw("A", 2)
+    cache.idle()
+
+    assertEquals(setOf("A_2.jpg"), files())
+    assertEquals(emptyList<String>(), announced.toList())
+  }
+
+  @Test
+  fun oneItemWithAndWithoutVersionIsFetchedOnce() {
+    val release = CountDownLatch(1)
+    fetcher.answer = { _, _ -> release.await(5, TimeUnit.SECONDS); FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(ByteArray(4096) { 7 }), 4096) }
+    replica = mapOf("A" to 7L)
+    val cache = cache()
+
+    cache.standard("A", 7)
+    cache.standard("A", null)
+    waitUntil { fetcher.calls.size == 1 }
+    Thread.sleep(100)
+    release.countDown()
+    cache.idle()
+
+    assertEquals("both resolve to version 7: one fetch", 1, fetcher.calls.size)
+    assertEquals(4096L, File(tmp.root, "$COVER_CACHE_DIR/A_7.jpg").length())
+    assertEquals(setOf("A_7.jpg"), files())
+  }
+
+  @Test
+  fun aWorkerSurvivesAFailingJob() {
+    fetcher.answer = { id, _ -> if (id == "X") throw AssertionError("boom") else image() }
+    val cache = cache(workers = 1)
+
+    cache.standard("X", 1)
+    cache.idle()
+    cache.standard("A", 1)
+    cache.idle()
+
+    assertEquals(setOf("A_1.jpg"), files())
+    assertEquals(listOf("Cover fetch failed: AssertionError"), errors.toList())
   }
 
   @Test
@@ -244,18 +304,29 @@ class CoverCacheTest {
   }
 
   @Test
-  fun jpegAliasesAreStoredAndOtherImageTypesAreNot() {
+  fun jpegAliasesAvifAndBmpAreStoredAndOtherTypesAreNotAskedAgain() {
     var type = "image/jpg"
-    val cache = cache(OkHttpCoverFetcher(fakeServer({ type }), log = {}))
+    val seen = CopyOnWriteArrayList<Request>()
+    val cache = cache(OkHttpCoverFetcher(fakeServer({ type }, seen), log = {}))
 
     cache.standard("A", 2)
     cache.idle()
-    assertEquals(setOf("A_2.jpg"), files())
-
     type = "image/avif"
     cache.standard("B", 2)
     cache.idle()
-    assertEquals("a type the cache can't serve back is not kept", setOf("A_2.jpg"), files())
+    type = "image/bmp"
+    cache.standard("C", 2)
+    cache.idle()
+    assertEquals(setOf("A_2.jpg", "B_2.avif", "C_2.bmp"), files())
+    assertEquals("image/avif", coverMimeOf(File(tmp.root, "$COVER_CACHE_DIR/B_2.avif")))
+
+    type = "image/tiff"
+    repeat(2) {
+      cache.standard("D", 2)
+      cache.idle()
+    }
+    assertEquals("a type the route can't serve back is not kept", 3, files().size)
+    assertEquals("nor asked for again", 1, seen.count { it.url.encodedPath.contains("/D/") })
   }
 
   @Test
@@ -373,7 +444,7 @@ class CoverCacheTest {
   }
 
   @Test
-  fun rawWaitsAtMostAFewSecondsForItsAnswerAndIsNotCutWhileStreaming() {
+  fun rawIsNotCutWhileStreaming() {
     val seen = CopyOnWriteArrayList<Triple<Boolean, Int, Long>>()
     val client = coverHttpClient().newBuilder().addInterceptor(Interceptor { chain ->
       seen += Triple(chain.request().url.query.orEmpty().contains("raw=1"), chain.readTimeoutMillis(), chain.call().timeout().timeoutNanos())
@@ -386,11 +457,33 @@ class CoverCacheTest {
     fetch.fetch(server, "A", raw = false)!!.body.close()
 
     val raw = seen.single { it.first }
-    assertEquals(COVER_RAW_FIRST_BYTE_MS.toInt(), raw.second)
+    assertEquals("per read while streaming", COVER_RAW_READ_TIMEOUT_MS.toInt(), raw.second)
     assertEquals("no call timeout for the streamed original", 0L, raw.third)
     val standard = seen.single { !it.first }
     assertEquals(COVER_READ_TIMEOUT_MS.toInt(), standard.second)
     assertTrue("the standard cover keeps the call timeout", standard.third > 0L)
+  }
+
+  @Test
+  fun rawWhoseHeadersDontArriveIsCancelled() {
+    val socket = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())
+    val accepted = CopyOnWriteArrayList<java.net.Socket>()
+    val acceptor = Thread { runCatching { while (true) accepted += socket.accept() } }.apply { isDaemon = true; start() }
+    try {
+      val local = server.copy(address = "http://127.0.0.1:${socket.localPort}")
+      val fetch = OkHttpCoverFetcher(coverHttpClient(), log = {}, rawHeaderTimeoutMs = 200)
+
+      val started = System.nanoTime()
+      val answer = fetch.fetch(local, "A", raw = true)
+      val elapsedMs = (System.nanoTime() - started) / 1_000_000
+
+      assertNull(answer)
+      assertTrue("a server that accepts and never answers is given up on its headers, not the 20 s read: $elapsedMs ms", elapsedMs < 3_000)
+    } finally {
+      socket.close()
+      accepted.forEach { it.close() }
+      acceptor.interrupt()
+    }
   }
 
   @Test

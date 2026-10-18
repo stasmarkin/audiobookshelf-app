@@ -75,6 +75,7 @@ class CoverRouteTest {
   fun parsesVersionAndRaw() {
     assertEquals(CoverRequest("li_1", 1700000000000, true), parseCoverRoute(Uri.parse("https://localhost/_absplus/cover/li_1?ts=1700000000000&raw=1")))
     assertEquals(CoverRequest("li1", null, false), parseCoverRoute(Uri.parse("https://localhost/_absplus/cover/li1?ts=abc")))
+    assertEquals(CoverRequest("li1", 5, false, wait = true), parseCoverRoute(Uri.parse("https://localhost/_absplus/cover/li1?ts=5&e=2&wait=1")))
     assertEquals(CoverRequest("li1", null, false), parseCoverRoute(Uri.parse("https://localhost/_absplus/cover/li1?ts=-5")))
     assertNull("not a cover route", route("/item/abc"))
   }
@@ -185,6 +186,23 @@ class CoverRouteTest {
     runBlocking { cache.awaitIdleForTest() }
     assertEquals(listOf("A" to false), fetches.toList())
     assertEquals(2L, store.newest("A")!!.updatedAt)
+  }
+
+  @Test
+  fun waitModeServesTheCoverOnceFetched() {
+    fetchAnswer = { Thread.sleep(300); FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(JPEG), JPEG.size.toLong()) }
+
+    val response = route("/_absplus/cover/y1?ts=3&wait=1")!!
+    assertEquals(200, response.statusCode)
+    assertArrayEquals("a canvas that draws once gets the cover, not a 404", JPEG, response.data.readBytes())
+  }
+
+  @Test
+  fun waitModeGivesAnEmptyBodyWhenTheFetchFails() {
+    fetchAnswer = { null }
+
+    val response = route("/_absplus/cover/y2?ts=3&wait=1")!!
+    assertEquals(0, response.data.readBytes().size)
   }
 
   private fun waitUntil(condition: () -> Boolean) {

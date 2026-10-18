@@ -1,3 +1,4 @@
+import Vue from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { coverSrc } from '@/utils/coverUrl'
 
@@ -60,7 +61,7 @@ export const getters = {
     },
   getLibraryItemCoverSrcById:
     (state, getters, rootState, rootGetters) =>
-    (libraryItemId, placeholder = null) => {
+    (libraryItemId, placeholder = null, { wait = false } = {}) => {
       if (!placeholder) placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
       if (!libraryItemId) return placeholder
       return (
@@ -71,7 +72,8 @@ export const getters = {
           token: rootGetters['user/getToken'],
           tokenRequired: rootGetters.getDoesServerImagesRequireToken,
           versioned: false,
-          epoch: state.coverEpochs[libraryItemId] || 0
+          epoch: state.coverEpochs[libraryItemId] || 0,
+          wait
         }) || placeholder
       )
     },
@@ -101,8 +103,8 @@ export const actions = {
 }
 
 export const mutations = {
-  bumpCoverEpoch(state, itemId) {
-    state.coverEpochs = { ...state.coverEpochs, [itemId]: (state.coverEpochs[itemId] || 0) + 1 }
+  bumpCoverEpochs(state, itemIds) {
+    for (const itemId of itemIds) Vue.set(state.coverEpochs, itemId, (state.coverEpochs[itemId] || 0) + 1)
   },
   setIsModalOpen(state, val) {
     state.isModalOpen = val

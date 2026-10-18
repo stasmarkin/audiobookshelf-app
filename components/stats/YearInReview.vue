@@ -129,7 +129,7 @@ export default {
               img.addEventListener('error', () => {
                 resolve()
               })
-              img.src = this.$store.getters['globals/getLibraryItemCoverSrcById'](libraryItemId)
+              img.src = this.$store.getters['globals/getLibraryItemCoverSrcById'](libraryItemId, null, { wait: true })
             })
           }
         }

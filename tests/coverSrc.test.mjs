@@ -11,7 +11,8 @@ const { coverSrc, isCoverRoute, shownGroupCovers } = await importSource('../util
 const scriptOf = (source) => source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
 
 const globalsSource = (await read('../store/globals.js')).replace(/^import .*$/gm, '').replace(/^export const /gm, 'const ')
-const gettersFor = (native, platform = native ? 'android' : 'web') => new Function('Capacitor', 'coverSrc', `${globalsSource}\nreturn getters`)({ getPlatform: () => platform }, coverSrc)
+const fakeVue = { set: (target, key, value) => (target[key] = value) }
+const gettersFor = (native, platform = native ? 'android' : 'web') => new Function('Vue', 'Capacitor', 'coverSrc', `${globalsSource}\nreturn getters`)(fakeVue, { getPlatform: () => platform }, coverSrc)
 
 const rootGetters = (serverAddress, tokenRequired = false) => ({ 'user/getServerAddress': serverAddress, 'user/getToken': 't', getDoesServerImagesRequireToken: tokenRequired })
 const coverOf = (native, item, serverAddress, raw = false) => gettersFor(native).getLibraryItemCoverSrc({ coverEpochs: {} }, null, {}, rootGetters(serverAddress))(item, '/book_placeholder.jpg', raw)
@@ -85,21 +86,22 @@ test('a group whose only cover route failed shows its name', () => {
 })
 
 test('a cover-ready notice makes the cover route ask again', async () => {
-  const mutations = new Function(`${globalsSource}\nreturn mutations`)()
+  const mutations = new Function('Vue', `${globalsSource}\nreturn mutations`)(fakeVue)
   const state = { coverEpochs: {} }
   const getters = gettersFor(true)
-  const src = () => getters.getLibraryItemCoverSrc(state, null, {}, rootGetters(null))(book(), '/p.jpg')
-  const byId = () => getters.getLibraryItemCoverSrcById(state, null, {}, rootGetters(null))('li1')
+  const src = (raw = false) => getters.getLibraryItemCoverSrc(state, null, {}, rootGetters(null))(book(), '/p.jpg', raw)
+  const byId = (options) => getters.getLibraryItemCoverSrcById(state, null, {}, rootGetters(null))('li1', null, options)
 
   assert.equal(src(), '/_absplus/cover/li1?ts=1700', 'no notice: no epoch')
-  mutations.bumpCoverEpoch(state, 'li1')
+  mutations.bumpCoverEpochs(state, ['li1'])
   assert.equal(src(), '/_absplus/cover/li1?ts=1700&e=1')
   assert.equal(byId(), '/_absplus/cover/li1?e=1')
-  mutations.bumpCoverEpoch(state, 'other')
+  assert.equal(src(true), '/_absplus/cover/li1?ts=1700&raw=1', 'the streamed original is not loaded again for a stored standard copy')
+  mutations.bumpCoverEpochs(state, ['other'])
   assert.equal(src(), '/_absplus/cover/li1?ts=1700&e=1', 'another item does not change this cover')
   assert.equal(coverSrc({ itemId: 'li1', updatedAt: 1700, native: false, serverAddress: 'https://srv', epoch: 3 }), 'https://srv/api/items/li1/cover?ts=1700', 'web mode ignores it')
 
-  const { createDataService } = await importSource('../utils/dataService.js')
+  const { createDataService, COVER_READY_BATCH_MS } = await importSource('../utils/dataService.js')
   const listeners = {}
   const commits = []
   createDataService({
@@ -107,5 +109,16 @@ test('a cover-ready notice makes the cover route ask again', async () => {
     store: { state: {}, commit: (type, payload) => commits.push([type, payload]) }
   })
   listeners.onCoverReady({ itemId: 'li1' })
-  assert.deepEqual(commits.filter(([type]) => type === 'globals/bumpCoverEpoch'), [['globals/bumpCoverEpoch', 'li1']])
+  listeners.onCoverReady({ itemId: 'li2' })
+  listeners.onCoverReady({ itemId: 'li1' })
+  const bumps = () => commits.filter(([type]) => type === 'globals/bumpCoverEpochs')
+  assert.deepEqual(bumps(), [], 'notices wait for the batch')
+  await new Promise((resolve) => setTimeout(resolve, COVER_READY_BATCH_MS + 50))
+  assert.deepEqual(bumps(), [['globals/bumpCoverEpochs', ['li1', 'li2']]], 'one mutation for the batch')
+})
+
+test('Year in Review waits for a missing cover', () => {
+  const state = { coverEpochs: {} }
+  assert.equal(gettersFor(true).getLibraryItemCoverSrcById(state, null, {}, rootGetters(null))('li1', null, { wait: true }), '/_absplus/cover/li1?wait=1')
+  assert.equal(gettersFor(false).getLibraryItemCoverSrcById(state, null, {}, rootGetters('https://srv'))('li1', null, { wait: true }), 'https://srv/api/items/li1/cover', 'web mode as before')
 })

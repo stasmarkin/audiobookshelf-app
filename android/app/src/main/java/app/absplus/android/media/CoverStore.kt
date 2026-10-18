@@ -12,7 +12,7 @@ const val MAX_COVER_FILE_BYTES = 5L * 1024 * 1024
 const val COVER_TOUCH_EVERY_MS = 24 * 60 * 60 * 1000L
 const val COVER_CACHE_DIR = "cover-cache"
 
-private val COVER_EXTENSIONS = setOf("jpg", "png", "webp", "gif")
+private val COVER_EXTENSIONS = setOf("jpg", "png", "webp", "gif", "avif", "bmp")
 private const val TMP_EXTENSION = "tmp"
 
 data class CoverEntry(val itemId: String, val updatedAt: Long, val file: File, val bytes: Long)
