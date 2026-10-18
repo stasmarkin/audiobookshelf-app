@@ -205,7 +205,7 @@ class AwaitingServiceTest {
   }
 
   @Test
-  fun aServerPingedBeforeTheSignInKeepsTheQueueWaitingUntilTheSignIn() = withServerPingedBeforeTheSignIn { f ->
+  fun aServerPingedBeforeTheLiveSessionKeepsTheQueueWaitingUntilTheSession() = withServerPingedBeforeTheSignIn { f ->
     pns.watchServerForAwaiting()
     showB()
     f.idle()
@@ -213,10 +213,10 @@ class AwaitingServiceTest {
     assertEquals(itemB, pns.awaiting.blockedItem)
     assertFalse("nothing starts", pns.awaitingPresentation.isResuming)
 
+    // Set without a sign-in report, as Android Auto or a restore does
     DeviceManager.serverConnectionConfig = f.config("config-1")
-    ServerReachability.reportSignedIn("config-1")
     f.idle()
-    assertFalse("the sign-in hands out the wait's resume", pns.awaiting.isAwaiting)
+    assertFalse("the live session hands out the wait's resume", pns.awaiting.isAwaiting)
   }
 
   @Test

@@ -1147,9 +1147,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
   }
 
-  // onlineEntries, not state: state is conflated and can miss a quick OFFLINE -> ONLINE; signIns: ONLINE can come first
+  // onlineEntries, not state: state is conflated and can miss a quick OFFLINE -> ONLINE; the live session can come after it
   internal fun watchServerForAwaiting() {
-    startScope.launch { merge(ServerReachability.onlineEntries, ServerReachability.signIns).collect { resumeAwaitingIfReady() } }
+    startScope.launch { merge(ServerReachability.onlineEntries, DeviceManager.liveSessionChanges).collect { resumeAwaitingIfReady() } }
   }
 
   private fun readyServer(): String? = readyServerConfigId(ServerReachability.serverConfigId.value, DeviceManager.serverConnectionConfig?.id)

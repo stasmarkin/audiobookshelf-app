@@ -46,9 +46,6 @@ object ServerReachability : ReachabilitySink {
    * OFFLINE and back; this count still changes.
    */
   val onlineEntries: StateFlow<Long> = _onlineEntries.asStateFlow()
-  private val _signIns = MutableStateFlow(0L)
-  /** Counts the app's sign-ins, each after the machine took it: one while already ONLINE changes no [state]. */
-  val signIns: StateFlow<Long> = _signIns.asStateFlow()
 
   @Volatile private var machine: ReachabilityMachine? = null
   private var probe: suspend (ServerConnectionConfig) -> Boolean = ::httpPing
@@ -160,7 +157,6 @@ object ServerReachability : ReachabilitySink {
         }
       }
     }
-    if (next is ReachabilityInput.SignedIn) _signIns.value++
   }
 
   private fun cancelProbe() {
