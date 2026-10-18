@@ -82,9 +82,21 @@ class AwaitingForegroundTest {
       pns.preparePlayer(streamOfB(), false, 1f)
     }
     assertEquals(itemB, pns.awaiting.blockedItem)
-    // The notification's Play reaches the wait, not the restore of the last session: the queue starts its item again
+    // The notification's Play reaches the wait, not the restore of the last session: the item then starts playing
     pns.play()
     assertEquals("the Play tried to make the service foreground", 5, starts)
+    val resume = pns.awaiting.onServerState(ServerState.ONLINE, "config-1") as AwaitingAction.ResumeStream
+    assertEquals(itemB, resume.queueItem)
+    assertTrue(resume.playWhenReady)
+  }
+
+  @Test
+  fun aRefusedDownloadStartsAgainOnPlayWithoutTheServer() {
+    refuseStarts()
+    pns.preparePlayer(streamOfB().apply { playMethod = PLAYMETHOD_LOCAL }, true, 1f)
+    assertEquals(itemB, pns.awaiting.blockedItem)
+    // The server is still away: the Play starts the queue's item again, which finds the download
+    pns.play()
     assertNull(pns.awaiting.blockedItem)
   }
 
