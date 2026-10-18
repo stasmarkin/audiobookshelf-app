@@ -76,11 +76,16 @@ class AwaitingForegroundTest {
     assertEquals("the queue waits on its item again", itemB, pns.awaiting.blockedItem)
     val notice = shadowOf(ctx.getSystemService(NotificationManager::class.java)).allNotifications.single()
     assertEquals("Tap Play to continue", notice.text())
-    // The notification's Play reaches the wait, not the restore of the last session: the item then starts playing
+    // Three server returns in the background are refused three times: no failed resumes, the queue stays
+    repeat(3) {
+      assertTrue(pns.awaiting.onServerState(ServerState.ONLINE, "config-1") is AwaitingAction.ResumeStream)
+      pns.preparePlayer(streamOfB(), false, 1f)
+    }
+    assertEquals(itemB, pns.awaiting.blockedItem)
+    // The notification's Play reaches the wait, not the restore of the last session: the queue starts its item again
     pns.play()
-    val resume = pns.awaiting.onServerState(ServerState.ONLINE, "config-1") as AwaitingAction.ResumeStream
-    assertEquals(itemB, resume.queueItem)
-    assertTrue(resume.playWhenReady)
+    assertEquals("the Play tried to make the service foreground", 5, starts)
+    assertNull(pns.awaiting.blockedItem)
   }
 
   @Test
