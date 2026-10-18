@@ -117,6 +117,9 @@ class CoverCache(
     return CoverAnswer.Stream(fetched.mime, fetched.body)
   }
 
+  /** The newest cached version, marked as used; no network (offline WebView answers). */
+  fun newestCached(itemId: String): CoverEntry? = store.newest(itemId)?.also { store.touch(it) }
+
   /** For native consumers: the newest cached file, index only. */
   fun latestFile(itemId: String): File? = store.peekNewest(itemId)?.file
 

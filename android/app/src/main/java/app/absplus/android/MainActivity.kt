@@ -30,6 +30,7 @@ import app.absplus.android.plugins.AbsThemeImport
 import app.absplus.android.plugins.AbsUpdater
 import app.absplus.android.plugins.AbsData
 import app.absplus.android.sync.SyncRuntime
+import app.absplus.android.media.CoverWebViewClient
 import app.absplus.android.services.DownloadServiceHost
 import app.absplus.android.services.StorageMoveService
 import com.getcapacitor.BridgeActivity
@@ -64,6 +65,8 @@ class MainActivity : BridgeActivity() {
     registerPlugin(AbsData::class.java)
 
     super.onCreate(savedInstanceState)
+    // Covers for the WebView are served by the app, so a cover shown once online is there offline too
+    bridge?.let { it.setWebViewClient(CoverWebViewClient(it)) }
     DLog.d(tag, "onCreate")
     DLog.marker("App UI started (Activity created)")
 
