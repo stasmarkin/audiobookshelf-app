@@ -453,7 +453,7 @@ class SyncEngineTest {
         200 to serverBookmarks
       } else 200 to "{}"
     }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
 
     eventually("the pull") { gets() == 1 }
     settle()
@@ -472,15 +472,15 @@ class SyncEngineTest {
       if (request.method == "GET") {
         ApiHandler.invalidateAuthRequests()
         // The server goes away before the redo runs
-        if (drops.getAndDecrement() > 0) state.value = ServerState.OFFLINE
+        if (drops.getAndDecrement() > 0) setState(ServerState.OFFLINE)
         200 to serverBookmarks
       } else 200 to "{}"
     }
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the first pull") { gets() == 1 }
     settle()
 
-    state.value = ServerState.ONLINE
+    setState(ServerState.ONLINE)
     eventually("the next pull and its own redo") { gets() == 3 }
     settle()
     delay(200)
