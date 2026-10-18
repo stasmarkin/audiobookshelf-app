@@ -24,7 +24,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlay() {
     DLog.d(tag, "ON PLAY MEDIA SESSION COMPAT")
-    // Android Auto's Play with nothing to resume starts the latest started item (Р22); a headset or the widget stays a no-op
+    // Android Auto's Play with nothing to resume starts the latest started item; a headset or the widget stays a no-op
     val fromAuto = isAutoController(playerNotificationService.mediaSession.currentControllerInfo.packageName)
     playerNotificationService.play(if (fromAuto) ({ startFirstPlayable { playerNotificationService.onMediaButtonHandled() } }) else null)
   }
