@@ -58,13 +58,22 @@ sealed interface AwaitingAction {
 }
 
 /**
- * A start of the item the queue is at that could only stream while the server is away: the queue waits on it, as when
- * it reaches that item by itself, instead of failing the start and losing the queue. Null: start as usual (a single
- * Play outside the queue, a downloaded copy, a cast start, the server online or refusing the sign-in).
+ * The server a play request can go to now: the reachable one, when the live session (whose address and token the request
+ * uses) is for it. ONLINE comes from a ping, so on a cold start it can come before the app has signed in.
  */
-fun queueItemToAwait(request: StartRequest, plan: PlaybackSource, queue: List<PlaylistQueueItem>, index: Int, state: ServerState): PlaylistQueueItem? {
+fun readyServerConfigId(reachableServerConfigId: String?, liveSessionServerConfigId: String?): String? =
+        reachableServerConfigId?.takeIf { it == liveSessionServerConfigId }
+
+/**
+ * A start of the item the queue is at that could only stream while the server is away (or not signed in yet): the
+ * queue waits on it, as when it reaches that item by itself, instead of failing the start and losing the queue. Null:
+ * start as usual (a single Play outside the queue, a downloaded copy, a cast start, the server ready or refusing the
+ * sign-in).
+ */
+fun queueItemToAwait(request: StartRequest, plan: PlaybackSource, queue: List<PlaylistQueueItem>, index: Int, state: ServerState,
+                     serverReady: Boolean = state == ServerState.ONLINE): PlaylistQueueItem? {
   // A server that refuses the sign-in answers: the start fails as before and the user signs in again
-  if (plan !is PlaybackSource.Stream || request.forceStream || state == ServerState.ONLINE || state == ServerState.UNAUTHORIZED) return null
+  if (plan !is PlaybackSource.Stream || request.forceStream || serverReady || state == ServerState.UNAUTHORIZED) return null
   val item = queue.getOrNull(index) ?: return null
   return item.takeIf { it.libraryItemId == plan.libraryItemId && it.episodeId.orEmpty() == plan.episodeId.orEmpty() }
 }

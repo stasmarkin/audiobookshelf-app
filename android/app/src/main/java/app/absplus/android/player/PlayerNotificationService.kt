@@ -77,6 +77,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -612,12 +613,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     initializeMPlayer()
     currentPlayer = mPlayer
 
-    // onlineEntries, not state: state is conflated and can miss a quick OFFLINE -> ONLINE
-    startScope.launch {
-      ServerReachability.onlineEntries.collect {
-        perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission()))
-      }
-    }
+    watchServerForAwaiting()
     // Download callbacks come from a worker thread; the collector runs on main
     startScope.launch { SyncRuntime.localCopyReady.collect { onLocalCopyReady(it) } }
     startScope.launch {
@@ -1151,6 +1147,17 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
   }
 
+  // onlineEntries, not state: state is conflated and can miss a quick OFFLINE -> ONLINE; signIns: ONLINE can come first
+  internal fun watchServerForAwaiting() {
+    startScope.launch { merge(ServerReachability.onlineEntries, ServerReachability.signIns).collect { resumeAwaitingIfReady() } }
+  }
+
+  private fun readyServer(): String? = readyServerConfigId(ServerReachability.serverConfigId.value, DeviceManager.serverConnectionConfig?.id)
+
+  private val isServerReady get() = ServerReachability.state.value == ServerState.ONLINE && readyServer() != null
+
+  private fun resumeAwaitingIfReady() = perform(awaiting.onServerState(ServerReachability.state.value, readyServer(), streamPermission()))
+
   private fun streamPermission(): StreamPermission {
     val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
     return StreamPermission(metered, deviceSettings.streamingUsingCellular)
@@ -1415,7 +1422,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       }
       is PlaybackSource.Stream -> {
         // Without an active server there is nothing to wait for: the start fails as before
-        val queued = ActiveServer.current()?.let { queueItemToAwait(request, plan, playlistQueue, playlistQueueIndex, ServerReachability.state.value) }
+        val queued = ActiveServer.current()?.let { queueItemToAwait(request, plan, playlistQueue, playlistQueueIndex, ServerReachability.state.value, isServerReady) }
         if (queued != null) {
           awaitQueueStart(ticket, queued, onResult)
           return@launch
@@ -1467,7 +1474,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             // A Pause during the read is kept
             block = { display -> blockQueue(item, startGate.admitAgain(ticket, playWhenReady) == true, display, readDisplay = false) },
             answer = { started -> onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced) },
-            resumeIfOnline = { perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission())) })
+            resumeIfOnline = { resumeAwaitingIfReady() })
   }
 
   private fun prepareAdmitted(ticket: StartGate.Ticket, session: PlaybackSession, request: StartRequest) {
@@ -1654,7 +1661,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           }
         }
         is PlaybackSource.Stream -> {
-          if (ServerReachability.state.value != ServerState.ONLINE) {
+          if (!isServerReady) {
             blockQueueFor(ticket, nextItem)
             if (wakeLock.isHeld) wakeLock.release()
             return@launch
@@ -1705,7 +1712,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       if (wakeLock.isHeld) wakeLock.release()
       return
     }
-    if (retryCount > 0 && ServerReachability.state.value != ServerState.ONLINE) {
+    if (retryCount > 0 && !isServerReady) {
       blockQueueFor(ticket, nextItem)
       if (wifiLock.isHeld) wifiLock.release()
       if (wakeLock.isHeld) wakeLock.release()
@@ -1729,7 +1736,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           if (wakeLock.isHeld) wakeLock.release()
         }
       } else mainHandler.post {
-        if (ServerReachability.state.value != ServerState.ONLINE && playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
+        if (!isServerReady && playlistQueue.getOrNull(playlistQueueIndex) === nextItem) {
           blockQueueFor(ticket, nextItem)
         } else {
           // The server answered with an error: nothing to wait for
@@ -2048,7 +2055,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (awaiting.isAwaiting) {
       // The player has nothing to play while waiting: start again now if the server is back, else probe it. Before the
       // restore below: a queue may wait with no session, and the last session is not what it waits on
-      val action = awaiting.onUserPlay(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission())
+      val action = awaiting.onUserPlay(ServerReachability.state.value, readyServer(), streamPermission())
       if (action == null) ServerReachability.retryNow() else perform(action)
       return
     }
@@ -3379,7 +3386,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               clientEventEmitter?.onNetworkMeteredChanged(isUnmeteredNetwork)
               // A wait held back by the cellular setting may go on now
               if (isUnmeteredNetwork) mainHandler.post {
-                perform(awaiting.onServerState(ServerReachability.state.value, ServerReachability.serverConfigId.value, streamPermission()))
+                resumeAwaitingIfReady()
               }
               if (hasNetworkConnectivity) {
                 // Force android auto loading if libraries are empty.

@@ -17,6 +17,9 @@ import app.absplus.android.media.MediaProgressSyncer
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
+import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.ServerReachability
+import app.absplus.android.sync.SyncTestFixture
 import app.absplus.android.sync.ServerState
 import com.google.android.exoplayer2.Player
 import java.lang.reflect.Proxy
@@ -183,5 +186,52 @@ class AwaitingServiceTest {
     assertEquals("session-a", pns.currentPlaybackSession?.id)
     assertTrue("the lost stream still waits", pns.awaiting.isStreamLost)
     assertTrue(playerCalls.contains("pause"))
+  }
+
+  // The server answers its ping, but the app has not signed in yet (a cold start offline): no live session
+  private fun withServerPingedBeforeTheSignIn(test: (SyncTestFixture) -> Unit) {
+    val f = SyncTestFixture()
+    try {
+      f.save(f.config("config-1"))
+      ActiveServer.init(ctx)
+      ActiveServer.remember("config-1")
+      ServerReachability.start(ctx, f.probe)
+      f.idle()
+      assertEquals(ServerState.ONLINE, ServerReachability.state.value)
+      test(f)
+    } finally {
+      f.close()
+    }
+  }
+
+  @Test
+  fun aServerPingedBeforeTheSignInKeepsTheQueueWaitingUntilTheSignIn() = withServerPingedBeforeTheSignIn { f ->
+    pns.watchServerForAwaiting()
+    showB()
+    f.idle()
+    assertTrue("the play request would have no address: the wait is kept", pns.awaiting.isAwaiting)
+    assertEquals(itemB, pns.awaiting.blockedItem)
+    assertFalse("nothing starts", pns.awaitingPresentation.isResuming)
+
+    DeviceManager.serverConnectionConfig = f.config("config-1")
+    ServerReachability.reportSignedIn("config-1")
+    f.idle()
+    assertFalse("the sign-in hands out the wait's resume", pns.awaiting.isAwaiting)
+  }
+
+  @Test
+  fun aQueueReachingAStreamBeforeTheSignInWaitsInsteadOfRequestingIt() = withServerPingedBeforeTheSignIn { f ->
+    // No apiHandler: a play request would fail the test
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    pns.playlistQueue = listOf(PlaylistQueueItem("book-a", null), itemB)
+    pns.playlistQueueIndex = 0
+    pns.advancePlaylistQueue()
+    // The plan reads the downloads off the main thread
+    val deadline = System.currentTimeMillis() + 5_000
+    while (pns.awaiting.blockedItem == null && System.currentTimeMillis() < deadline) {
+      f.idle()
+      Thread.sleep(10)
+    }
+    assertEquals("the queue waits on B, no play request", itemB, pns.awaiting.blockedItem)
   }
 }
