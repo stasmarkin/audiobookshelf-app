@@ -558,6 +558,7 @@
   "MessageDownloading": "Downloading...",
   "MessageDownloadingEpisode": "Downloading episode",
   "MessageDownloadingFile": "Downloading {0}",
+  "MessageDownloadsPausedBySystem": "Android paused downloads. Open the app to resume them.",
   "MessageEpisodesQueuedForDownload": "{0} Episode(s) queued for download",
   "MessageExternalMediaControls": "Next and Previous from headsets, watches, cars and lock-screen controls use this mode. Fast Forward and Rewind always use your skip intervals. Chapters use audiobook chapter markers; Previous restarts the current chapter after 4 seconds, otherwise it goes to the previous chapter. Missing or invalid chapters, podcasts without audiobook chapters, and unavailable original-file timelines use time skips. Navigation stays within the current book or episode; the on-screen player controls are unchanged.",
   "MessageFailedToRefreshToken": "Failed to refresh token, re-login required",

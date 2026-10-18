@@ -36,7 +36,8 @@ object DownloadServiceHost {
           val downloads: String,
           val cancel: String,
           val moveToSd: String,
-          val moveToInternal: String
+          val moveToInternal: String,
+          val pausedBySystem: String
   )
 
   private var manager: DownloadItemManager? = null
@@ -51,6 +52,7 @@ object DownloadServiceHost {
   fun ensure(context: Context): DownloadItemManager {
     if (manager == null) {
       val appContext = context.applicationContext
+      this.appContext = appContext
       DbManager.initialize(appContext)
       manager = DownloadItemManager(FolderScanner(appContext), appContext, ForwardingEmitter)
       watchNetwork(appContext)
@@ -101,7 +103,10 @@ object DownloadServiceHost {
     try {
       val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
       cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = startServiceIfIdle(appContext)
+        // A pause by the system waits for the app's foreground: from here the start would only be refused again
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+          if (!pausedBySystem) startIdleService(appContext)
+        }
       })
     } catch (e: RuntimeException) {
       AbsLogger.error(TAG, "Could not watch the network for paused auto downloads: ${e.message}")
@@ -110,6 +115,12 @@ object DownloadServiceHost {
 
   /** Starts the service for queued work restored or enqueued while the app was in background (e.g. by a worker). */
   fun startServiceIfIdle(context: Context) {
+    // Only the app's foreground calls this, and the foreground resets the dataSync time limit
+    endSystemPause(context)
+    startIdleService(context)
+  }
+
+  private fun startIdleService(context: Context) {
     val appContext = context.applicationContext
     scope.launch {
       restoreJob?.join()
@@ -118,8 +129,9 @@ object DownloadServiceHost {
   }
 
   /**
-   * The app came to the front: auto downloads held when a background window ended may run again, under the foreground
-   * service (a process that survived in the background does not load the bridge again). No-op before the manager exists.
+   * The app came to the front: auto downloads held when a background window ended, and downloads Android paused at its
+   * time limit, may run again under the foreground service (a process that survived in the background does not load
+   * the bridge again). No-op before the manager exists.
    */
   fun releaseAutoHold(context: Context) {
     val m = synchronized(this) { manager } ?: return
@@ -262,7 +274,10 @@ object DownloadServiceHost {
     restoreJob?.join()
     if (service != null) return
     queue.setAutoTransfersHeld(false)
-    queue.resumeWork()
+    // The worker's window is not a foreground service, so the dataSync time limit does not hold it back. The pause
+    // itself stays: lifting it here would let a network change start the service only to be refused again
+    nextPauseGeneration()
+    queue.resumeTransfers()
     try {
       withTimeoutOrNull(budgetMs) {
         while (service == null && synchronized(queue) { queue.hasWork() }) delay(WORKER_POLL_MS)
@@ -271,6 +286,8 @@ object DownloadServiceHost {
       // Budget used up or the worker cancelled: nothing keeps the process alive once the worker returns, so auto
       // transfers stop here and resume (by range) in the next window or when the app is open (M03)
       if (service == null) queue.setAutoTransfersHeld(true)
+      // Manual downloads too, while Android still withholds the service they need
+      if (service == null && pausedBySystem) queue.suspendTransfers()
     }
   }
 
@@ -323,7 +340,8 @@ object DownloadServiceHost {
           downloads: String,
           cancel: String,
           moveToSd: String,
-          moveToInternal: String
+          moveToInternal: String,
+          pausedBySystem: String
   ) {
     context.getSharedPreferences(NOTIFICATION_PREFERENCES, Context.MODE_PRIVATE)
             .edit()
@@ -334,6 +352,7 @@ object DownloadServiceHost {
             .putString(KEY_CANCEL, cancel)
             .putString(KEY_MOVE_TO_SD, moveToSd)
             .putString(KEY_MOVE_TO_INTERNAL, moveToInternal)
+            .putString(KEY_PAUSED_BY_SYSTEM, pausedBySystem)
             .apply()
   }
 
@@ -348,7 +367,8 @@ object DownloadServiceHost {
             preferences.getString(KEY_DOWNLOADS, DEFAULT_DOWNLOADS) ?: DEFAULT_DOWNLOADS,
             preferences.getString(KEY_CANCEL, DEFAULT_CANCEL) ?: DEFAULT_CANCEL,
             preferences.getString(KEY_MOVE_TO_SD, DEFAULT_MOVE_TO_SD) ?: DEFAULT_MOVE_TO_SD,
-            preferences.getString(KEY_MOVE_TO_INTERNAL, DEFAULT_MOVE_TO_INTERNAL) ?: DEFAULT_MOVE_TO_INTERNAL)
+            preferences.getString(KEY_MOVE_TO_INTERNAL, DEFAULT_MOVE_TO_INTERNAL) ?: DEFAULT_MOVE_TO_INTERNAL,
+            preferences.getString(KEY_PAUSED_BY_SYSTEM, DEFAULT_PAUSED_BY_SYSTEM) ?: DEFAULT_PAUSED_BY_SYSTEM)
   }
 
   fun attachService(downloadService: DownloadService) {
@@ -362,12 +382,48 @@ object DownloadServiceHost {
     if (service === downloadService) service = null
   }
 
+  /** Runs the queue under a service that is in the foreground now, which lifts a pause by the system. */
   fun startWork(context: Context) {
     val queue = ensure(context)
+    endSystemPause(context)
+    val generation = pauseGeneration
     scope.launch {
       restoreJob?.join()
-      queue.resumeWork()
+      // A pause by the system that came meanwhile wins
+      synchronized(queue) { if (pauseGeneration == generation) queue.resumeTransfers() }
     }
+  }
+
+  /**
+   * Android ended the service at its dataSync time limit or refused to start it. Transfers pause with their bytes
+   * kept and nothing fails. Network changes don't restart the service until the app's foreground; a worker run still
+   * transfers in its own window.
+   */
+  fun pauseBySystem(downloadService: DownloadService) {
+    val owned = synchronized(this) { service === downloadService }
+    // Detached first, so progress updates can't repost the ongoing notification the service just removed
+    detachService(downloadService)
+    if (!pausedBySystem) {
+      pausedBySystem = true
+      DownloadService.showPausedBySystem(downloadService)
+    }
+    val generation = nextPauseGeneration()
+    // A service refused at its start ran nothing: what runs now is a worker's, in its own window
+    if (!owned) return
+    val m = synchronized(this) { manager } ?: return
+    // Off the main thread: onTimeout has seconds to stop. A resume that came meanwhile wins
+    scope.launch { synchronized(m) { if (pauseGeneration == generation) m.suspendTransfers() } }
+  }
+
+  // Orders a pause by the system against resumes whose coroutines may run in either order
+  @Synchronized
+  private fun nextPauseGeneration(): Int = ++pauseGeneration
+
+  private fun endSystemPause(context: Context) {
+    nextPauseGeneration()
+    pausedBySystem = false
+    // Also after a process restart, which forgets the pause but not its notification
+    DownloadService.hidePausedBySystem(context)
   }
 
   private fun onRestoreComplete(context: Context) {
@@ -401,6 +457,11 @@ object DownloadServiceHost {
     override fun onQueueChanged(hasWork: Boolean) {
       bridgeEmitter.onQueueChanged(hasWork)
       service?.onQueueChanged(hasWork)
+      // E.g. a worker run finished the paused downloads, or only failed ones are left: nothing to open the app for; the
+      // pause itself stays until the app's foreground lifts it
+      if (!hasWork && pausedBySystem && queueSnapshot().none { it.downloadItemParts.any { p -> !p.moved && !p.failed } }) {
+        appContext?.let(DownloadService::hidePausedBySystem)
+      }
     }
   }
 
@@ -419,8 +480,10 @@ object DownloadServiceHost {
   private const val KEY_CANCEL = "cancel"
   private const val KEY_MOVE_TO_SD = "move_to_sd"
   private const val KEY_MOVE_TO_INTERNAL = "move_to_internal"
+  private const val KEY_PAUSED_BY_SYSTEM = "paused_by_system"
   const val DEFAULT_MOVE_TO_SD = "Moving downloads to SD card"
   const val DEFAULT_MOVE_TO_INTERNAL = "Moving downloads to internal storage"
+  const val DEFAULT_PAUSED_BY_SYSTEM = "Android paused downloads. Open the app to resume them."
   private const val DEFAULT_PREPARING = "Preparing downloads"
   private const val DEFAULT_DOWNLOADING_FILE = "Downloading {0}"
   private const val DEFAULT_WAITING_FOR_STORAGE = "Waiting for available storage"
@@ -429,4 +492,7 @@ object DownloadServiceHost {
   private const val TAG = "DownloadServiceHost"
   private const val WORKER_POLL_MS = 5_000L
   @Volatile private var networkWatched = false
+  @Volatile private var pausedBySystem = false
+  @Volatile private var pauseGeneration = 0
+  @Volatile private var appContext: Context? = null
 }

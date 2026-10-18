@@ -16,6 +16,11 @@ Merged into `plus`, not yet in a published release.
   seconds to 30 minutes, Off by default. When on, the full player shows it outside the short jump. The notification,
   headset, widget and Android Auto keep the short jumps. For everyone, the full player's jump keys are now chevrons
   centered on Play (the short jumps used circular arrows); the collapsed player keeps the arrows.
+- **Downloads at the Android 15 time limit** (contributed by Stanislav Markin): Android 15 lets an app's downloads run
+  in the background for 6 hours a day. When that time is used up, downloads now pause instead of the app crashing, and
+  Android restarting the download service no longer crashes it again and again. Paused downloads keep what they have
+  downloaded, stay in the list as "Continues when the app is open", and continue from there when the app is opened. A
+  notification says that Android paused them. Background auto download runs continue in their own windows.
 
 ## v0.19.0 — Podcast auto downloads, SD card storage, E-ink and Bluetooth controls
 

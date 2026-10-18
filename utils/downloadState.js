@@ -7,8 +7,8 @@
 //   longer the one the download was started for (nothing transfers or is deleted until it is reconnected);
 // - waitingForSpace is queued until storage frees up.
 // The item's waitingFor (getDownloadQueue) says why a queued item does not transfer: "sdCard" (finished files wait for
-// the SD card), or for an auto download "network", "wifi", "charging" or "background" (continues in the next background
-// window or when the app is open).
+// the SD card), for an auto download "network", "wifi", "charging", or "background" (continues in the next background
+// window or when the app is open; also any download while Android paused the download service).
 // Retry restarts unfinished files from byte 0 (finished files are kept), so it is never called Resume. (A restart of
 // the app resumes identified staged bytes on its own; that is not an action.)
 

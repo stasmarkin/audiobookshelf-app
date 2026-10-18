@@ -91,7 +91,8 @@ class AbsDownloader : Plugin() {
             call.getString("downloads") ?: "Downloads",
             call.getString("cancel") ?: "Cancel",
             call.getString("moveToSd") ?: DownloadServiceHost.DEFAULT_MOVE_TO_SD,
-            call.getString("moveToInternal") ?: DownloadServiceHost.DEFAULT_MOVE_TO_INTERNAL)
+            call.getString("moveToInternal") ?: DownloadServiceHost.DEFAULT_MOVE_TO_INTERNAL,
+            call.getString("pausedBySystem") ?: DownloadServiceHost.DEFAULT_PAUSED_BY_SYSTEM)
     call.resolve()
   }
 
