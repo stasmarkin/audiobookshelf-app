@@ -125,7 +125,7 @@ Listening sessions stay in Paper (`playbackSession`) and are sent through `local
 
 ## Sync and merge
 
-**One merge rule replaces three: the larger `lastUpdate` wins, but a local row with `pending` is never overwritten by the server until it has been sent.** The server itself trusts the client's `lastUpdate`, so the rule matches its model. In practice an unsent local action takes priority over a newer server value and, once sent, overwrites the server. Clock skew between devices is accepted as it is on the server. Conflicts aren't shown.
+**One merge rule replaces three: the larger `lastUpdate` wins, but a local row with `pending` is never overwritten by the server until it has been sent.** The server itself trusts the client's `lastUpdate`, so the rule matches its model. In practice an unsent local action takes priority over a newer server value and, once sent, overwrites the server (a listening position the server didn't take is the exception: it is sent only if the server isn't further, see [Listening sessions](#sync-and-merge)). Clock skew between devices is accepted as it is on the server. Conflicts aren't shown.
 
 - **Explicit actions** ("finished", reset, e-book progress, bookmarks) set `pending` and add an outbox row.
 - **Playback ticks** write `media_progress` without an outbox row and without setting `pending`: listening progress reaches the server through sessions (`/sync` and `local-all`). A tick never clears a `pending` that is already set.
@@ -149,6 +149,7 @@ Listening sessions stay in Paper (`playbackSession`) and are sent through `local
 
 - **Backoff:** 1 s, 5 s, 30 s, 5 min.
 - **401:** handed to the shared `TokenRefresher`, then retried. New code never refreshes on its own, and a response to a request sent before a logout or server switch is not applied.
+- **408 and 429:** retried with the backoff, like a 5xx; the row and its `pending` stay.
 - **404 and other 4xx:** the row is dropped and logged to diagnostics so it can't block the queue, and the related `pending` is cleared (a pending bookmark row is removed).
 - **Rows of an inactive server** stay queued until that server is active again.
 - **`progress_patch`** stores which fields the action changed. When sent, the body is those fields read from the current `media_progress` row, plus `lastUpdate`, to `PATCH /api/me/progress/:libraryItemId` (or `/:libraryItemId/:episodeId`). So "finished" or e-book progress never overwrites an audio position set elsewhere. If the row changes while the `PATCH` is in flight, another `PATCH` is queued after the 2xx; `pending` is cleared only once the latest value has been sent.
@@ -159,7 +160,7 @@ Listening sessions stay in Paper (`playbackSession`) and are sent through `local
 
 - An offline segment of a streamed item gets its own uuid instead of the server session's id, so `local-all` can't overwrite the server session, and the same listening time is not sent through both `/sync` and `local-all`.
 - The `local-all` response is handled per session: successful sessions are removed, failed ones stay queued for next time, except sessions the server rejected because the item or library no longer exists — those are dropped and logged, like a 404 in the outbox, or the queue would never empty. Only the snapshot that was sent is removed: a session updated by a tick while `local-all` was in flight stays and goes next time.
-- A session the server accepts without taking its position (`success` with `progressSynced: false`, because the server's `lastUpdate` is newer) doesn't silently lift the unsent-session protection: a `progress_patch` with the row's position, progress and `lastUpdate` is queued, and `pending` is cleared after its 2xx.
+- A session the server accepts without taking its position (`success` with `progressSynced: false`, because the server's `lastUpdate` is newer) doesn't silently lift the unsent-session protection: a conditional `progress_patch` of the row's position is queued. Before sending it, the outbox reads the server's record: if the server is at or past the local position, or has the item finished, the position is not sent and the server's values are taken into the row; otherwise the local position is sent. `pending` is cleared after the 2xx, or at once when nothing is left to send. So a position another device moved further is never rolled back.
 
 **Paper mirror and import.** `MediaProgressSyncer` writes `media_progress` after every tick. Every accepted progress change of a downloaded copy — a tick, a user action or a server value — is also mirrored to Paper `LocalMediaProgress` from one place during phase 1. In the other direction, on every start Paper progress newer than the Room row is imported into Room (this covers time spent on a rolled-back version); each server seen in the import is remembered until its first successful user reconcile; on that reconcile every imported row of that server whose `lastUpdate` is newer than the server's, or that has no server record at all, gets `pending` and a `progress_patch` with its audio and e-book fields. This happens before the rule that deletes rows missing on the server, so imported rows are never deleted by it. Only then is that server forgotten (other servers wait for their own connection). The old local-progress sync is removed in release 2b only together with this replacement.
 
@@ -169,7 +170,7 @@ Listening sessions stay in Paper (`playbackSession`) and are sent through `local
 
 1. **Bookmark tombstone vs. the server's copy.** A bookmark deleted offline stays hidden when reconcile brings it back from the server, until the delete gets a 2xx or 404; then the row is removed.
 2. **The total changes during a catalogue walk.** The walk restarts once. If the total changes again, what was seen is upserted, no deletes are made, and the library is marked as not fully reconciled; the next reconcile closes the gap.
-3. **404 or another 4xx in the outbox.** The row is dropped and logged to diagnostics, the related `pending` is cleared (a pending bookmark row is removed), and the queue moves on.
+3. **404 or another 4xx in the outbox** (not 408 or 429, which are retried). The row is dropped and logged to diagnostics, the related `pending` is cleared (a pending bookmark row is removed), and the queue moves on.
 4. **`pending` vs. `user_updated`.** A server event with a newer `lastUpdate` doesn't overwrite a local row with `pending`; once the row is sent, the next server value applies by the normal rule.
 5. **Offline segment of a stream.** Unsent time from a streamed server session collects in a Paper session with its own uuid; the same time is never sent through both `/sync` and `local-all`.
 
@@ -235,7 +236,7 @@ Each PR is useful on its own, breaks nothing and rolls back without data loss. R
 | 5 | Home and search from the replica: native shelves, search and podcast episodes (5a), then the pages (5b) | Home and search are identical online and offline. |
 | 6 | Any item page offline: expanded-copy cache (6-item), "not available offline" markers and disabled buttons with a reason (6-ui), the player on the item a queue waits for (6b) | An item that isn't downloaded opens offline. |
 | 7 | Covers offline: disk cache | Covers of shelves that were opened are visible offline. |
-| 8 | Android Auto from the replica: `MediaManager` reads Room (8a); offline marks, lists that follow changes, cover icons (8b) | Android Auto offline shows the whole catalogue and plays downloaded items. |
+| 8 | Android Auto from the replica: `MediaManager` reads Room (8a); offline marks, lists that follow changes, cover icons (8b) | Android Auto offline shows the whole catalogue and plays downloaded items; items that aren't downloaded are marked and refused at once, open lists follow changes, covers seen online stay visible, and the catalogue syncs while Android Auto is in use. |
 
 ## Risks
 
