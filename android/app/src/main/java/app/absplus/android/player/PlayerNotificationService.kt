@@ -51,6 +51,7 @@ import app.absplus.android.managers.PlaybackRestoreStore.LOG_TAG as RESTORE_TAG
 import app.absplus.android.managers.SleepTimerManager
 import android.content.pm.ServiceInfo
 import androidx.media.session.MediaButtonReceiver
+import app.absplus.android.media.AutoRefresh
 import app.absplus.android.media.AutoSnapshot
 import app.absplus.android.media.CoverCache
 import app.absplus.android.media.MediaManager
@@ -74,11 +75,13 @@ import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.upstream.*
 import java.util.*
 import kotlin.concurrent.schedule
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -238,6 +241,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   @Volatile private var firstLoadDone: Boolean = false
   // The media browser answers here: the replica, the device database and Paper are not read on the main thread
   private val autoIOScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+  private val autoRefresh = AutoRefresh(System::currentTimeMillis)
+  private val autoRefreshStarted = AtomicBoolean(false)
+  private var autoRefreshTicker: Job? = null
 
   fun isBrowseTreeInitialized(): Boolean {
     return this::browseTree.isInitialized
@@ -2481,6 +2487,48 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     return items.map { withOfflineMark(it, state, label) }.toMutableList()
   }
 
+  /** Android Auto's open lists follow the data, the server's state and the active server ([AutoRefresh]). */
+  private fun startAutoRefresh() {
+    if (!autoRefreshStarted.compareAndSet(false, true)) return
+    // From MediaManager's own subscription, after it marked the snapshot stale
+    mediaManager.onDataChange = { notifyAuto(autoRefresh.onData(it)) }
+    autoIOScope.launch { ServerReachability.state.collect { notifyAuto(autoRefresh.onServerState(it)) } }
+    autoIOScope.launch {
+      var previous = ServerReachability.serverConfigId.value
+      ServerReachability.serverConfigId.collect { id ->
+        if (id != previous) notifyAuto(autoRefresh.onServerSwitched())
+        previous = id
+      }
+    }
+  }
+
+  private fun notifyAuto(ids: Set<String>) {
+    sendAutoNotifications(ids)
+    // Changes held back by their interval go out on a 1 s tick, which runs only while there are some
+    synchronized(autoRefresh) {
+      if (!autoRefresh.hasPending || autoRefreshTicker != null) return
+      autoRefreshTicker = autoIOScope.launch {
+        var ticking = true
+        while (ticking) {
+          delay(1_000)
+          val due = synchronized(autoRefresh) {
+            autoRefresh.due().also { if (!autoRefresh.hasPending) { autoRefreshTicker = null; ticking = false } }
+          }
+          sendAutoNotifications(due)
+        }
+      }
+    }
+  }
+
+  private fun sendAutoNotifications(ids: Set<String>) {
+    if (ids.isEmpty()) return
+    autoIOScope.launch {
+      // A deep node takes the current snapshot without waiting: it must already know the change
+      mediaManager.refreshSnapshot()
+      ids.forEach { notifyChildrenChanged(it) }
+    }
+  }
+
   /** Called by [autoRootLoader] on the load's thread once the server checks and libraries have finished. */
   private fun onAndroidAutoItemsLoaded() {
     AbsLogger.info(tag, "onLoadChildren: Loaded Android Auto data, initializing browseTree")
@@ -2539,6 +2587,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       }
 
       isAndroidAuto = true
+      startAutoRefresh()
       autoIOScope.launch { mediaManager.refreshSnapshot() }
 
       val extras = Bundle()
@@ -2567,6 +2616,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   private suspend fun loadAutoChildren(parentMediaId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+    autoRefresh.served(parentMediaId)
     val send = { items: List<MediaBrowserCompat.MediaItem>? -> result.sendResult(autoAnswer(items)) }
     // The root and Continue wait for a stale snapshot; a deep node takes the current one of the same server (after a
     // restart the host may ask a deep node first, which then waits for the first one)

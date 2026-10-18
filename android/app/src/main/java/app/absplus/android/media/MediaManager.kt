@@ -10,6 +10,7 @@ import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
 import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.DataChange
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
 import app.absplus.android.sync.SyncEngine
@@ -269,6 +270,9 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   private val playRequests = LatestRequest()
   private val watchingDataChanges = AtomicBoolean(false)
 
+  /** Each change of [SyncEngine.dataChanges], once the snapshot knows it is stale: a reload it starts reads fresh data. */
+  @Volatile var onDataChange: ((DataChange) -> Unit)? = null
+
   /** The Android Auto root from the replica of the active server; see [refreshSnapshot]. */
   val snapshot: AutoSnapshot? get() = snapshots.current
 
@@ -280,7 +284,12 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
    */
   suspend fun refreshSnapshot(): AutoSnapshot? {
     if (watchingDataChanges.compareAndSet(false, true)) {
-      androidAutoIOScope.launch { SyncEngine.dataChanges.collect { snapshotGate.onData(it.scope) } }
+      androidAutoIOScope.launch {
+        SyncEngine.dataChanges.collect {
+          snapshotGate.onData(it.scope)
+          onDataChange?.invoke(it)
+        }
+      }
     }
     return snapshots.refresh()
   }
