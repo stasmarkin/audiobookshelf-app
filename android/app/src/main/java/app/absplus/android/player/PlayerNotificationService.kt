@@ -684,6 +684,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (!isStarted && !startAsForegroundService()) return onBackgroundStartRefused(playbackSession, playWhenReady)
     // The player's notification takes the id of a waiting queue's one, and the foreground it held: ending the wait
     // below must not drop it
+    val heldForWait = waitHoldsForeground
+    val refusedNotice = startRefusedNoticeShown
     waitHoldsForeground = false
     startRefusedNoticeShown = false
     // A resume hands out its action (and ends the wait) before it prepares; anything else replaces what waited
@@ -763,6 +765,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       DLog.e(tag, "Invalid playback session no media items to play")
       currentPlaybackSession = null
       if (!keepPlaybackPin) LocalItemLocks.clearPlaybackPin()
+      // Nothing took the wait's notification over
+      waitHoldsForeground = heldForWait
+      startRefusedNoticeShown = refusedNotice
+      dropWaitNotice()
       return
     }
     if (playbackSession.localLibraryItem == null && !keepPlaybackPin) {
