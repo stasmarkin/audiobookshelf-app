@@ -40,6 +40,7 @@ class SyncEngineTest {
   @Volatile private var now = 100_000_000L
   private var refresh: RefreshResult = RefreshResult.Transient
   @Volatile private var failNextRun = false
+  @Volatile private var signedIn = true
   private val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
   private val store get() = SyncEngine.store!!
 
@@ -69,7 +70,8 @@ class SyncEngineTest {
             notifyWindowMs = 10,
             logError = { errors.add(it) },
             unreachableRetryMs = unreachableRetryMs,
-            recentlySettledMs = recentlySettledMs))
+            recentlySettledMs = recentlySettledMs,
+            signedIn = { signedIn }))
     settle()
   }
 
@@ -438,6 +440,52 @@ class SyncEngineTest {
     settle()
     assertEquals("a stale redo is not redone again", 2, gets())
     assertTrue(db.bookmarks().getVisible("srv").isEmpty())
+  }
+
+  @Test
+  fun reconcileDroppedByALogoutIsNotRedone() = runBlocking {
+    foreground = true
+    start()
+    api.handler = { request ->
+      if (request.method == "GET") {
+        signedIn = false
+        ApiHandler.invalidateAuthRequests()
+        200 to serverBookmarks
+      } else 200 to "{}"
+    }
+    setState(ServerState.ONLINE)
+
+    eventually("the pull") { gets() == 1 }
+    settle()
+    delay(200)
+    settle()
+    assertEquals("no redo for a session that ended", 1, gets())
+    assertTrue(db.bookmarks().getVisible("srv").isEmpty())
+  }
+
+  @Test
+  fun staleRedoThatNeverRanLeavesTheNextReconcileItsRedo() = runBlocking {
+    foreground = true
+    start()
+    val drops = AtomicInteger(1)
+    api.handler = { request ->
+      if (request.method == "GET") {
+        ApiHandler.invalidateAuthRequests()
+        // The server goes away before the redo runs
+        if (drops.getAndDecrement() > 0) setState(ServerState.OFFLINE)
+        200 to serverBookmarks
+      } else 200 to "{}"
+    }
+    setState(ServerState.ONLINE)
+    eventually("the first pull") { gets() == 1 }
+    settle()
+
+    setState(ServerState.ONLINE)
+    eventually("the next pull and its own redo") { gets() == 3 }
+    settle()
+    delay(200)
+    settle()
+    assertEquals(3, gets())
   }
 
   @Test

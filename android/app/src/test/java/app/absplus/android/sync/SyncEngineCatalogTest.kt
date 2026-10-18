@@ -46,6 +46,7 @@ class SyncEngineCatalogTest {
   private val onlineEntries = MutableStateFlow(0L)
   private val serverId = MutableStateFlow<String?>("srv")
   @Volatile private var foreground = true
+  @Volatile private var signedIn = true
   @Volatile private var now = 100_000_000L
   @Volatile private var beforeEventWrite: suspend () -> Unit = {}
   @Volatile private var currentLibraryId: () -> String? = { "lib1" }
@@ -93,7 +94,8 @@ class SyncEngineCatalogTest {
             logError = { errors.add(it) },
             notifyWindowMs = 10,
             catalog = CatalogDeps(replica, currentLibraryId = { currentLibraryId() }, http = syncHttp(api), minIntervalMs = CATALOG_INTERVAL_MS,
-                    beforeEventWrite = { beforeEventWrite() })))
+                    beforeEventWrite = { beforeEventWrite() }),
+            signedIn = { signedIn }))
     settle()
   }
 
@@ -252,6 +254,20 @@ class SyncEngineCatalogTest {
     setState(ServerState.ONLINE)
 
     awaitPasses(2)
+    assertNull(title("li1"))
+  }
+
+  @Test
+  fun passDroppedByALogoutIsNotRedone() = runBlocking {
+    server.book("li1")
+    server.onItemsPage = {
+      signedIn = false
+      ApiHandler.invalidateAuthRequests()
+    }
+    start()
+    setState(ServerState.ONLINE)
+
+    awaitPasses(1)
     assertNull(title("li1"))
   }
 
