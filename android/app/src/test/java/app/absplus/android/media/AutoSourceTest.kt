@@ -108,6 +108,17 @@ class AutoSourceTest {
     assertEquals(listOf("old", "a"), mergeContinue(replica, server, setOf("lib1"), "srv", "srv").map { it.libraryItemWrapper.id })
   }
 
+  @Test fun aDeletedCopyClearsTheServerItemsMark() {
+    val book = inLibrary("b1", "lib1", 100)
+    (book.libraryItemWrapper as LibraryItem).localLibraryItemId = "local_b1"
+    val copy = localBook("local_b1").apply { libraryItemId = "b1" }
+    val mark = resolverDownloadMark { _, _ -> true }
+    markItemsInProgress(listOf(book)) { item, episodeId -> mark(listOf(copy), "srv", item, episodeId) }
+    assertEquals("local_b1", (book.libraryItemWrapper as LibraryItem).localLibraryItemId)
+    markItemsInProgress(listOf(book)) { item, episodeId -> mark(emptyList(), "srv", item, episodeId) }
+    assertNull("the copy is gone", (book.libraryItemWrapper as LibraryItem).localLibraryItemId)
+  }
+
   @Test fun aProgressReadMovesTheSwitchedItemFirst() {
     val snap = snapshot(1, listOf("a", "b"))
     val progress = mapOf("b" to MediaProgress("p", "b", null, 10.0, 0.5, 5.0, false, null, null, 900, 1, null))

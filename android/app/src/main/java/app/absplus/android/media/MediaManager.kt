@@ -96,6 +96,16 @@ internal fun mergeContinue(
           .sortedByDescending { it.progressLastUpdate }.take(AUTO_CONTINUE_LIMIT)
 }
 
+/** Sets the download mark of every item (episode) of [items] anew; [mark] null clears a mark whose copy is gone. */
+internal fun markItemsInProgress(items: List<ItemInProgress>, mark: (LibraryItem, String?) -> String?) {
+  items.forEach { inProgress ->
+    val item = inProgress.libraryItemWrapper as? LibraryItem ?: return@forEach
+    val episode = inProgress.episode
+    if (episode != null) episode.localEpisodeId = mark(item, episode.id)
+    else item.localLibraryItemId = mark(item, null)
+  }
+}
+
 /** Only the latest of overlapping play requests starts: a slow earlier resolve must not replace a later choice. */
 internal class LatestRequest {
   private val counter = AtomicLong()
@@ -233,6 +243,8 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   var serverItemsInProgress = listOf<ItemInProgress>()
   // The server the in-progress list was read from
   @Volatile private var serverItemsInProgressOf: String? = null
+  // The version of the downloaded copies its marks were computed against
+  @Volatile private var serverItemsInProgressMarkedAt = -1L
   var serverLibraries = listOf<Library>()
 
   var userSettingsPlaybackRate:Float? = null
@@ -291,6 +303,8 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
       serverItemsInProgress = listOf()
       serverItemsInProgressOf = null
     }
+    // A copy downloaded or deleted since the list was read changes its marks
+    if (serverItemsInProgress.isNotEmpty() && serverItemsInProgressMarkedAt != DbManager.localLibraryItemsVersion) markInProgress(serverItemsInProgress)
     return mergeContinue(snap?.continueItems.orEmpty(), serverItemsInProgress, snap?.libraries.orEmpty().mapTo(HashSet()) { it.id },
             serverItemsInProgressOf, active)
   }
@@ -341,14 +355,11 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
 
   /** Download marks of the server's in-progress books and episodes, by the replica's rule; the copies are read once. */
   private fun markInProgress(items: List<ItemInProgress>) {
-    val sc = catalog.activeServer() ?: return
+    val version = DbManager.localLibraryItemsVersion
+    val sc = catalog.activeServer()
     val copies by lazy { DeviceManager.dbManager.getLocalLibraryItems() }
-    items.forEach { inProgress ->
-      val item = inProgress.libraryItemWrapper as? LibraryItem ?: return@forEach
-      val episode = inProgress.episode
-      if (episode != null) episode.localEpisodeId = catalog.downloadMarkOf(copies, sc, item, episode.id)
-      else item.localLibraryItemId = catalog.downloadMarkOf(copies, sc, item, null)
-    }
+    markItemsInProgress(items) { item, episodeId -> sc?.let { catalog.downloadMarkOf(copies, it, item, episodeId) } }
+    serverItemsInProgressMarkedAt = version
   }
 
   private fun markShelves(shelves: List<LibraryShelfType>): List<LibraryShelfType> {
