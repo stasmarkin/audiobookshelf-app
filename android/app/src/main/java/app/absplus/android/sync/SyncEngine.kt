@@ -110,7 +110,9 @@ class SyncDeps(
         val paperImport: PaperProgressImport? = null,
         /** Every Paper `LocalMediaProgress`, read for [paperImport] on start. */
         val paperProgress: () -> List<LocalMediaProgress> = { emptyList() },
-        val catalog: CatalogDeps? = null
+        val catalog: CatalogDeps? = null,
+        /** A live session (not a cold start before JS restores it, not after a logout); gates redoing a stale answer. */
+        val signedIn: () -> Boolean = { true }
 )
 
 /**
@@ -176,7 +178,8 @@ object SyncEngine {
             paperImport = PaperProgressImport(db,
                     context.applicationContext.getSharedPreferences(PaperProgressImport.PREFS, Context.MODE_PRIVATE)),
             paperProgress = { DeviceManager.dbManager.getAllLocalMediaProgress() },
-            catalog = CatalogDeps(replica, currentLibraryId = { catalogPrefs.getString(CatalogPrefs.CURRENT_LIBRARY, null) }, http = catalogHttp)))
+            catalog = CatalogDeps(replica, currentLibraryId = { catalogPrefs.getString(CatalogPrefs.CURRENT_LIBRARY, null) }, http = catalogHttp),
+            signedIn = { DeviceManager.serverConnectionConfig != null }))
   }
 
   private fun start(deps: SyncDeps) {
@@ -291,6 +294,8 @@ object SyncEngine {
     /** Start of the last reconcile that succeeded; a failed one does not cover later requests. */
     private var lastReconcileOkStartAt: Long? = null
     private var reconcileRunning = false
+    /** The next reconcile redoes one whose answer went stale; a stale redo is not redone again. */
+    private var staleReconcileRedo = false
     private var catalogJob: Job? = null
     private var lastCatalogStartAt: Long? = null
     private var delayedCatalog: Job? = null
@@ -531,7 +536,8 @@ object SyncEngine {
     private suspend fun runOnce(reconcile: Boolean) {
       val config = deps.activeServer() ?: return
       if (deps.serverState.value != ServerState.ONLINE) {
-        if (reconcile) synchronized(lock) { reconcileDeferred = true }
+        // A redo that did not run is spent: the deferred reconcile is a new one, with a redo of its own
+        if (reconcile) synchronized(lock) { reconcileDeferred = true; staleReconcileRedo = false }
         publishPending(config.id)
         return
       }
@@ -540,9 +546,10 @@ object SyncEngine {
       try {
         if (reconcile) {
           val startedAt = deps.clock()
-          synchronized(lock) {
+          val redo = synchronized(lock) {
             reconcileDeferred = false
             reconcileRunning = true
+            staleReconcileRedo.also { staleReconcileRedo = false }
           }
           deps.log("Reconcile ${config.id}")
           val result = try {
@@ -556,7 +563,17 @@ object SyncEngine {
           }.onFailure { failure ->
             error = failure.message
             deps.logError("Reconcile ${config.id} failed: ${failure.message}")
-            synchronized(lock) { reconcileDeferred = true }
+            synchronized(lock) {
+              // A stale answer says nothing about the server: on a cold start it is the config JS sets meanwhile.
+              // After a logout the session is gone, and the pull waits for the next foreground as before.
+              if (failure is SyncFailure && failure.stale && !redo && deps.isForeground() && deps.signedIn()) {
+                staleReconcileRedo = true
+                wantReconcile = true
+                wantPush = true
+              } else {
+                reconcileDeferred = true
+              }
+            }
           }
         }
         val result = pusher.pushAll(config)
@@ -623,6 +640,7 @@ object SyncEngine {
         socketDown = false
         wantPush = false
         wantReconcile = false
+        staleReconcileRedo = false
         lastReconcileAt = null
         lastReconcileOkStartAt = null
         unreachableRetries = 0
@@ -654,6 +672,7 @@ object SyncEngine {
 
     private suspend fun runCatalog(reconciler: CatalogReconciler) {
       val self = coroutineContext[Job]
+      var staleRedo = false
       try {
         while (true) {
           val config = deps.activeServer() ?: return
@@ -680,8 +699,10 @@ object SyncEngine {
             else -> deps.log("Catalog ${config.id}: ${result.libraries} libraries, failed ${result.failedLibraries}")
           }
           applyBufferedEvents(passId)
+          // A stale stop says nothing about the server: on a cold start it is the config JS sets meanwhile; not after a logout
+          val stale = result?.stoppedBy == HttpOutcome.STALE && !staleRedo && deps.signedIn()
           val (again, afterReconnect) = synchronized(lock) {
-            val more = catalogAgain
+            val more = catalogAgain || stale
             val socket = socketAgain
             catalogAgain = false
             socketAgain = false
@@ -698,6 +719,7 @@ object SyncEngine {
           }
           if (afterReconnect) passCatalogAfterReconnect()
           if (!again) return
+          staleRedo = stale
         }
       } finally {
         synchronized(lock) { if (catalogJob === self) catalogJob = null }

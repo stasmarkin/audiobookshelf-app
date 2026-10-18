@@ -1,6 +1,7 @@
 package app.absplus.android.sync
 
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.server.ApiHandler
 import app.absplus.android.server.RefreshResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * [SyncEngine] with fake reachability, foreground flag, clock and server, on in-memory Room under Robolectric.
@@ -38,6 +40,7 @@ class SyncEngineTest {
   @Volatile private var now = 100_000_000L
   private var refresh: RefreshResult = RefreshResult.Transient
   @Volatile private var failNextRun = false
+  @Volatile private var signedIn = true
   private val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
   private val store get() = SyncEngine.store!!
 
@@ -67,7 +70,8 @@ class SyncEngineTest {
             notifyWindowMs = 10,
             logError = { errors.add(it) },
             unreachableRetryMs = unreachableRetryMs,
-            recentlySettledMs = recentlySettledMs))
+            recentlySettledMs = recentlySettledMs,
+            signedIn = { signedIn }))
     settle()
   }
 
@@ -399,6 +403,89 @@ class SyncEngineTest {
 
     eventually("the next automatic trigger reconciles") { gets() == 2 }
     eventually("and its bookmarks arrive") { db.bookmarks().getVisible("srv").size == 2 }
+  }
+
+  @Test
+  fun reconcileDroppedAsStaleIsRedoneOnce() = runBlocking {
+    foreground = true
+    start()
+    val bumps = AtomicInteger(1)
+    // The pull is in flight when JS sets the server config on a cold start, which bumps the auth generation
+    api.handler = { request ->
+      if (request.method == "GET" && bumps.getAndDecrement() > 0) ApiHandler.invalidateAuthRequests()
+      if (request.method == "GET") 200 to serverBookmarks else 200 to "{}"
+    }
+    setState(ServerState.ONLINE)
+
+    eventually("the redone pull applies the bookmarks") { db.bookmarks().getVisible("srv").size == 2 }
+    settle()
+    assertEquals("one stale pull and one redo", 2, gets())
+  }
+
+  @Test
+  fun reconcileStaleAgainIsNotRedoneForever() = runBlocking {
+    foreground = true
+    start()
+    api.handler = { request ->
+      if (request.method == "GET") {
+        ApiHandler.invalidateAuthRequests()
+        200 to serverBookmarks
+      } else 200 to "{}"
+    }
+    setState(ServerState.ONLINE)
+
+    eventually("the pull and its redo") { gets() == 2 }
+    settle()
+    delay(200)
+    settle()
+    assertEquals("a stale redo is not redone again", 2, gets())
+    assertTrue(db.bookmarks().getVisible("srv").isEmpty())
+  }
+
+  @Test
+  fun reconcileDroppedByALogoutIsNotRedone() = runBlocking {
+    foreground = true
+    start()
+    api.handler = { request ->
+      if (request.method == "GET") {
+        signedIn = false
+        ApiHandler.invalidateAuthRequests()
+        200 to serverBookmarks
+      } else 200 to "{}"
+    }
+    setState(ServerState.ONLINE)
+
+    eventually("the pull") { gets() == 1 }
+    settle()
+    delay(200)
+    settle()
+    assertEquals("no redo for a session that ended", 1, gets())
+    assertTrue(db.bookmarks().getVisible("srv").isEmpty())
+  }
+
+  @Test
+  fun staleRedoThatNeverRanLeavesTheNextReconcileItsRedo() = runBlocking {
+    foreground = true
+    start()
+    val drops = AtomicInteger(1)
+    api.handler = { request ->
+      if (request.method == "GET") {
+        ApiHandler.invalidateAuthRequests()
+        // The server goes away before the redo runs
+        if (drops.getAndDecrement() > 0) setState(ServerState.OFFLINE)
+        200 to serverBookmarks
+      } else 200 to "{}"
+    }
+    setState(ServerState.ONLINE)
+    eventually("the first pull") { gets() == 1 }
+    settle()
+
+    setState(ServerState.ONLINE)
+    eventually("the next pull and its own redo") { gets() == 3 }
+    settle()
+    delay(200)
+    settle()
+    assertEquals(3, gets())
   }
 
   @Test
