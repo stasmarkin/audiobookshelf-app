@@ -310,4 +310,21 @@ class AwaitingServerTest {
     assertTrue(source.contains("answer = { started -> onResult(if (started != null) StartResult.AwaitingServer(started.display) else StartResult.Replaced) }"))
     assertTrue(Regex("""private suspend fun awaitQueueStart\(ticket: StartGate.Ticket, item: PlaylistQueueItem, onResult: \(StartResult\) -> Unit\) \{\s*//[^\n]*\n\s*val playWhenReady = startGate.admit\(ticket\) \?: return onResult\(StartResult.Replaced\)""").containsMatchIn(source))
   }
+
+  @Test fun aQueueWaitsThroughAPingedServerUntilTheSignIn() {
+    val item = PlaylistQueueItem("li1", null)
+    val waiting = AwaitingServer()
+    assertNull(waiting.onQueueBlocked(item, "a"))
+    assertNull("online, not signed in: kept", waiting.onServerState(ServerState.ONLINE, readyServerConfigId("a", null)))
+    assertNull("signed in to another server: kept", waiting.onServerState(ServerState.ONLINE, readyServerConfigId("a", "b")))
+    assertEquals(item, waiting.blockedItem)
+    assertEquals(item, (waiting.onServerState(ServerState.ONLINE, readyServerConfigId("a", "a")) as ResumeStream).queueItem)
+  }
+
+  @Test fun aQueueStartBeforeTheSignInWaits() {
+    val queue = listOf(PlaylistQueueItem("li1", null))
+    val request = StartRequest("li1", null, playWhenReady = true)
+    assertEquals(queue[0], queueItemToAwait(request, PlaybackSource.Stream("li1", null), queue, 0, ServerState.ONLINE, serverReady = false))
+    assertNull(queueItemToAwait(request, PlaybackSource.Stream("li1", null), queue, 0, ServerState.ONLINE, serverReady = true))
+  }
 }

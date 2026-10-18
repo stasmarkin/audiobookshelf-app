@@ -60,8 +60,8 @@ function playerView(store, playbackSession = store.state.currentPlaybackSession,
   const sandbox = { AbsAudioPlayer: native, console: { ...console, log: () => {} }, Capacitor: { convertFileSrc: (v) => `converted:${v}` }, Dialog: {}, getAverageColorFromCoverUrl: () => null, normalizePlaybackRate: (v) => v, formatPlaybackRate: String, coverPresentation: {}, playerLayout: {}, WrappingMarquee: function () {}, jumpLabelMixin: {}, COARSE_STEP_S: 60, coarseTime: (v) => v, coarseClock: String, sleepRemainingLabel: String, createPainter: () => () => {} }
   vm.runInNewContext(strip(playerSource), sandbox)
   const { computed, methods } = sandbox.component
-  const view = { $store: store, $strings: { LabelWaitingForServer: 'Waiting for server', ButtonHistory: 'History' }, $platform: 'android', playbackSession, showFullscreen: false, currentChapterTitle: '', isLoading: false, isCheckingServerProgress: false, playerSettings: {} }
-  for (const name of ['awaitingDisplay', 'awaitingServer', 'isPlayerOpen', 'mediaMetadata', 'libraryItem', 'localLibraryItem', 'localLibraryItemCoverSrc', 'coverLibraryItem', 'coverDownloadSrc', 'title', 'authorName', 'authorLine', 'mediaType', 'isPodcast', 'mediaId', 'chapters', 'menuItems']) {
+  const view = { $store: store, $strings: { LabelWaitingForServer: 'Waiting for server', ButtonHistory: 'History', LabelPlaybackDirect: 'Direct', LabelPlaybackLocal: 'Local', LabelPlaybackTranscode: 'Transcode' }, $constants: { PlayMethod: { DIRECTPLAY: 0, DIRECTSTREAM: 1, TRANSCODE: 2, LOCAL: 3 } }, $platform: 'android', playbackSession, showFullscreen: false, currentChapterTitle: '', isLoading: false, isCheckingServerProgress: false, playerSettings: {} }
+  for (const name of ['awaitingDisplay', 'awaitingServer', 'isPlayerOpen', 'mediaMetadata', 'libraryItem', 'localLibraryItem', 'localLibraryItemCoverSrc', 'coverLibraryItem', 'coverDownloadSrc', 'title', 'authorName', 'authorLine', 'mediaType', 'isPodcast', 'mediaId', 'chapters', 'menuItems', 'playMethod', 'isLocalPlayMethod', 'isDirectPlayMethod', 'playbackMethodLabel']) {
     Object.defineProperty(view, name, { get: () => computed[name].call(view), configurable: true })
   }
   for (const [name, fn] of Object.entries(methods)) view[name] = fn.bind(view)
@@ -172,4 +172,14 @@ test("the open book's own actions are hidden under the awaited book", () => {
   assert.ok(actions(view).includes('close'), 'Close still ends the wait')
   const template = playerSource.slice(0, playerSource.indexOf('</template>'))
   assert.match(template, /<span v-if="!isPodcast && !awaitingDisplay && \(serverLibraryItemId \|\| bookmarkable\)" class="player-key utility-key bookmark-key/)
+})
+
+test("the open book's playback method is not shown as the awaited book's", () => {
+  const store = newStore()
+  store.commit('setPlaybackSession', { ...sessionA, playMethod: 3 })
+  assert.equal(playerView(store).playbackMethodLabel, 'Local', 'book A alone shows how it plays')
+  container(store, {}).onAwaitingServer({ awaiting: true, display: displayB })
+  assert.equal(playerView(store).playbackMethodLabel, '', "no LOCAL of book A over book B")
+  const template = playerSource.slice(0, playerSource.indexOf('</template>'))
+  assert.match(template, /<p v-if="playbackMethodLabel" class="playback-method[^>]*>\{\{ playbackMethodLabel \}\}<\/p>/)
 })

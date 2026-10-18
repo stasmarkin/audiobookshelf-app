@@ -15,6 +15,10 @@ import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.updateAppWidget
 import app.absplus.android.widget.WidgetRenderer
 import app.absplus.android.widgetStateOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /** Interface for widget event handling. */
 interface WidgetEventEmitter {
@@ -41,7 +45,14 @@ object DeviceManager {
 
   val dbManager: DbManager = DbManager()
   var deviceData: DeviceData = dbManager.getDeviceData()
+  private val _liveSessionChanges = MutableStateFlow(0L)
+  /** Counts writes of [serverConnectionConfig]: the app's sign-in and the native code that sets it on its own. */
+  val liveSessionChanges: StateFlow<Long> = _liveSessionChanges.asStateFlow()
   var serverConnectionConfig: ServerConnectionConfig? = null
+    set(value) {
+      field = value
+      _liveSessionChanges.update { it + 1 }
+    }
 
   val serverConnectionConfigId get() = serverConnectionConfig?.id ?: ""
   val serverConnectionConfigName get() = serverConnectionConfig?.name ?: ""

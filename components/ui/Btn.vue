@@ -42,7 +42,10 @@ export default {
     classList() {
       var list = []
       if (this.loading) list.push('text-opacity-0')
-      if (this.color === 'success') {
+      // The disabled overlay barely dims the success fill, so a disabled success button takes the neutral fill instead
+      if (this.color === 'success' && this.disabled) {
+        list.push('bg-primary')
+      } else if (this.color === 'success') {
         // White label on the actionable success fill (state.success itself is too light for white text)
         list.push('text-white', 'bg-success-action')
       } else {
