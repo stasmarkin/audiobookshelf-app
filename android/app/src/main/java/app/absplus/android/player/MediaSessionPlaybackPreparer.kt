@@ -37,8 +37,10 @@ class MediaSessionPlaybackPreparer(var playerNotificationService:PlayerNotificat
     Log.d(tag, "ON PREPARE FROM MEDIA ID $mediaId $playWhenReady")
     val mediaManager = playerNotificationService.mediaManager
     mediaManager.resolveForPlay(mediaId) { libraryItemWrapper, podcastEpisode ->
-      libraryItemWrapper?.let { li ->
-        playerNotificationService.startWrapper(li, podcastEpisode, playWhenReady, mediaManager.getSavedPlaybackRate())
+      if (libraryItemWrapper == null) {
+        playerNotificationService.reportUnknownItem(mediaId)
+      } else {
+        playerNotificationService.startWrapper(libraryItemWrapper, podcastEpisode, playWhenReady, mediaManager.getSavedPlaybackRate())
       }
     }
   }

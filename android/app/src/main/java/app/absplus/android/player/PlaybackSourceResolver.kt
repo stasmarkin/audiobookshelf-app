@@ -95,7 +95,9 @@ data class StartRequest(
         /** The server's track count of a book, when known: a copy with fewer tracks is partial and streams. */
         val expectedTracks: Int? = null,
         /** Take the start position from the stream still playing, read just before the file replaces it. */
-        val followPlayer: Boolean = false
+        val followPlayer: Boolean = false,
+        /** A stream without the server is refused at once (Android Auto), instead of a play request that fails or times out. */
+        val offlineFailsFast: Boolean = false
 ) {
   companion object {
     fun forQueueItem(item: PlayerNotificationService.PlaylistQueueItem, playWhenReady: Boolean, playbackRate: Float? = null) =
@@ -105,7 +107,7 @@ data class StartRequest(
     /** An Android Auto browse-tree item: a server item (with its server episode) or a device copy. */
     fun forWrapper(wrapper: LibraryItemWrapper, episode: PodcastEpisode?, playWhenReady: Boolean, playbackRate: Float?) =
             StartRequest(wrapper.id, episode?.id, (wrapper as? LibraryItem)?.ino, playWhenReady = playWhenReady,
-                    playbackRate = playbackRate)
+                    playbackRate = playbackRate, offlineFailsFast = true)
   }
 }
 

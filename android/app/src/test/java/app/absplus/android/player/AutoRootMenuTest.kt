@@ -134,4 +134,21 @@ class AutoRootMenuTest {
     listOf(null, "", "android.media.session.MediaController", "com.android.bluetooth", "app.absplus.android", ANDROID_WEARABLE_PKG_NAME)
       .forEach { assertFalse(it.toString(), isAutoController(it)) }
   }
+  @Test fun offlineMarkSkipsDownloadsAndBrowsableItems() {
+    fun item(id: String, flags: Int, downloaded: Boolean = false) = MediaBrowserCompat.MediaItem(
+      android.support.v4.media.MediaDescriptionCompat.Builder().setMediaId(id).setTitle("T").setSubtitle("Author").setExtras(android.os.Bundle().apply {
+        if (downloaded) putLong(android.support.v4.media.MediaDescriptionCompat.EXTRA_DOWNLOAD_STATUS, android.support.v4.media.MediaDescriptionCompat.STATUS_DOWNLOADED)
+      }).build(), flags)
+    val label = "Not available offline"
+    val offline = app.absplus.android.sync.ServerState.OFFLINE
+    val stream = withOfflineMark(item("li1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), offline, label)
+    assertEquals("Author · $label", stream.description.subtitle.toString())
+    assertEquals("li1", stream.mediaId)
+    assertTrue(stream.isPlayable)
+    assertEquals("Author", withOfflineMark(item("local_1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), offline, label).description.subtitle)
+    assertEquals("a device copy's episode", "Author", withOfflineMark(item("local_ep_1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), offline, label).description.subtitle)
+    assertEquals("Author", withOfflineMark(item("li2", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE, downloaded = true), offline, label).description.subtitle)
+    assertEquals("Author", withOfflineMark(item("pod1", MediaBrowserCompat.MediaItem.FLAG_BROWSABLE), offline, label).description.subtitle)
+    assertEquals("Author", withOfflineMark(item("li1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), app.absplus.android.sync.ServerState.ONLINE, label).description.subtitle)
+  }
 }

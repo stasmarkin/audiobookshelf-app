@@ -69,6 +69,24 @@ fun queueItemToAwait(request: StartRequest, plan: PlaybackSource, queue: List<Pl
   return item.takeIf { it.libraryItemId == plan.libraryItemId && it.episodeId.orEmpty() == plan.episodeId.orEmpty() }
 }
 
+/** Whether the server takes a play request now; one refusing the sign-in answers, and its start fails as before. */
+fun serverTakesRequests(state: ServerState): Boolean = state == ServerState.ONLINE || state == ServerState.UNAUTHORIZED
+
+/**
+ * An Android Auto start ([StartRequest.offlineFailsFast]) that could only stream while the server is away, and that no
+ * queue waits on: refused at once (Р18). Without an active server the state is UNKNOWN, and there is nothing to stream from.
+ */
+fun autoStreamRefusal(request: StartRequest, plan: PlaybackSource, state: ServerState, queued: PlaylistQueueItem?): Boolean =
+        request.offlineFailsFast && plan is PlaybackSource.Stream && queued == null && !serverTakesRequests(state)
+
+/** A stream start: [refuse] answers [message] without asking the server, otherwise [play] sends the play request. */
+fun streamStart(refuse: Boolean, message: String, play: () -> Unit, onResult: (PlayerNotificationService.StartResult) -> Unit) {
+  if (refuse) onResult(PlayerNotificationService.StartResult.Failed(message)) else play()
+}
+
+/** Why an id Android Auto asked to play resolves to nothing: no server to ask, or the server does not have it. */
+fun unknownItemMessage(state: ServerState, offline: String, notFound: String): String = if (serverTakesRequests(state)) notFound else offline
+
 /** The stream the player has now (server ids), for a switch to its copy when the download finishes. */
 data class CurrentStream(
         val libraryItemId: String,

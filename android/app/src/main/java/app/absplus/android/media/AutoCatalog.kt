@@ -28,6 +28,8 @@ import app.absplus.android.device.AppStorage
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.player.PlaybackSource
 import app.absplus.android.player.PlaybackSourceResolver
+import app.absplus.android.player.serverTakesRequests
+import app.absplus.android.sync.ServerState
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CatalogReader
@@ -68,6 +70,13 @@ data class AutoSnapshot(
 )
 
 const val AUTO_CONTINUE_LIMIT = 25
+
+/** Р19: an item that is not downloaded says so in its subtitle while the server takes no play request. */
+fun offlineSubtitle(subtitle: CharSequence?, downloaded: Boolean, state: ServerState, label: String): CharSequence? = when {
+  downloaded || serverTakesRequests(state) -> subtitle
+  subtitle.isNullOrEmpty() -> label
+  else -> "$subtitle · $label"
+}
 
 /**
  * Android Auto nodes read from the catalog replica of the active server ([CatalogReader], the rules of the app's tabs)

@@ -1427,22 +1427,28 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           awaitQueueStart(ticket, queued, onResult)
           return@launch
         }
-        val payload = getPlayItemRequestPayload(false)
-        stopSyncerThen {
-          apiHandler.playLibraryItemWithStatus(plan.libraryItemId, plan.episodeId ?: "", payload) { session, httpStatus ->
-            if (session == null) {
-              onResult(StartResult.Failed("Server play request failed", httpStatus))
-              return@playLibraryItemWithStatus
-            }
-            startScope.launch {
-              if (replaced()) return@launch
-              applyStreamStart(session, request.startTime)
-              if (replaced()) return@launch
-              DLog.d(tag, "startItem: streamed session ${session.id} for item ${session.libraryItemId}${session.episodeId?.let { e -> ", episode $e" } ?: ""} playMethod=${session.playMethod} start=${session.currentTime}s playWhenReady=${request.playWhenReady}")
-              onResult(StartResult.Started(session))
-              prepareAdmitted(ticket, session, request)
-            }
-          }
+        val refuse = autoStreamRefusal(request, plan, ServerReachability.state.value, queued)
+        streamStart(refuse, getString(R.string.not_available_offline), play = { streamFromServer(request, plan, ticket, ::replaced, onResult) }, onResult)
+      }
+    }
+  }
+
+  private fun streamFromServer(request: StartRequest, plan: PlaybackSource.Stream, ticket: StartGate.Ticket, replaced: () -> Boolean,
+                               onResult: (StartResult) -> Unit) {
+    val payload = getPlayItemRequestPayload(false)
+    stopSyncerThen {
+      apiHandler.playLibraryItemWithStatus(plan.libraryItemId, plan.episodeId ?: "", payload) { session, httpStatus ->
+        if (session == null) {
+          onResult(StartResult.Failed("Server play request failed", httpStatus))
+          return@playLibraryItemWithStatus
+        }
+        startScope.launch {
+          if (replaced()) return@launch
+          applyStreamStart(session, request.startTime)
+          if (replaced()) return@launch
+          DLog.d(tag, "startItem: streamed session ${session.id} for item ${session.libraryItemId}${session.episodeId?.let { e -> ", episode $e" } ?: ""} playMethod=${session.playMethod} start=${session.currentTime}s playWhenReady=${request.playWhenReady}")
+          onResult(StartResult.Started(session))
+          prepareAdmitted(ticket, session, request)
         }
       }
     }
@@ -1505,8 +1511,16 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     startItem(StartRequest.forWrapper(wrapper, episode, playWhenReady, playbackRate)) {
       if (it !is StartResult.Failed) return@startItem
       DLog.e(tag, "Failed to play library item ${wrapper.id}: ${it.message}")
-      if (it.message == LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE) mediaManager.onPlaybackError?.invoke(it.message)
+      // Android Auto shows the text; otherwise the driver sees nothing happen
+      mediaManager.onPlaybackError?.invoke(it.message)
     }
+  }
+
+  /** Android Auto asked to play an id that resolves to nothing. */
+  fun reportUnknownItem(mediaId: String) {
+    DLog.e(tag, "Media item not found $mediaId")
+    mediaManager.onPlaybackError?.invoke(unknownItemMessage(ServerReachability.state.value, getString(R.string.not_available_offline),
+            getString(R.string.item_not_found)))
   }
 
   // Stops the progress syncer of what is playing before another session is prepared
@@ -2459,6 +2473,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
     }.toMutableList()
 
+  /** What Android Auto gets for a node or a search: playable items it cannot stream now are marked (Р19). */
+  private fun autoAnswer(items: List<MediaBrowserCompat.MediaItem>?): MutableList<MediaBrowserCompat.MediaItem>? {
+    if (items == null) return null
+    val state = ServerReachability.state.value
+    val label = getString(R.string.not_available_offline)
+    return items.map { withOfflineMark(it, state, label) }.toMutableList()
+  }
+
   /** Called by [autoRootLoader] on the load's thread once the server checks and libraries have finished. */
   private fun onAndroidAutoItemsLoaded() {
     AbsLogger.info(tag, "onLoadChildren: Loaded Android Auto data, initializing browseTree")
@@ -2545,12 +2567,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   private suspend fun loadAutoChildren(parentMediaId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+    val send = { items: List<MediaBrowserCompat.MediaItem>? -> result.sendResult(autoAnswer(items)) }
     // The root and Continue wait for a stale snapshot; a deep node takes the current one of the same server (after a
     // restart the host may ask a deep node first, which then waits for the first one)
     val snap = if (parentMediaId == AUTO_MEDIA_ROOT || parentMediaId == CONTINUE_ROOT) mediaManager.refreshSnapshot() else mediaManager.snapshotForNode()
     // Prevent crashing if app is restarted while browsing (nodes the replica or the device can answer are served)
     if (!servableWithoutServer(parentMediaId, snap?.readyLibraryIds.orEmpty()) && !firstLoadDone) {
-      result.sendResult(null)
+      send(null)
       return
     }
 
@@ -2581,7 +2604,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                 )
       }
 
-      result.sendResult(localBrowseItems)
+      send(localBrowseItems)
     } else if (parentMediaId == CONTINUE_ROOT) {
       val localBrowseItems: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
       mediaManager.continueItems(snap).forEach { itemInProgress ->
@@ -2608,14 +2631,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                         MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                 )
       }
-      result.sendResult(localBrowseItems)
+      send(localBrowseItems)
     } else if (parentMediaId == AUTO_MEDIA_ROOT) {
       // The root comes from the replica at once; the server load (stream, never reconciled libraries) runs behind it
       // and refreshes the root through notifyChildrenChanged("/") when it finishes; a load already running is reused
       val needsLoad = !this::browseTree.isInitialized || forceReloadingAndroidAuto || autoRootLoader.isLoading
       browseTree = buildAutoTree(snap)
       onBrowseTreeInitialized()
-      result.sendResult(browseTree[parentMediaId]?.map { item ->
+      send(browseTree[parentMediaId]?.map { item ->
         MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
       }?.toMutableList())
       if (needsLoad) {
@@ -2639,7 +2662,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
           )
         }
-        result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+        send(children as MutableList<MediaBrowserCompat.MediaItem>?)
       }
     } else if (mediaManager.getIsLibrary(parentMediaId)) { // Load library items for library
       DLog.d(tag, "Loading items for library $parentMediaId")
@@ -2654,7 +2677,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                             MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                     )
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else {
         val children =
@@ -2701,14 +2724,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                   )
           )
         }
-        result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+        send(children as MutableList<MediaBrowserCompat.MediaItem>?)
       }
     } else if (parentMediaId.startsWith(RECENTLY_ROOT)) {
       DLog.d(tag, "Browsing recently $parentMediaId")
       val mediaIdParts = parentMediaId.split("__")
       if (!mediaManager.getIsLibrary(mediaIdParts[2])) {
         DLog.d(tag, "${mediaIdParts[2]} is not library")
-        result.sendResult(null)
+        send(null)
         return
       }
       DLog.d(tag, "Mediaparts: ${mediaIdParts.size} | $mediaIdParts")
@@ -2779,12 +2802,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               )
             }
           }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else if (mediaIdParts.size == 4) {
         mediaManager.getLibraryRecentShelfByType(mediaIdParts[2], mediaIdParts[3]) { shelf ->
           if (shelf === null) {
-            result.sendResult(mutableListOf())
+            send(mutableListOf())
           } else {
             if (shelf.type == "book") {
               val children =
@@ -2797,7 +2820,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                                 MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                         )
                       }
-              result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+              send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else if (shelf.type == "episode") {
               val episodesWithRecentEpisode =
                       (shelf as LibraryShelfEpisodeEntity).entities?.filter { libraryItem ->
@@ -2819,7 +2842,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                                 MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                         )
                       }
-              result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+              send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else if (shelf.type == "podcast") {
               val children =
                       (shelf as LibraryShelfPodcastEntity).entities?.map { libraryItem ->
@@ -2829,7 +2852,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                                 MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                         )
                       }
-              result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+              send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else if (shelf.type == "series") {
               val children =
                       (shelf as LibraryShelfSeriesEntity).entities?.map { librarySeriesItem ->
@@ -2839,7 +2862,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                                 MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                         )
                       }
-              result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+              send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else if (shelf.type == "authors") {
               val children =
                       (shelf as LibraryShelfAuthorEntity).entities?.map { authorItem ->
@@ -2849,9 +2872,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                                 MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                         )
                       }
-              result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+              send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else {
-              result.sendResult(mutableListOf())
+              send(mutableListOf())
             }
           }
         }
@@ -2873,7 +2896,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       */
       if (!mediaManager.getIsLibrary(mediaIdParts[2])) {
         DLog.d(tag, "${mediaIdParts[2]} is not library")
-        result.sendResult(null)
+        send(null)
         return
       }
       DLog.d(tag, "$mediaIdParts")
@@ -2905,7 +2928,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           } else {
             val children =
                     seriesItems.map { seriesItem ->
@@ -2915,7 +2938,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           }
         }
       } else if (mediaIdParts[3] == "SERIES_LIST") {
@@ -2939,7 +2962,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           } else {
             val children =
                     seriesItems.map { seriesItem ->
@@ -2949,7 +2972,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           }
         }
       } else if (mediaIdParts[3] == "SERIES") {
@@ -2972,7 +2995,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                             MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                     )
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else if (mediaIdParts[3] == "AUTHORS" && mediaIdParts.size == 5) {
         DLog.d(tag, "Loading authors from library ${mediaIdParts[2]} with paging ${mediaIdParts[4]}")
@@ -3002,7 +3025,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           } else {
             val children =
                     authorItems.map { authorItem ->
@@ -3012,7 +3035,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           }
         }
       } else if (mediaIdParts[3] == "AUTHORS") {
@@ -3036,7 +3059,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           } else {
             val children =
                     authorItems.map { authorItem ->
@@ -3046,7 +3069,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                               MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                       )
                     }
-            result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+            send(children as MutableList<MediaBrowserCompat.MediaItem>?)
           }
         }
       } else if (mediaIdParts[3] == "AUTHOR") {
@@ -3069,7 +3092,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                       )
                     }
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else if (mediaIdParts[3] == "AUTHOR_SERIES") {
         mediaManager.loadAuthorSeriesBooksWithAudio(
@@ -3099,7 +3122,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                       )
                     }
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else if (mediaIdParts[3] == "COLLECTIONS") {
         DLog.d(tag, "Loading collections from library ${mediaIdParts[2]}")
@@ -3113,7 +3136,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                             MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
                     )
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else if (mediaIdParts[3] == "COLLECTION") {
         DLog.d(tag, "Loading collection ${mediaIdParts[4]} books from library ${mediaIdParts[2]}")
@@ -3129,7 +3152,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                             MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                     )
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else if (mediaIdParts[3] == "DISCOVERY") {
         DLog.d(tag, "Loading discovery from library ${mediaIdParts[2]}")
@@ -3144,14 +3167,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                             MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                     )
                   }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
+          send(children as MutableList<MediaBrowserCompat.MediaItem>?)
         }
       } else {
-        result.sendResult(null)
+        send(null)
       }
     } else {
       DLog.d(tag, "Loading podcast episodes for podcast $parentMediaId")
-      mediaManager.loadPodcastEpisodeMediaBrowserItems(parentMediaId, ctx) { result.sendResult(it) }
+      mediaManager.loadPodcastEpisodeMediaBrowserItems(parentMediaId, ctx) { send(it) }
     }
   }
 
@@ -3171,7 +3194,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         cachedSearchResults = listOf("book", "podcast", "series", "authors").flatMap { found[it].orEmpty() }.toMutableList()
         cachedSearch = key
       }
-      result.sendResult(cachedSearchResults)
+      result.sendResult(autoAnswer(cachedSearchResults))
       DLog.d(tag, "onSearch: Done")
     }
   }

@@ -113,7 +113,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
     val mediaManager = playerNotificationService.mediaManager
     mediaManager.resolveForPlay(mediaId) { libraryItemWrapper, podcastEpisode ->
       if (libraryItemWrapper == null) {
-        DLog.e(tag, "onPlayFromMediaId: Media item not found $mediaId")
+        playerNotificationService.reportUnknownItem(mediaId)
       } else {
         playerNotificationService.startWrapper(libraryItemWrapper, podcastEpisode, true, mediaManager.getSavedPlaybackRate())
       }
