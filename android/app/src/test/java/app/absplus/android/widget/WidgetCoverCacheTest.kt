@@ -1,6 +1,7 @@
 package app.absplus.android.widget
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.data.DeviceData
 import app.absplus.android.data.DeviceInfo
@@ -46,7 +47,11 @@ class WidgetCoverCacheTest {
     File(ctx.filesDir, "$COVER_CACHE_DIR/book-w_9.jpg").writeBytes(byteArrayOf(1, 2, 3))
     CoverCache.setForTest(null)
 
-    val uri = WidgetRenderer.artworkUri(ctx, WidgetRenderer.fallbackState(ctx))
+    // WidgetRenderer is frozen (Gate F), so its private fallback state and artwork are read reflectively
+    val state = WidgetRenderer::class.java.getDeclaredMethod("fallbackState", Context::class.java).apply { isAccessible = true }
+      .invoke(WidgetRenderer, ctx) as WidgetRenderer.State
+    val uri = WidgetRenderer::class.java.getDeclaredMethod("artworkUri", Context::class.java, WidgetRenderer.State::class.java)
+      .apply { isAccessible = true }.invoke(WidgetRenderer, ctx, state) as Uri
 
     assertEquals("content", uri.scheme)
     assertTrue(uri.toString().contains("/cover_cache/book-w_9.jpg"))
