@@ -1151,8 +1151,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (ticket !== resumingTicket) return
     resumingTicket = null
     if (awaitingPresentation.isResuming) awaitingPresentation.end()
-    // Nor does anything keep the wait's foreground for it
-    dropWaitNotice()
+    // Nor does anything keep the wait's foreground for it, unless a newer start is on its way and takes it over
+    if (startGate.admit(ticket) != null) dropWaitNotice()
   }
 
   internal fun onActiveServerChanged(previous: String?, id: String?) {
