@@ -300,7 +300,8 @@ object SyncEngine {
     private suspend fun runOnce(reconcile: Boolean) {
       val config = deps.activeServer() ?: return
       if (deps.serverState.value != ServerState.ONLINE) {
-        if (reconcile) synchronized(lock) { reconcileDeferred = true }
+        // A redo that did not run is spent: the deferred reconcile is a new one, with a redo of its own
+        if (reconcile) synchronized(lock) { reconcileDeferred = true; staleReconcileRedo = false }
         publishPending(config.id)
         return
       }
