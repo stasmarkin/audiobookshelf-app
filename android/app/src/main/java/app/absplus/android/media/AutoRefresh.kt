@@ -11,7 +11,8 @@ private const val MAX_SERVED_NODES = 50
 /**
  * Which Android Auto nodes to tell to reload ([android.support.v4.media.MediaBrowserServiceCompat.notifyChildrenChanged])
  * when the data or the server changes. A catalog or user change reloads the root and the nodes Auto opened, at most
- * every [catalogEveryMs]; a progress change Continue and those nodes, at most every [progressEveryMs]; a change held
+ * every [catalogEveryMs]; a progress change Continue and those nodes, at most every [progressEveryMs] and once more
+ * after it (a new item joins Continue only when the snapshot recomputes, see SnapshotGate); a change held
  * back by its interval is handed out by [due]. Playback ticks reload nothing: Auto would redraw its lists every few
  * seconds, and the playing item's percentage shows when its list opens again.
  */
@@ -19,6 +20,8 @@ class AutoRefresh(private val clock: () -> Long, private val catalogEveryMs: Lon
   private val servedNodes = LinkedHashSet<String>()
   private var catalogPending = false
   private var progressPending = false
+  // One more Continue reload after the interval: the first may come before the snapshot may recompute (SnapshotGate)
+  private var progressFollowUp = false
   private var catalogAt: Long? = null
   private var progressAt: Long? = null
   // Whether the server was away when the lists were drawn; null before the first state
@@ -38,7 +41,10 @@ class AutoRefresh(private val clock: () -> Long, private val catalogEveryMs: Lon
     when (change.scope) {
       // Hidden series of the user change the shelves
       "catalog", "user" -> catalogPending = true
-      "progress" -> progressPending = true
+      "progress" -> {
+        progressPending = true
+        progressFollowUp = true
+      }
       else -> return emptySet()
     }
     return dueNow()
@@ -78,7 +84,8 @@ class AutoRefresh(private val clock: () -> Long, private val catalogEveryMs: Lon
       notify += servedNodes
     }
     if (progressPending && progressAt.elapsed(now) >= progressEveryMs) {
-      progressPending = false
+      progressPending = progressFollowUp
+      progressFollowUp = false
       progressAt = now
       notify += CONTINUE_ROOT
       notify += servedNodes

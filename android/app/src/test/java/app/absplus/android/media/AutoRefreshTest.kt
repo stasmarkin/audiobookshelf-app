@@ -38,6 +38,23 @@ class AutoRefreshTest {
     now += 1
     assertEquals(setOf(CONTINUE_ROOT), refresh.due())
     assertEquals(emptySet<String>(), refresh.due())
+    now += 10_000
+    assertEquals("the follow-up of the second change", setOf(CONTINUE_ROOT), refresh.due())
+    now += 10_000
+    assertEquals(emptySet<String>(), refresh.due())
+    assertFalse(refresh.hasPending)
+  }
+
+  // Continue gains a newly started item only when the snapshot recomputes, at most every 10 s after it was built
+  @Test fun aSingleProgressChangeReloadsContinueOnceMoreAfterTheInterval() {
+    assertEquals(setOf(CONTINUE_ROOT), refresh.onData(change("progress")))
+    assertTrue(refresh.hasPending)
+    now += 9_999
+    assertEquals(emptySet<String>(), refresh.due())
+    now += 1
+    assertEquals(setOf(CONTINUE_ROOT), refresh.due())
+    now += 10_000
+    assertEquals(emptySet<String>(), refresh.due())
     assertFalse(refresh.hasPending)
   }
 

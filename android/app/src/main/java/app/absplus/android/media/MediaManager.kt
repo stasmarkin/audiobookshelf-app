@@ -581,25 +581,30 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     val serverConnConfig = if (DeviceManager.isConnectedToServer) DeviceManager.serverConnectionConfig else DeviceManager.deviceData.getLastServerConnectionConfig()
 
     if (!DeviceManager.isConnectedToServer || !DeviceManager.checkConnectivity(ctx) || serverConnConfig == null || serverConnConfig.id != serverConfigIdUsed) {
-      podcastEpisodeLibraryItemMap = ConcurrentHashMap()
-      serverLibraries = listOf()
-      serverLibraryItems = ConcurrentHashMap()
-      cachedLibraryAuthors = ConcurrentHashMap()
-      cachedLibraryAuthorItems = ConcurrentHashMap()
-      cachedLibraryAuthorSeriesItems = ConcurrentHashMap()
-      cachedLibrarySeries = ConcurrentHashMap()
-      cachedLibrarySeriesItem = ConcurrentHashMap()
-      cachedLibraryCollections = ConcurrentHashMap()
-      cachedLibraryRecentShelves = ConcurrentHashMap()
-      cachedLibraryDiscovery = ConcurrentHashMap()
-      cachedLibraryPodcasts = ConcurrentHashMap()
-      isLibraryPodcastsCached = ConcurrentHashMap()
-      serverItemsInProgress = listOf()
-      allLibraryPersonalizationsDone = false
-      libraryPersonalizationsDone = 0
+      resetServerItems()
       return true
     }
     return false
+  }
+
+  /** Drops what was loaded from the server, so another server's libraries and items are neither shown nor started. */
+  fun resetServerItems() {
+    podcastEpisodeLibraryItemMap = ConcurrentHashMap()
+    serverLibraries = listOf()
+    serverLibraryItems = ConcurrentHashMap()
+    cachedLibraryAuthors = ConcurrentHashMap()
+    cachedLibraryAuthorItems = ConcurrentHashMap()
+    cachedLibraryAuthorSeriesItems = ConcurrentHashMap()
+    cachedLibrarySeries = ConcurrentHashMap()
+    cachedLibrarySeriesItem = ConcurrentHashMap()
+    cachedLibraryCollections = ConcurrentHashMap()
+    cachedLibraryRecentShelves = ConcurrentHashMap()
+    cachedLibraryDiscovery = ConcurrentHashMap()
+    cachedLibraryPodcasts = ConcurrentHashMap()
+    isLibraryPodcastsCached = ConcurrentHashMap()
+    serverItemsInProgress = listOf()
+    allLibraryPersonalizationsDone = false
+    libraryPersonalizationsDone = 0
   }
 
   private fun loadItemsInProgressForAllLibraries(cb: (List<ItemInProgress>) -> Unit) {

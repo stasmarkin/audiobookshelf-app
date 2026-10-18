@@ -1460,7 +1460,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     stopSyncerThen {
       apiHandler.playLibraryItemWithStatus(plan.libraryItemId, plan.episodeId ?: "", payload) { session, httpStatus ->
         if (session == null) {
-          onResult(StartResult.Failed("Server play request failed", httpStatus))
+          // A replaced start's late failure must not show over what plays now
+          startScope.launch { if (!replaced()) onResult(StartResult.Failed("Server play request failed", httpStatus)) }
           return@playLibraryItemWithStatus
         }
         startScope.launch {
@@ -2551,7 +2552,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     autoIOScope.launch {
       var previous = ServerReachability.serverConfigId.value
       ServerReachability.serverConfigId.collect { id ->
-        if (id != previous) notifyAuto(autoRefresh.onServerSwitched())
+        if (id != previous) {
+          mediaManager.resetServerItems()
+          forceReloadingAndroidAuto = true
+          notifyAuto(autoRefresh.onServerSwitched())
+        }
         previous = id
       }
     }
