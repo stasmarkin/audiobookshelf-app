@@ -19,8 +19,8 @@ Design for making Audiobookshelf+ fully usable without a reachable server: every
 | 4 | 4b-series | Series tab and series pages | Done |
 | 4 | 4c-authors | Authors tab | Done |
 | 4 | 4d-collections | Collections tab and collection pages | Done |
-| 4 | 4e-playlists | Playlists; an offline queue waits for the server at an item that isn't downloaded | This release |
-| 5 | 5a-native | Home shelves, search and podcast episodes computed from the replica (native side) | Planned |
+| 4 | 4e-playlists | Playlists; an offline queue waits for the server at an item that isn't downloaded | Done |
+| 5 | 5a-native | Home shelves, search and podcast episodes computed from the replica (native side) | This release |
 | 5 | 5b-ui | Home and search | Planned |
 | 6 | 6-item | Full item details are cached when an item is opened online | Planned |
 | 6 | 6-ui | Book, podcast and episode pages; server-only actions disabled with a reason | Planned |
