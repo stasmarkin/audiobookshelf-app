@@ -206,6 +206,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var waitHoldsForeground = false
   // The notification of a start Android refused from the background (see onBackgroundStartRefused)
   private var startRefusedNoticeShown = false
+  // That start was of a download: the user's Play starts it again, with or without the server
+  private var refusedLocalStart = false
   // Tests replace it with a refusal
   internal var startSelfInForeground: () -> Unit = { ContextCompat.startForegroundService(this, Intent(this, PlayerNotificationService::class.java)) }
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -1043,6 +1045,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       return
     }
     awaiting.onStartRefused(item, serverConfigId, playWhenReady)
+    refusedLocalStart = session.isLocal
     showAwaiting(true)
     try {
       NotificationManagerCompat.from(this).notify(notificationId, waitNotification(session.displayTitle ?: getString(R.string.app_name),
@@ -1984,16 +1987,20 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       // The user's Play may make the service foreground (from the app, or a media button that already did): the wait
       // keeps that, so its item may start later from the background
       holdForegroundForWait()
-      val refused = awaiting.blockedItem?.takeIf { startRefusedNoticeShown && it == playlistQueue.getOrNull(playlistQueueIndex) }
-      if (refused != null) {
-        // Starts again from the queue: a download needs no server, a stream waits for it again
-        DLog.i(tag, "Play after a refused start - starting ${refused.libraryItemId} again")
+      if (startRefusedNoticeShown) {
+        // The wait goes on as any other (the server's return starts it again)
         startRefusedNoticeShown = false
         // Held, the foreground notification has replaced the notice
         if (!waitHoldsForeground) NotificationManagerCompat.from(this).cancel(notificationId)
-        awaiting.cancel(CancelReason.OTHER_ITEM_STARTED)
-        startQueueItem(refused, true)
-        return
+        val download = awaiting.blockedItem?.takeIf { refusedLocalStart && it == playlistQueue.getOrNull(playlistQueueIndex) }
+        refusedLocalStart = false
+        if (download != null) {
+          // A download needs no server: it starts again from the queue
+          DLog.i(tag, "Play after a refused start - starting the download of ${download.libraryItemId} again")
+          awaiting.cancel(CancelReason.OTHER_ITEM_STARTED)
+          startQueueItem(download, true)
+          return
+        }
       }
       // The player has nothing to play while waiting: start again now if the server is back, else probe it. Before the
       // restore below: a queue may wait with no session, and the last session is not what it waits on
