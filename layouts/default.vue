@@ -168,7 +168,7 @@ export default {
         serverConnectionConfig: serverConfig
       }
       const authRes = await this.$nativeHttp.post(`${serverConfig.address}/api/authorize`, null, nativeHttpOptions).catch((error) => {
-        AbsLogger.error({ tag: 'default', message: `attemptConnection: Server auth failed (${serverConfig.name})` })
+        AbsLogger.error({ tag: 'default', message: `attemptConnection: Server auth failed (${serverConfig.name}): ${error?.code || error?.status || error?.message}` })
         return false
       })
 
