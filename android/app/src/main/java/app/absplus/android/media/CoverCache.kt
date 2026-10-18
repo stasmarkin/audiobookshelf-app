@@ -24,7 +24,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -35,8 +37,8 @@ const val COVER_CONNECT_TIMEOUT_MS = 10_000L
 const val COVER_READ_TIMEOUT_MS = 20_000L
 // The read timeout is per read: a server trickling bytes would otherwise hold a fetch slot without end
 const val COVER_CALL_TIMEOUT_MS = 30_000L
-// A queued fetch gives up after this long without any cover arriving: a server hanging on /cover must not queue minutes
-const val COVER_SLOT_STALL_MS = 5_000L
+// A queued fetch gives up after this long without any answer: a server hanging on /cover must not queue minutes
+const val COVER_SLOT_STALL_MS = 10_000L
 private const val SLOT_POLL_MS = 250L
 private const val REFUSAL_LOG_EVERY_MS = 5 * 60 * 1000L
 
@@ -119,10 +121,14 @@ class CoverCache(
   private val serverState: () -> ServerState,
   private val replicaUpdatedAt: suspend (serverConfigId: String, itemId: String) -> Long?,
   private val scope: CoroutineScope,
-  private val clock: () -> Long = System::currentTimeMillis,
+  private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
   private val slotStallMs: Long = COVER_SLOT_STALL_MS,
+  private val slotPollMs: Long = SLOT_POLL_MS,
+  private val log: (String) -> Unit = { DLog.w("CoverCache", it) },
 ) {
-  @Volatile private var lastProgressAt = 0L
+  // Monotonic clock values can be negative: "never" must be below any of them
+  @Volatile private var lastProgressAt = Long.MIN_VALUE
+  private var lastStallLogAt = Long.MIN_VALUE
 
   // A fetch gives a stored entry, or the bytes of an image type the store doesn't keep (each waiter gets its own stream)
   private sealed interface Fetched {
@@ -201,21 +207,48 @@ class CoverCache(
     return job.await()
   }
 
-  /** Waits for a fetch slot while covers keep arriving; false once nothing arrived for [slotStallMs]. */
-  private suspend fun acquireSlot(): Boolean {
+  /**
+   * Waits for a fetch slot in arrival order while the server keeps answering; false once no fetch finished for
+   * [slotStallMs]. One acquire stays queued and a watchdog cancels it, so polling never moves a waiter to the back.
+   */
+  private suspend fun acquireSlot(): Boolean = coroutineScope {
     val waitStartedAt = clock()
-    while (true) {
-      if (withTimeoutOrNull(SLOT_POLL_MS) { permits.acquire() } != null) return true
-      if (clock() - maxOf(lastProgressAt, waitStartedAt) >= slotStallMs) return false
+    val acquiring = async { permits.acquire() }
+    val watchdog = launch {
+      while (clock() - maxOf(lastProgressAt, waitStartedAt) < slotStallMs) delay(slotPollMs)
     }
+    val acquired = select<Boolean> {
+      acquiring.onAwait { true }
+      watchdog.onJoin { false }
+    }
+    watchdog.cancel()
+    if (acquired) return@coroutineScope true
+    acquiring.cancel()
+    acquiring.join()
+    // The permit may have been granted just before the cancel: then it is ours to use
+    if (!acquiring.isCancelled) return@coroutineScope true
+    logStall()
+    false
+  }
+
+  private fun logStall() {
+    val now = clock()
+    synchronized(inFlight) {
+      if (lastStallLogAt != Long.MIN_VALUE && now - lastStallLogAt < REFUSAL_LOG_EVERY_MS) return
+      lastStallLogAt = now
+    }
+    log("Cover fetch gave up: slot wait stalled")
   }
 
   private fun download(itemId: String, version: Long): Fetched? {
     // The server may have gone away while this request waited for a free slot
     if (!mayFetch()) return null
     val config = activeServer() ?: return null
-    val fetched = fetcher.fetch(config, itemId, raw = false) ?: return null
-    lastProgressAt = clock()
+    val startedAt = clock()
+    val fetched = fetcher.fetch(config, itemId, raw = false)
+    // Any quick answer (also a 404 or a refusal) frees a slot; a request that hung until its timeout does not count
+    clock().let { if (it - startedAt < slotStallMs) lastProgressAt = it }
+    if (fetched == null) return null
     return fetched.body.use { body ->
       val ext = fetched.ext
       if (ext != null) {

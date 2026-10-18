@@ -7,6 +7,7 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +15,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
@@ -42,8 +44,13 @@ class CoverCacheTest {
   private val fetcher = FakeFetcher()
   private val store by lazy { CoverStore(File(tmp.root, COVER_CACHE_DIR)) }
 
-  private fun cache(fetch: CoverFetcher = fetcher, slotStallMs: Long = COVER_SLOT_STALL_MS) =
-    CoverCache(store, fetch, { active }, { state }, { _, id -> replica[id] }, scope, slotStallMs = slotStallMs)
+  private val now = AtomicLong(1_000_000L)
+  private val stallLogs = CopyOnWriteArrayList<String>()
+
+  private fun cache(fetch: CoverFetcher = fetcher, slotStallMs: Long = COVER_SLOT_STALL_MS, fakeClock: Boolean = false) =
+    CoverCache(store, fetch, { active }, { state }, { _, id -> replica[id] }, scope,
+      clock = if (fakeClock) ({ now.get() }) else ({ System.nanoTime() / 1_000_000 }), slotStallMs = slotStallMs,
+      slotPollMs = 5, log = { stallLogs += it })
 
   private fun seed(itemId: String, updatedAt: Long) {
     store.put(itemId, updatedAt, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!
@@ -323,17 +330,19 @@ class CoverCacheTest {
     val release = CountDownLatch(1)
     fetcher.answer = { id, _ -> if (id.startsWith("H")) release.await(10, TimeUnit.SECONDS); image() }
     seed("C", 1)
-    val cache = cache(slotStallMs = 300)
+    val cache = cache(slotStallMs = 1_000, fakeClock = true)
     try {
       val hanging = (1..COVER_FETCH_PARALLELISM).map { async(Dispatchers.IO) { cache.standard("H$it", 1) } }
       waitUntil { fetcher.calls.size == COVER_FETCH_PARALLELISM }
+      val miss = async(Dispatchers.IO) { cache.standard("B", 1) }
+      val older = async(Dispatchers.IO) { cache.standard("C", 2) }
+      Thread.sleep(50)
+      now.addAndGet(1_000)
 
-      val miss = withTimeout(3_000) { cache.standard("B", 1) }
-      val older = withTimeout(3_000) { cache.standard("C", 2) }
-
-      assertSame("no cover arrives: the card draws its title", CoverAnswer.Miss, miss)
-      assertEquals("the older cached version instead", 1L, (older as CoverAnswer.Cached).entry.updatedAt)
+      assertSame("no answer arrives: the card draws its title", CoverAnswer.Miss, withTimeout(3_000) { miss.await() })
+      assertEquals("the older cached version instead", 1L, (withTimeout(3_000) { older.await() } as CoverAnswer.Cached).entry.updatedAt)
       assertEquals(0, fetcher.callsFor("B") + fetcher.callsFor("C"))
+      assertEquals("one log line per stall window", listOf("Cover fetch gave up: slot wait stalled"), stallLogs.toList())
       release.countDown()
       hanging.awaitAll()
     } finally {
@@ -341,14 +350,69 @@ class CoverCacheTest {
     }
   }
 
+  /** Runs [waves] of fetches through the 4 slots; each wave takes 400 fake ms, longer in total than the 1 s stall limit. */
+  private suspend fun runWaves(cache: CoverCache, ids: List<String>, waves: Int, gate: java.util.concurrent.Semaphore): List<CoverAnswer> = coroutineScope {
+    // Queued one by one, so the slot queue holds them in list order
+    val answers = ids.mapIndexed { i, id ->
+      async(Dispatchers.IO) { cache.standard(id, 1) }.also {
+        if (i < COVER_FETCH_PARALLELISM) waitUntil { fetcher.calls.size == i + 1 } else Thread.sleep(20)
+      }
+    }
+    for (wave in 1..waves) {
+      waitUntil { fetcher.calls.size == COVER_FETCH_PARALLELISM * wave }
+      now.addAndGet(400)
+      Thread.sleep(50) // the waiters' watchdogs see the new time before any slot frees
+      gate.release(COVER_FETCH_PARALLELISM)
+    }
+    answers.awaitAll()
+  }
+
   @Test
   fun aMovingQueueKeepsWaiting() = runBlocking {
-    fetcher.answer = { _, _ -> Thread.sleep(100); image() }
-    val cache = cache(slotStallMs = 1_000)
+    val gate = java.util.concurrent.Semaphore(0)
+    fetcher.answer = { _, _ -> gate.acquire(); image() }
+    val ids = (1..COVER_FETCH_PARALLELISM * 4).map { "M$it" }
 
-    val answers = (1..COVER_FETCH_PARALLELISM * 4).map { async(Dispatchers.IO) { cache.standard("M$it", 1) } }.awaitAll()
+    val answers = withTimeout(10_000) { runWaves(cache(slotStallMs = 1_000, fakeClock = true), ids, 4, gate) }
 
-    assertTrue("every queued cover arrives", answers.all { it is CoverAnswer.Cached })
+    assertTrue("the last wave waited 1.2 s, answers came every 0.4 s: every cover arrives", answers.all { it is CoverAnswer.Cached })
+  }
+
+  @Test
+  fun fastRefusalsCountAsProgress() = runBlocking {
+    val gate = java.util.concurrent.Semaphore(0)
+    fetcher.answer = { id, _ -> gate.acquire(); if (id.startsWith("R")) null else image() }
+    val ids = (1..COVER_FETCH_PARALLELISM * 3).map { "R$it" } + (1..COVER_FETCH_PARALLELISM).map { "M$it" }
+
+    val answers = withTimeout(10_000) { runWaves(cache(slotStallMs = 1_000, fakeClock = true), ids, 4, gate) }
+
+    assertTrue("quick refusals kept the queue alive", answers.takeLast(COVER_FETCH_PARALLELISM).all { it is CoverAnswer.Cached })
+  }
+
+  @Test
+  fun waitersGetSlotsInArrivalOrder(): Unit = runBlocking {
+    val gate = java.util.concurrent.Semaphore(0, true)
+    fetcher.answer = { _, _ -> gate.acquire(); image() }
+    val cache = cache(fakeClock = true)
+    try {
+      val all = (1..COVER_FETCH_PARALLELISM).map { async(Dispatchers.IO) { cache.standard("H$it", 1) } }.toMutableList()
+      waitUntil { fetcher.calls.size == COVER_FETCH_PARALLELISM }
+      for (i in 1..6) {
+        all += async(Dispatchers.IO) { cache.standard("W$i", 1) }
+        Thread.sleep(50)
+      }
+      for (i in 1..6) {
+        gate.release(1)
+        waitUntil { fetcher.calls.size == COVER_FETCH_PARALLELISM + i }
+        Thread.sleep(30)
+      }
+
+      assertEquals((1..6).map { "W$it" }, fetcher.calls.map { it.first }.filter { it.startsWith("W") })
+      gate.release(100)
+      all.awaitAll()
+    } finally {
+      gate.release(100)
+    }
   }
 
   @Test
