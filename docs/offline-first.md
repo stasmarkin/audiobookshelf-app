@@ -23,8 +23,8 @@ Design for making Audiobookshelf+ fully usable without a reachable server: every
 | 5 | 5a-native | Home shelves, search and podcast episodes computed from the replica (native side) | Done |
 | 5 | 5b-ui | Home and search | Done |
 | 6 | 6-item | Full item details are cached when an item is opened online | Done |
-| 6 | 6-ui | Book, podcast and episode pages; server-only actions disabled with a reason | This release |
-| 6 | 6b-awaiting-player | The player opens on the book a queue waits for | Planned |
+| 6 | 6-ui | Book, podcast and episode pages; server-only actions disabled with a reason | Done |
+| 6 | 6b-awaiting-player | The player opens on the book a queue waits for | This release |
 | 7 | 7-covers | Covers | Planned |
 | 8 | 8a-auto-replica | Android Auto browses the catalog copy | Planned |
 | 8 | 8b-auto-offline | Android Auto: offline marks, lists that follow changes, cover icons | Planned |
