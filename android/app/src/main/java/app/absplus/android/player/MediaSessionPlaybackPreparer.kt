@@ -7,8 +7,6 @@ import android.os.Looper
 import android.os.ResultReceiver
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
-import app.absplus.android.data.LibraryItemWrapper
-import app.absplus.android.data.PodcastEpisode
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 
@@ -29,34 +27,27 @@ class MediaSessionPlaybackPreparer(var playerNotificationService:PlayerNotificat
 
   override fun onPrepare(playWhenReady: Boolean) {
     Log.d(tag, "ON PREPARE $playWhenReady")
-    playerNotificationService.mediaManager.getFirstItem()?.let { li ->
-      playerNotificationService.startWrapper(li, null, playWhenReady, playerNotificationService.mediaManager.getSavedPlaybackRate())
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.firstPlayable { li, episode ->
+      li?.let { playerNotificationService.startWrapper(it, episode, playWhenReady, mediaManager.getSavedPlaybackRate()) }
     }
   }
 
   override fun onPrepareFromMediaId(mediaId: String, playWhenReady: Boolean, extras: Bundle?) {
     Log.d(tag, "ON PREPARE FROM MEDIA ID $mediaId $playWhenReady")
-
-    val libraryItemWrapper: LibraryItemWrapper?
-    var podcastEpisode: PodcastEpisode? = null
-
-    val libraryItemWithEpisode = playerNotificationService.mediaManager.getPodcastWithEpisodeByEpisodeId(mediaId)
-    if (libraryItemWithEpisode != null) {
-      libraryItemWrapper = libraryItemWithEpisode.libraryItemWrapper
-      podcastEpisode = libraryItemWithEpisode.episode
-    } else {
-      libraryItemWrapper = playerNotificationService.mediaManager.getById(mediaId)
-    }
-
-    libraryItemWrapper?.let { li ->
-      playerNotificationService.startWrapper(li, podcastEpisode, playWhenReady, playerNotificationService.mediaManager.getSavedPlaybackRate())
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.resolveForPlay(mediaId) { libraryItemWrapper, podcastEpisode ->
+      libraryItemWrapper?.let { li ->
+        playerNotificationService.startWrapper(li, podcastEpisode, playWhenReady, mediaManager.getSavedPlaybackRate())
+      }
     }
   }
 
   override fun onPrepareFromSearch(query: String, playWhenReady: Boolean, extras: Bundle?) {
     Log.d(tag, "ON PREPARE FROM SEARCH $query")
-    playerNotificationService.mediaManager.getFromSearch(query)?.let { li ->
-      playerNotificationService.startWrapper(li, null, playWhenReady, playerNotificationService.mediaManager.getSavedPlaybackRate())
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.findForVoice(query) { li ->
+      li?.let { playerNotificationService.startWrapper(it, null, playWhenReady, mediaManager.getSavedPlaybackRate()) }
     }
   }
 

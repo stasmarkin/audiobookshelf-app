@@ -7,8 +7,6 @@ import android.os.*
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import android.view.KeyEvent
-import app.absplus.android.data.LibraryItemWrapper
-import app.absplus.android.data.PodcastEpisode
 import java.util.*
 import kotlin.concurrent.schedule
 
@@ -21,14 +19,20 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPrepare() {
     DLog.d(tag, "ON PREPARE MEDIA SESSION COMPAT")
-    playerNotificationService.mediaManager.getFirstItem()?.let { li ->
-      playerNotificationService.startWrapper(li, null, true, playerNotificationService.mediaManager.getSavedPlaybackRate())
-    }
+    startFirstPlayable()
   }
 
   override fun onPlay() {
     DLog.d(tag, "ON PLAY MEDIA SESSION COMPAT")
-    playerNotificationService.play()
+    // Android Auto's Play with nothing to resume starts the latest started item (Р22); elsewhere it stays a no-op
+    playerNotificationService.play(if (playerNotificationService.isAndroidAuto) ({ startFirstPlayable { playerNotificationService.onMediaButtonHandled() } }) else null)
+  }
+
+  private fun startFirstPlayable(onNothing: () -> Unit = {}) {
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.firstPlayable { li, episode ->
+      if (li == null) onNothing() else playerNotificationService.startWrapper(li, episode, true, mediaManager.getSavedPlaybackRate())
+    }
   }
 
   override fun onPrepareFromSearch(query: String?, extras: Bundle?) {
@@ -38,8 +42,8 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlayFromSearch(query: String?, extras: Bundle?) {
     DLog.d(tag, "ON PLAY FROM SEARCH $query")
-    playerNotificationService.mediaManager.getFromSearch(query)?.let { li ->
-      playerNotificationService.startWrapper(li, null, true, playerNotificationService.mediaManager.getSavedPlaybackRate())
+    playerNotificationService.mediaManager.findForVoice(query) { li ->
+      li?.let { playerNotificationService.startWrapper(it, null, true, playerNotificationService.mediaManager.getSavedPlaybackRate()) }
     }
   }
 
@@ -104,26 +108,14 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
     DLog.d(tag, "ON PLAY FROM MEDIA ID $mediaId")
-    val libraryItemWrapper: LibraryItemWrapper?
-    var podcastEpisode: PodcastEpisode? = null
-
-    if (mediaId.isNullOrEmpty()) {
-      libraryItemWrapper = playerNotificationService.mediaManager.getFirstItem()
-    } else {
-      val libraryItemWithEpisode = playerNotificationService.mediaManager.getPodcastWithEpisodeByEpisodeId(mediaId)
-      if (libraryItemWithEpisode != null) {
-        libraryItemWrapper = libraryItemWithEpisode.libraryItemWrapper
-        podcastEpisode = libraryItemWithEpisode.episode
+    if (mediaId.isNullOrEmpty()) return startFirstPlayable()
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.resolveForPlay(mediaId) { libraryItemWrapper, podcastEpisode ->
+      if (libraryItemWrapper == null) {
+        DLog.e(tag, "onPlayFromMediaId: Media item not found $mediaId")
       } else {
-        libraryItemWrapper = playerNotificationService.mediaManager.getById(mediaId)
-        if (libraryItemWrapper == null) {
-          DLog.e(tag, "onPlayFromMediaId: Media item not found $mediaId")
-        }
+        playerNotificationService.startWrapper(libraryItemWrapper, podcastEpisode, true, mediaManager.getSavedPlaybackRate())
       }
-    }
-
-    libraryItemWrapper?.let { li ->
-      playerNotificationService.startWrapper(li, podcastEpisode, true, playerNotificationService.mediaManager.getSavedPlaybackRate())
     }
   }
 

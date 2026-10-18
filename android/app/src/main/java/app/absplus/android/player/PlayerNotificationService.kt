@@ -51,6 +51,7 @@ import app.absplus.android.managers.PlaybackRestoreStore.LOG_TAG as RESTORE_TAG
 import app.absplus.android.managers.SleepTimerManager
 import android.content.pm.ServiceInfo
 import androidx.media.session.MediaButtonReceiver
+import app.absplus.android.media.AutoSnapshot
 import app.absplus.android.media.MediaManager
 import app.absplus.android.media.MediaProgressSyncer
 import app.absplus.android.media.getUriToAbsIconDrawable
@@ -78,7 +79,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -189,7 +189,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private val startGate = StartGate()
   private val pauseOrigin = PauseOrigin()
 
-  private var isAndroidAuto = false
+  var isAndroidAuto = false
+    private set
 
   // Playlist queue for native background advancement (bypasses WebView/JS layer)
   data class PlaylistQueueItem(
@@ -233,16 +234,18 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var shakeSensorUnregisterTask: TimerTask? = null
 
   // These are used to trigger reloading if
-  private var forceReloadingAndroidAuto: Boolean = false
-  private var firstLoadDone: Boolean = false
+  @Volatile private var forceReloadingAndroidAuto: Boolean = false
+  @Volatile private var firstLoadDone: Boolean = false
+  // The media browser answers here: the replica, the device database and Paper are not read on the main thread
+  private val autoIOScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
   fun isBrowseTreeInitialized(): Boolean {
     return this::browseTree.isInitialized
   }
 
   // Cache latest search so it wont trigger again when returning from series for example
-  private var cachedSearch: String = ""
-  private var cachedSearchResults: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
+  @Volatile private var cachedSearch: String = ""
+  @Volatile private var cachedSearchResults: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
 
   /*
      Service related stuff
@@ -410,6 +413,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaProgressSyncer.reset()
     metadataScope.cancel()
     startScope.cancel()
+    autoIOScope.cancel()
     // The player is released without closePlayback
     LocalItemLocks.clearPlaybackPin()
 
@@ -2044,7 +2048,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     return false
   }
 
-  fun play() {
+  /** [nothingToRestore]: what a Play with nothing prepared and no last session to restore does instead. */
+  fun play(nothingToRestore: (() -> Unit)? = null) {
     if (awaiting.isAwaiting) {
       // The player has nothing to play while waiting: start again now if the server is back, else probe it. Before the
       // restore below: a queue may wait with no session, and the last session is not what it waits on
@@ -2062,7 +2067,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       // (service or process was recreated). Rebuild the last session instead of no-op'ing.
       DLog.marker("Playback restoration requested")
       DLog.i(RESTORE_TAG, "Play received with no prepared session - attempting restore")
-      if (!restoreLastPlaybackSession(true)) onMediaButtonHandled()
+      if (!restoreLastPlaybackSession(true)) nothingToRestore?.invoke() ?: onMediaButtonHandled()
       return
     }
     DLog.i(RESTORE_TAG, "Play received - using existing player/session ${currentPlaybackSession?.mediaItemId}")
@@ -2407,50 +2412,52 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private val RECENTLY_ROOT = "__RECENTLY__"
   private val DOWNLOADS_ROOT = "__DOWNLOADS__"
   private val CONTINUE_ROOT = "__CONTINUE__"
-  private lateinit var browseTree: BrowseTree
+  @Volatile private lateinit var browseTree: BrowseTree
   private val browseTreeInitListeners = mutableListOf<() -> Unit>()
 
   private fun waitForBrowseTree(cb: () -> Unit)
   {
-    if (this::browseTree.isInitialized)
-    {
-      cb()
+    val ready = synchronized(browseTreeInitListeners) {
+      this::browseTree.isInitialized.also { if (!it) browseTreeInitListeners += cb }
     }
-    else
-    {
-      browseTreeInitListeners += cb
-    }
+    if (ready) cb()
   }
 
   private fun onBrowseTreeInitialized()
   {
     // Called after browseTree is assigned for the first time
-    browseTreeInitListeners.forEach { it.invoke() }
-    browseTreeInitListeners.clear()
+    val listeners = synchronized(browseTreeInitListeners) { browseTreeInitListeners.toList().also { browseTreeInitListeners.clear() } }
+    listeners.forEach { it.invoke() }
   }
 
   /**
-   * The Android Auto root before the server load has finished: only entries whose children can be served without
-   * it. That is Downloads (local, allowed before firstLoadDone); Continue, Recent and Libraries are refused until
-   * the first load is done, so they appear with the refreshed root.
+   * The Android Auto tree: Continue and the libraries from the replica snapshot, then the server's libraries the
+   * replica lacks. Before the server load it offers only what [servableWithoutServer] serves: the reconciled libraries,
+   * and Continue once one is; without a snapshot that is Downloads only.
    */
-  internal fun provisionalAutoRootItems(): MutableList<MediaBrowserCompat.MediaItem> =
-    BrowseTree(this, emptyList(), emptyList(), false)[AUTO_MEDIA_ROOT].orEmpty().map { item ->
+  internal fun buildAutoTree(snapshot: AutoSnapshot?): BrowseTree {
+    val manager = if (this::mediaManager.isInitialized) mediaManager else null
+    val ready = snapshot?.readyLibraryIds.orEmpty()
+    val fromReplica = snapshot?.libraries.orEmpty().filter { firstLoadDone || it.id in ready }
+    val ids = fromReplica.mapTo(HashSet()) { it.id }
+    val libraries = fromReplica + manager?.serverLibraries.orEmpty().filter { it.id !in ids }
+    val continueItems = if (firstLoadDone || ready.isNotEmpty()) snapshot?.continueItems.orEmpty() else emptyList()
+    val recentsLoaded = ready.isNotEmpty() || manager?.allLibraryPersonalizationsDone == true
+    return BrowseTree(this, continueItems, libraries, recentsLoaded)
+  }
+
+  /** The Android Auto root answered at once: what [buildAutoTree] has without waiting for the server load. */
+  internal fun provisionalAutoRootItems(snapshot: AutoSnapshot? = null): MutableList<MediaBrowserCompat.MediaItem> =
+    buildAutoTree(snapshot)[AUTO_MEDIA_ROOT].orEmpty().map { item ->
       MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
     }.toMutableList()
 
   /** Called by [autoRootLoader] on the load's thread once the server checks and libraries have finished. */
   private fun onAndroidAutoItemsLoaded() {
     AbsLogger.info(tag, "onLoadChildren: Loaded Android Auto data, initializing browseTree")
-    browseTree =
-            BrowseTree(
-                    this,
-                    mediaManager.serverItemsInProgress,
-                    mediaManager.serverLibraries,
-                    mediaManager.allLibraryPersonalizationsDone
-            )
-    onBrowseTreeInitialized()
     firstLoadDone = true
+    browseTree = buildAutoTree(mediaManager.snapshot)
+    onBrowseTreeInitialized()
     if (mediaManager.serverLibraries.isNotEmpty()) {
       AbsLogger.info(tag, "onLoadChildren: Android Auto fetching personalized data for all libraries")
       mediaManager.populatePersonalizedDataForAllLibraries {
@@ -2503,6 +2510,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       }
 
       isAndroidAuto = true
+      autoIOScope.launch { mediaManager.refreshSnapshot() }
 
       val extras = Bundle()
       extras.putBoolean(MediaConstants.BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED, true)
@@ -2526,9 +2534,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     AbsLogger.info(tag, "onLoadChildren: parentMediaId: $parentMediaId (${DeviceManager.serverConnectionConfigString})")
 
     result.detach()
+    autoIOScope.launch { loadAutoChildren(parentMediaId, result) }
+  }
 
-    // Prevent crashing if app is restarted while browsing (nodes that need no server data are always served)
-    if (!servableBeforeFirstLoad(parentMediaId) && !firstLoadDone) {
+  private suspend fun loadAutoChildren(parentMediaId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+    // Every node reads the fresh snapshot: after a restart the host may ask a deep node first
+    val snap = mediaManager.refreshSnapshot()
+    // Prevent crashing if app is restarted while browsing (nodes the replica or the device can answer are served)
+    if (!servableWithoutServer(parentMediaId, snap?.readyLibraryIds.orEmpty()) && !firstLoadDone) {
       result.sendResult(null)
       return
     }
@@ -2563,61 +2576,21 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       result.sendResult(localBrowseItems)
     } else if (parentMediaId == CONTINUE_ROOT) {
       val localBrowseItems: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-      mediaManager.serverItemsInProgress.forEach { itemInProgress ->
+      snap?.continueItems.orEmpty().forEach { itemInProgress ->
         val progress: MediaProgressWrapper?
         val mediaDescription: MediaDescriptionCompat
         if (itemInProgress.episode != null) {
-          if (itemInProgress.isLocal) {
-            progress =
-                    DeviceManager.dbManager.getLocalMediaProgress(
-                            "${itemInProgress.libraryItemWrapper.id}-${itemInProgress.episode.id}"
-                    )
+          progress = if (itemInProgress.isLocal) {
+            DeviceManager.dbManager.getLocalMediaProgress("${itemInProgress.libraryItemWrapper.id}-${itemInProgress.episode.id}")
           } else {
-            progress =
-                    mediaManager.serverUserMediaProgress.find {
-                      it.libraryItemId == itemInProgress.libraryItemWrapper.id &&
-                              it.episodeId == itemInProgress.episode.id
-                    }
-
-            // to show download icon
-            val localLibraryItem =
-                    DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(
-                            itemInProgress.libraryItemWrapper.id,
-                            (itemInProgress.libraryItemWrapper as LibraryItem).ino
-                    )
-            localLibraryItem?.let { lli ->
-              val localEpisode =
-                      (lli.media as Podcast).episodes?.find {
-                        it.serverEpisodeId == itemInProgress.episode.id
-                      }
-              itemInProgress.episode.localEpisodeId = localEpisode?.id
-            }
+            mediaManager.progressOf(itemInProgress.libraryItemWrapper.id, itemInProgress.episode.id)
           }
-          mediaDescription =
-                  itemInProgress.episode.getMediaDescription(
-                          itemInProgress.libraryItemWrapper,
-                          progress,
-                          ctx
-                  )
+          mediaDescription = itemInProgress.episode.getMediaDescription(itemInProgress.libraryItemWrapper, progress, ctx)
         } else {
-          if (itemInProgress.isLocal) {
-            progress =
-                    DeviceManager.dbManager.getLocalMediaProgress(
-                            itemInProgress.libraryItemWrapper.id
-                    )
+          progress = if (itemInProgress.isLocal) {
+            DeviceManager.dbManager.getLocalMediaProgress(itemInProgress.libraryItemWrapper.id)
           } else {
-            progress =
-                    mediaManager.serverUserMediaProgress.find {
-                      it.libraryItemId == itemInProgress.libraryItemWrapper.id
-                    }
-
-            val localLibraryItem =
-                    DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(
-                            itemInProgress.libraryItemWrapper.id,
-                            (itemInProgress.libraryItemWrapper as LibraryItem).ino
-                    )
-            (itemInProgress.libraryItemWrapper as LibraryItem).localLibraryItemId =
-                    localLibraryItem?.id // To show downloaded icon
+            mediaManager.progressOf(itemInProgress.libraryItemWrapper.id, null)
           }
           mediaDescription = itemInProgress.libraryItemWrapper.getMediaDescription(progress, ctx)
         }
@@ -2629,72 +2602,37 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       }
       result.sendResult(localBrowseItems)
     } else if (parentMediaId == AUTO_MEDIA_ROOT) {
-      DLog.d(tag, "Trying to initialize browseTree.")
-      if (!this::browseTree.isInitialized || forceReloadingAndroidAuto || autoRootLoader.isLoading) {
+      // The root comes from the replica at once; the server load (stream, never reconciled libraries) runs behind it
+      // and refreshes the root through notifyChildrenChanged("/") when it finishes; a load already running is reused
+      val needsLoad = !this::browseTree.isInitialized || forceReloadingAndroidAuto || autoRootLoader.isLoading
+      browseTree = buildAutoTree(snap)
+      onBrowseTreeInitialized()
+      result.sendResult(browseTree[parentMediaId]?.map { item ->
+        MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
+      }?.toMutableList())
+      if (needsLoad) {
         forceReloadingAndroidAuto = false
-        // Answer at once with what needs no server (Downloads), instead of waiting for the server checks, which
-        // can take 3 s per unreachable server or about 30 s for a stalled one (Discussion #30). The full root
-        // follows through notifyChildrenChanged("/") when the load finishes; a load already running is reused.
-        AbsLogger.info(tag, "onLoadChildren: Loading Android Auto items (provisional root sent)")
-        result.sendResult(provisionalAutoRootItems())
+        AbsLogger.info(tag, "onLoadChildren: Loading Android Auto items (replica root sent)")
         autoRootLoader.reload()
-      } else {
-        DLog.d(tag, "Starting browseTree refresh")
-        browseTree =
-                BrowseTree(
-                        this,
-                        mediaManager.serverItemsInProgress,
-                        mediaManager.serverLibraries,
-                        mediaManager.allLibraryPersonalizationsDone
-                )
-        onBrowseTreeInitialized()
-        val children =
-                browseTree[parentMediaId]?.map { item ->
-                  DLog.d(tag, "Found top menu item: ${item.description.title}")
-                  MediaBrowserCompat.MediaItem(
-                          item.description,
-                          MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
-                  )
-                }
-
-        AbsLogger.info(tag, "onLoadChildren: Android auto data loaded")
-        result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
       }
     } else if (parentMediaId == LIBRARIES_ROOT || parentMediaId == RECENTLY_ROOT)
     {
-      DLog.d(tag, "First load done: $firstLoadDone")
-      if (!firstLoadDone)
-      {
-        result.sendResult(null)
-        return
-      }
-
       if (!this::browseTree.isInitialized)
       {
-        // ✅ good: detach and wait for init
-        result.detach()
-        waitForBrowseTree {
-          val children = browseTree[parentMediaId]?.map { item ->
-            DLog.d(tag, "[MENU: $parentMediaId] Showing list item ${item.description.title}")
-            MediaBrowserCompat.MediaItem(
-              item.description,
-              MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
-            )
-          }
-          result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
-        }
-        return
+        browseTree = buildAutoTree(snap)
+        onBrowseTreeInitialized()
       }
 
-      // Already initialized: just return
-      val children = browseTree[parentMediaId]?.map { item ->
-        DLog.d(tag, "[MENU: $parentMediaId] Showing list item ${item.description.title}")
-        MediaBrowserCompat.MediaItem(
-          item.description,
-          MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
-        )
+      waitForBrowseTree {
+        val children = browseTree[parentMediaId]?.map { item ->
+          DLog.d(tag, "[MENU: $parentMediaId] Showing list item ${item.description.title}")
+          MediaBrowserCompat.MediaItem(
+            item.description,
+            MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
+          )
+        }
+        result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
       }
-      result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
     } else if (mediaManager.getIsLibrary(parentMediaId)) { // Load library items for library
       DLog.d(tag, "Loading items for library $parentMediaId")
       val selectedLibrary = mediaManager.getLibrary(parentMediaId)
@@ -2843,13 +2781,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             if (shelf.type == "book") {
               val children =
                       (shelf as LibraryShelfBookEntity).entities?.map { libraryItem ->
-                        val progress =
-                                mediaManager.serverUserMediaProgress.find {
-                                  it.libraryItemId == libraryItem.id
-                                }
-                        val localLibraryItem =
-                                DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(libraryItem.id, libraryItem.ino)
-                        libraryItem.localLibraryItemId = localLibraryItem?.id
+                        val progress = mediaManager.progressOf(libraryItem.id, null)
                         val description =
                                 libraryItem.getMediaDescription(progress, ctx, null, false)
                         MediaBrowserCompat.MediaItem(
@@ -2866,25 +2798,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
               val children =
                       episodesWithRecentEpisode?.map { libraryItem ->
                         val podcast = libraryItem.media as Podcast
-                        val progress =
-                                mediaManager.serverUserMediaProgress.find {
-                                  it.libraryItemId == libraryItem.libraryId &&
-                                          it.episodeId == libraryItem.recentEpisode?.id
-                                }
-
-                        // to show download icon
-                        val localLibraryItem =
-                                DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(
-                                        libraryItem.recentEpisode!!.id,
-                                        libraryItem.ino
-                                )
-                        localLibraryItem?.let { lli ->
-                          val localEpisode =
-                                  (lli.media as Podcast).episodes?.find {
-                                    it.serverEpisodeId == libraryItem.recentEpisode.id
-                                  }
-                          libraryItem.recentEpisode.localEpisodeId = localEpisode?.id
-                        }
+                        val progress = mediaManager.progressOf(libraryItem.id, libraryItem.recentEpisode!!.id)
 
                         val description =
                                 libraryItem.recentEpisode.getMediaDescription(
@@ -3043,13 +2957,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           }
           val children =
                   items.map { libraryItem ->
-                    val progress =
-                            mediaManager.serverUserMediaProgress.find {
-                              it.libraryItemId == libraryItem.id
-                            }
-                    val localLibraryItem =
-                            DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(libraryItem.id, libraryItem.ino)
-                    libraryItem.localLibraryItemId = localLibraryItem?.id
+                    val progress = mediaManager.progressOf(libraryItem.id, null)
                     val description = libraryItem.getMediaDescription(progress, ctx, null, true)
                     MediaBrowserCompat.MediaItem(
                             description,
@@ -3137,13 +3045,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         mediaManager.loadAuthorBooksWithAudio(mediaIdParts[2], mediaIdParts[4]) { libraryItems ->
           val children =
                   libraryItems.map { libraryItem ->
-                    val progress =
-                            mediaManager.serverUserMediaProgress.find {
-                              it.libraryItemId == libraryItem.id
-                            }
-                    val localLibraryItem =
-                            DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(libraryItem.id, libraryItem.ino)
-                    libraryItem.localLibraryItemId = localLibraryItem?.id
+                    val progress = mediaManager.progressOf(libraryItem.id, null)
                     if (libraryItem.collapsedSeries != null) {
                       val description =
                               libraryItem.getMediaDescription(progress, ctx, mediaIdParts[4])
@@ -3175,13 +3077,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           }
           val children =
                   items.map { libraryItem ->
-                    val progress =
-                            mediaManager.serverUserMediaProgress.find {
-                              it.libraryItemId == libraryItem.id
-                            }
-                    val localLibraryItem =
-                            DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(libraryItem.id, libraryItem.ino)
-                    libraryItem.localLibraryItemId = localLibraryItem?.id
+                    val progress = mediaManager.progressOf(libraryItem.id, null)
                     val description = libraryItem.getMediaDescription(progress, ctx, null, true)
                     if (libraryItem.collapsedSeries != null) {
                       MediaBrowserCompat.MediaItem(
@@ -3218,13 +3114,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           DLog.d(tag, "Received ${libraryItems.size} collections")
           val children =
                   libraryItems.map { libraryItem ->
-                    val progress =
-                            mediaManager.serverUserMediaProgress.find {
-                              it.libraryItemId == libraryItem.id
-                            }
-                    val localLibraryItem =
-                            DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(libraryItem.id, libraryItem.ino)
-                    libraryItem.localLibraryItemId = localLibraryItem?.id
+                    val progress = mediaManager.progressOf(libraryItem.id, null)
                     val description = libraryItem.getMediaDescription(progress, ctx)
                     MediaBrowserCompat.MediaItem(
                             description,
@@ -3239,13 +3129,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           DLog.d(tag, "Received ${libraryItems.size} libraryItems for discovery")
           val children =
                   libraryItems.map { libraryItem ->
-                    val progress =
-                            mediaManager.serverUserMediaProgress.find {
-                              it.libraryItemId == libraryItem.id
-                            }
-                    val localLibraryItem =
-                            DeviceManager.dbManager.getLocalLibraryItemByLIdOrIno(libraryItem.id, libraryItem.ino)
-                    libraryItem.localLibraryItemId = localLibraryItem?.id
+                    val progress = mediaManager.progressOf(libraryItem.id, null)
                     val description = libraryItem.getMediaDescription(progress, ctx)
                     MediaBrowserCompat.MediaItem(
                             description,
@@ -3269,35 +3153,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           result: Result<MutableList<MediaBrowserCompat.MediaItem>>
   ) {
     result.detach()
-    if (cachedSearch != query) {
-      DLog.d(tag, "Search bundle: $extras")
-      var foundBooks: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-      var foundPodcasts: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-      var foundSeries: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-      var foundAuthors: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-
-      mediaManager.serverLibraries.forEach { serverLibrary ->
-        runBlocking {
-          // Skip searching library if it doesn't have any audio files
-          if (serverLibrary.stats?.numAudioFiles == 0) return@runBlocking
-          val searchResult = mediaManager.doSearch(serverLibrary.id, query)
-          for (resultData in searchResult.entries.iterator()) {
-            when (resultData.key) {
-              "book" -> foundBooks.addAll(resultData.value)
-              "series" -> foundSeries.addAll(resultData.value)
-              "authors" -> foundAuthors.addAll(resultData.value)
-              "podcast" -> foundPodcasts.addAll(resultData.value)
-            }
-          }
-        }
+    autoIOScope.launch {
+      // A reconcile or another server since the last search makes the cached results stale
+      val snap = mediaManager.refreshSnapshot()
+      val key = autoSearchCacheKey(query, snap?.serverConfigId, snap?.generation)
+      if (cachedSearch != key) {
+        DLog.d(tag, "Search bundle: $extras")
+        val found = mediaManager.searchAll(query)
+        cachedSearchResults = listOf("book", "podcast", "series", "authors").flatMap { found[it].orEmpty() }.toMutableList()
+        cachedSearch = key
       }
-      foundBooks.addAll(foundSeries)
-      foundBooks.addAll(foundAuthors)
-      cachedSearchResults = foundBooks
+      result.sendResult(cachedSearchResults)
+      DLog.d(tag, "onSearch: Done")
     }
-    result.sendResult(cachedSearchResults)
-    cachedSearch = query
-    DLog.d(tag, "onSearch: Done")
   }
 
   //

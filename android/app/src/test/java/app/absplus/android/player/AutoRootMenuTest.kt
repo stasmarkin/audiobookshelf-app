@@ -4,8 +4,13 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.support.v4.media.MediaBrowserCompat
 import androidx.test.core.app.ApplicationProvider
+import app.absplus.android.data.ItemInProgress
 import app.absplus.android.data.Library
+import app.absplus.android.data.LibraryItem
 import app.absplus.android.data.LibraryStats
+import app.absplus.android.data.MediaType
+import app.absplus.android.data.MediaTypeMetadata
+import app.absplus.android.media.AutoSnapshot
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -72,5 +77,53 @@ class AutoRootMenuTest {
     val first = service.provisionalAutoRootItems()
     first.add(MediaBrowserCompat.MediaItem(first[0].description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE))
     assertEquals(1, service.provisionalAutoRootItems().size)
+  }
+
+  private fun startedBook(id: String) = ItemInProgress(LibraryItem(id, "ino", "lib1", "f", "/$id", id, 1, 1, 1, 1, 1, null, null, false, false, "book",
+    MediaType(MediaTypeMetadata(id, false), null), null, null, null, null, null), null, 1, false)
+
+  private fun snapshot(ready: Set<String> = setOf("lib1"), started: Boolean = true, generation: Long = 1, server: String = "srv") = AutoSnapshot(
+    server, listOf(Library("lib1", "Library lib1", mutableListOf(), "database", "book", null)), ready, emptySet(),
+    if (started) listOf(startedBook("b1")) else emptyList(), emptyMap(), generation)
+
+  @Test fun replicaRootIsCompleteWithoutTheServer() {
+    val snap = snapshot()
+    val root = service.provisionalAutoRootItems(snap)
+    assertEquals(listOf(CONTINUE_ROOT, RECENTLY_ROOT, LIBRARIES_ROOT, DOWNLOADS_ROOT), root.map { it.mediaId })
+    assertTrue(root.all { it.isBrowsable })
+    assertEquals(listOf("lib1"), service.buildAutoTree(snap)[LIBRARIES_ROOT]!!.map { it.description.mediaId })
+    assertEquals(listOf("__RECENTLY__lib1"), service.buildAutoTree(snap)[RECENTLY_ROOT]!!.map { it.description.mediaId })
+    assertEquals(listOf(DOWNLOADS_ROOT), service.provisionalAutoRootItems(null).map { it.mediaId })
+  }
+
+  @Test fun readyLibraryNodesAreServedBeforeTheFirstLoad() {
+    assertTrue(servableWithoutServer("__LIBRARY__lib1__SERIES_LIST", setOf("lib1")))
+    assertFalse(servableWithoutServer("__LIBRARY__lib2__SERIES_LIST", setOf("lib1")))
+    assertTrue(servableWithoutServer("__RECENTLY__lib1__BOOK", setOf("lib1")))
+    assertFalse(servableWithoutServer("__RECENTLY__lib2", setOf("lib1")))
+    assertFalse(servableWithoutServer(CONTINUE_ROOT, emptySet()))
+    assertTrue(servableWithoutServer("local_x", emptySet()))
+    val snap = snapshot()
+    val tree = service.buildAutoTree(snap)
+    (tree[AUTO_BROWSE_ROOT]!! + tree[LIBRARIES_ROOT]!! + tree[RECENTLY_ROOT]!!).map { it.description.mediaId!! }
+      .forEach { assertTrue(it, servableWithoutServer(it, snap.readyLibraryIds)) }
+  }
+
+  @Test fun everySnapshotRootEntryPassesTheGuard() {
+    val snap = snapshot()
+    service.provisionalAutoRootItems(snap).forEach { assertTrue(it.mediaId!!, servableWithoutServer(it.mediaId!!, snap.readyLibraryIds)) }
+  }
+
+  @Test fun anUnreconciledReplicaOffersOnlyWhatTheGuardServes() {
+    val snap = snapshot(ready = emptySet())
+    assertEquals(listOf(DOWNLOADS_ROOT), service.provisionalAutoRootItems(snap).map { it.mediaId })
+  }
+
+  @Test fun searchCacheKeyFollowsTheSnapshot() {
+    val key = autoSearchCacheKey("dune", "srv", 1)
+    assertEquals(key, autoSearchCacheKey("dune", "srv", 1))
+    assertNotEquals(key, autoSearchCacheKey("dune", "srv", 2))
+    assertNotEquals(key, autoSearchCacheKey("dune", "srv2", 1))
+    assertNotEquals(key, autoSearchCacheKey("dune2", "srv", 1))
   }
 }
