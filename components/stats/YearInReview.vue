@@ -8,7 +8,7 @@
 </template>
 
 <script>
-import { loadCoverImages } from '@/utils/coverImages'
+import { drawnCoverIds, loadCoverImages } from '@/utils/coverImages'
 import { FileSharer } from '@webnativellc/capacitor-filesharer'
 import requiresServer from '@/mixins/requiresServer'
 
@@ -101,7 +101,7 @@ export default {
         ctx.translate(-canvas.width / 2, -canvas.height / 2)
         ctx.translate(-130, -120)
         // All covers at once: with each waiting for its download, one at a time would add up to minutes
-        const coverImages = await loadCoverImages(bookCovers, (id) => this.$store.getters['globals/getLibraryItemCoverSrcById'](id, null, { wait: true }))
+        const coverImages = await loadCoverImages(drawnCoverIds(bookCovers, 5 * 5), (id) => this.$store.getters['globals/getLibraryItemCoverSrcById'](id, null, { wait: true }))
         for (let x = 0; x < 5; x++) {
           for (let y = 0; y < 5; y++) {
             const coverIndex = index % bookCovers.length

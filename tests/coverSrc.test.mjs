@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises'
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
 const { coverSrc, isCoverRoute, shownGroupCovers } = await importSource('../utils/coverUrl.js')
-const { loadCoverImages } = await importSource('../utils/coverImages.js')
+const { drawnCoverIds, loadCoverImages } = await importSource('../utils/coverImages.js')
 const scriptOf = (source) => source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
 
 const globalsSource = (await read('../store/globals.js')).replace(/^import .*$/gm, '').replace(/^export const /gm, 'const ')
@@ -141,4 +141,10 @@ test('Year in Review loads its covers all at once', async () => {
   const loaded = await loading
   assert.deepEqual([...loaded.keys()], ['a', 'c'], 'a failed cover is left out')
   assert.equal(loaded.get('a'), images[0])
+})
+
+test('Year in Review loads only the covers its grid draws', () => {
+  const books = Array.from({ length: 13 }, (_, i) => `b${i}`)
+  assert.deepEqual(drawnCoverIds(books, 4 * 3), books.slice(0, 12), 'a 4x3 grid of 13 books loads the first 12')
+  assert.deepEqual(drawnCoverIds(['a', 'b'], 5 * 5), ['a', 'b'], 'fewer books than tiles: the grid repeats them')
 })

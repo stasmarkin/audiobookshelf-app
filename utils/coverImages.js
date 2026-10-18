@@ -18,3 +18,8 @@ export async function loadCoverImages(ids, srcOf, createImage = () => new Image(
   )
   return new Map(unique.map((id, i) => [id, loaded[i]]).filter(([, img]) => img))
 }
+
+/** The ids a grid of [tiles] draws, in its order (it wraps around [ids]): only these are worth loading. */
+export function drawnCoverIds(ids, tiles) {
+  return ids.slice(0, Math.min(tiles, ids.length))
+}
