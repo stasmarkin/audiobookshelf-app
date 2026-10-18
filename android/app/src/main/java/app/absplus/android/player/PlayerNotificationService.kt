@@ -224,6 +224,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var waitHoldsForeground = false
   // Android refused a start from the background: the wait's notification asks for a Play (see onBackgroundStartRefused)
   private var startRefusedNoticeShown = false
+  // That start was of a download: the user's Play starts it again, with or without the server
+  private var refusedLocalStart = false
   // Tests replace it with a refusal
   internal var startSelfInForeground: () -> Unit = { ContextCompat.startForegroundService(this, Intent(this, PlayerNotificationService::class.java)) }
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -1149,6 +1151,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (ticket !== resumingTicket) return
     resumingTicket = null
     if (awaitingPresentation.isResuming) awaitingPresentation.end()
+    // Nor does anything keep the wait's foreground for it
+    dropWaitNotice()
   }
 
   internal fun onActiveServerChanged(previous: String?, id: String?) {
@@ -1219,6 +1223,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       return
     }
     awaiting.onStartRefused(item, serverConfigId, playWhenReady)
+    refusedLocalStart = session.isLocal
     startRefusedNoticeShown = true
     resumingTicket = null
     awaitingPresentation.begin(item, null)
@@ -1395,9 +1400,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     } else if (awaitingPresentation.isResuming && awaitingPresentation.item != current) {
       resumingTicket = null
       awaitingPresentation.end()
+      // The resume on its way started an entry of the old queue: it goes
+      dropWaitNotice()
     }
-    // A resume on its way started an entry of the old queue: it goes
-    dropWaitNotice()
   }
 
   fun onPlaybackReady() = awaiting.onPlaybackReady()
@@ -2179,16 +2184,21 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       // The user's Play may make the service foreground (from the app, or a media button that already did): the wait
       // keeps that, so its item may start later from the background
       holdForegroundForWait()
-      val refused = awaiting.blockedItem?.takeIf { startRefusedNoticeShown && it == playlistQueue.getOrNull(playlistQueueIndex) }
-      if (refused != null) {
-        // Starts again from the queue: a download needs no server, a stream waits for it again
-        DLog.i(tag, "Play after a refused start - starting ${refused.libraryItemId} again")
+      if (startRefusedNoticeShown) {
+        // The wait goes on as any other (the server's return starts it again)
         startRefusedNoticeShown = false
-        awaiting.cancel(CancelReason.OTHER_ITEM_STARTED)
-        // Shown until its session replaces it, as for a resume
-        awaitingPresentation.resuming()
-        resumingTicket = startQueueItem(refused, true)
-        return
+        val download = awaiting.blockedItem?.takeIf { refusedLocalStart && it == playlistQueue.getOrNull(playlistQueueIndex) }
+        refusedLocalStart = false
+        if (download != null) {
+          // A download needs no server: it starts again from the queue
+          DLog.i(tag, "Play after a refused start - starting the download of ${download.libraryItemId} again")
+          awaiting.cancel(CancelReason.OTHER_ITEM_STARTED)
+          // Shown until its session replaces it, as for a resume
+          awaitingPresentation.resuming()
+          resumingTicket = startQueueItem(download, true)
+          return
+        }
+        refreshNowPlaying(awaitingDisplay)
       }
       // The player has nothing to play while waiting: start again now if the server is back, else probe it. Before the
       // restore below: a queue may wait with no session, and the last session is not what it waits on
