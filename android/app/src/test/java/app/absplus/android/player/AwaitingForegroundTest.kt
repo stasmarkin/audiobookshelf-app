@@ -68,17 +68,36 @@ class AwaitingForegroundTest {
   @Test
   fun theServerComingBackWithTheAppInTheBackgroundWaitsForAPlayInsteadOfCrashing() {
     refuseStarts()
-    // The resume's play request answered: its session reaches preparePlayer with the service never started
-    pns.preparePlayer(streamOfB(), true, 1f)
+    // The resume's play request answered (a stale wait resumes paused): its session reaches preparePlayer with the
+    // service never started
+    pns.preparePlayer(streamOfB(), false, 1f)
     assertEquals("the start was tried once", 1, starts)
     assertNull("nothing is prepared", pns.currentPlaybackSession)
     assertEquals("the queue waits on its item again", itemB, pns.awaiting.blockedItem)
     val notice = shadowOf(ctx.getSystemService(NotificationManager::class.java)).allNotifications.single()
     assertEquals("Tap Play to continue", notice.text())
-    // The user's Play (from that notification or the app) starts it, as it was meant to play
-    val resume = pns.awaiting.onUserPlay(ServerState.ONLINE, "config-1") as AwaitingAction.ResumeStream
+    // The notification's Play reaches the wait, not the restore of the last session: the item then starts playing
+    pns.play()
+    val resume = pns.awaiting.onServerState(ServerState.ONLINE, "config-1") as AwaitingAction.ResumeStream
     assertEquals(itemB, resume.queueItem)
     assertTrue(resume.playWhenReady)
+  }
+
+  @Test
+  fun anotherBookStartedWhileTheWaitHoldsTheForegroundKeepsTheService() {
+    pns.awaiting.onQueueBlocked(itemB, "config-1")
+    pns.holdForegroundForWait()
+    // What the start above makes Android deliver
+    PlayerNotificationService.isStarted = true
+    // For example Android Auto starts book C, which replaces the wait. The bare instance has no player: preparing
+    // stops at it, after the wait has ended
+    val c = streamOfB().apply { id = "session-c"; libraryItemId = "book-c" }
+    val stoppedAt = runCatching { pns.preparePlayer(c, true, 1f) }.exceptionOrNull()
+    assertTrue("reached the player, past the end of the wait: $stoppedAt", stoppedAt is UninitializedPropertyAccessException)
+    assertNull(pns.awaiting.blockedItem)
+    assertFalse("the service is not stopped under the new book", shadowOf(pns).isStoppedBySelf)
+    assertFalse(shadowOf(pns).isForegroundStopped)
+    assertTrue(PlayerNotificationListener.isForegroundService)
   }
 
   @Test
