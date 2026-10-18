@@ -160,6 +160,19 @@ class CoverCache(
     return CoverAnswer.Stream(fetched.mime, fetched.body)
   }
 
+  /**
+   * Downloads in the background the standard covers of [items] (item id, updatedAt) the cache lacks, so they show later
+   * without the server (Android Auto lists). Online only; the same single download per version and parallelism as
+   * [standard]. A version older than a cached one is skipped, as [standard] would answer the cached one.
+   */
+  fun prefetch(items: List<Pair<String, Long>>) {
+    if (!isOnline()) return
+    val missing = items.distinct().filter { (itemId, updatedAt) ->
+      DownloadIdentifiers.isSafe(itemId) && cached(itemId, updatedAt) == null && (store.newest(itemId)?.updatedAt ?: Long.MIN_VALUE) < updatedAt
+    }
+    missing.forEach { (itemId, updatedAt) -> scope.launch { fetchOnce(itemId, updatedAt) } }
+  }
+
   /** The newest cached version, marked as used; no network (offline WebView answers). */
   fun newestCached(itemId: String): CoverEntry? = store.newest(itemId)?.also { store.touch(it) }
 

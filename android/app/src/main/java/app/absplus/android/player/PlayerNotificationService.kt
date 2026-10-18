@@ -2438,6 +2438,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           )
 
   private val AUTO_MEDIA_ROOT = "/"
+  private val MAX_GRANTED_AUTO_ICONS = 2_000
   private val LIBRARIES_ROOT = "__LIBRARIES__"
   private val RECENTLY_ROOT = "__RECENTLY__"
   private val DOWNLOADS_ROOT = "__DOWNLOADS__"
@@ -2491,7 +2492,28 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (items == null) return null
     val state = ServerReachability.state.value
     val label = getString(R.string.not_available_offline)
+    grantAutoIcons(items)
     return items.map { withOfflineMark(it, state, label) }.toMutableList()
+  }
+
+  // A grant lasts beyond this process's requests: each icon is granted once
+  private val grantedAutoIcons: MutableSet<String> = Collections.synchronizedSet(Collections.newSetFromMap(object : LinkedHashMap<String, Boolean>() {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > MAX_GRANTED_AUTO_ICONS
+  }))
+  private val autoGrantFailures: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
+  /** The Auto host reads a cached cover or a download's cover (`content://`) only with a grant. */
+  private fun grantAutoIcons(items: List<MediaBrowserCompat.MediaItem>) {
+    items.mapNotNull { it.description.iconUri }.filter { it.scheme == "content" && grantedAutoIcons.add(it.toString()) }.forEach { uri ->
+      AUTO_HOST_PACKAGES.forEach { pkg ->
+        try {
+          grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: Exception) {
+          // A host that is not installed fails every time: logged once
+          if (autoGrantFailures.add(pkg)) DLog.e(tag, "Grant uri permission to $pkg error $e")
+        }
+      }
+    }
   }
 
   // Only valid inside a browse call (onLoadChildren, onSearch)
@@ -2678,7 +2700,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       send(localBrowseItems)
     } else if (parentMediaId == CONTINUE_ROOT) {
       val localBrowseItems: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-      mediaManager.continueItems(snap).forEach { itemInProgress ->
+      val continueItems = mediaManager.continueItems(snap)
+      prefetchAutoCovers(continueItems.map { it.libraryItemWrapper })
+      continueItems.forEach { itemInProgress ->
         val progress: MediaProgressWrapper?
         val mediaDescription: MediaDescriptionCompat
         if (itemInProgress.episode != null) {
@@ -2740,6 +2764,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       val selectedLibrary = mediaManager.getLibrary(parentMediaId)
       if (selectedLibrary?.mediaType == "podcast") { // Podcasts are browseable
         mediaManager.loadLibraryPodcasts(parentMediaId) { libraryItems ->
+          prefetchAutoCovers(libraryItems)
           val children =
                   libraryItems?.map { libraryItem ->
                     val mediaDescription = libraryItem.getMediaDescription(null, ctx)
@@ -2881,8 +2906,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             send(mutableListOf())
           } else {
             if (shelf.type == "book") {
+              prefetchAutoCovers((shelf as LibraryShelfBookEntity).entities)
               val children =
-                      (shelf as LibraryShelfBookEntity).entities?.map { libraryItem ->
+                      shelf.entities?.map { libraryItem ->
                         val progress = mediaManager.progressOf(libraryItem.id, null)
                         val description =
                                 libraryItem.getMediaDescription(progress, ctx, null, false)
@@ -2893,8 +2919,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                       }
               send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else if (shelf.type == "episode") {
+              prefetchAutoCovers((shelf as LibraryShelfEpisodeEntity).entities)
               val episodesWithRecentEpisode =
-                      (shelf as LibraryShelfEpisodeEntity).entities?.filter { libraryItem ->
+                      shelf.entities?.filter { libraryItem ->
                         libraryItem.recentEpisode !== null
                       }
               val children =
@@ -2915,8 +2942,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                       }
               send(children as MutableList<MediaBrowserCompat.MediaItem>?)
             } else if (shelf.type == "podcast") {
+              prefetchAutoCovers((shelf as LibraryShelfPodcastEntity).entities)
               val children =
-                      (shelf as LibraryShelfPodcastEntity).entities?.map { libraryItem ->
+                      shelf.entities?.map { libraryItem ->
                         val mediaDescription = libraryItem.getMediaDescription(null, ctx)
                         MediaBrowserCompat.MediaItem(
                                 mediaDescription,
@@ -3051,6 +3079,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         mediaManager.loadLibrarySeriesItemsWithAudio(mediaIdParts[2], mediaIdParts[4]) {
                 libraryItems ->
           DLog.d(tag, "Received ${libraryItems.size} library items")
+          prefetchAutoCovers(libraryItems)
           var items = libraryItems
           if (DeviceManager.deviceData.deviceSettings!!.androidAutoBrowseSeriesSequenceOrder ===
                           AndroidAutoBrowseSeriesSequenceOrderSetting.DESC
@@ -3145,6 +3174,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         }
       } else if (mediaIdParts[3] == "AUTHOR") {
         mediaManager.loadAuthorBooksWithAudio(mediaIdParts[2], mediaIdParts[4]) { libraryItems ->
+          prefetchAutoCovers(libraryItems)
           val children =
                   libraryItems.map { libraryItem ->
                     val progress = mediaManager.progressOf(libraryItem.id, null)
@@ -3171,6 +3201,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                 mediaIdParts[4],
                 mediaIdParts[5]
         ) { libraryItems ->
+          prefetchAutoCovers(libraryItems)
           var items = libraryItems
           if (DeviceManager.deviceData.deviceSettings!!.androidAutoBrowseSeriesSequenceOrder ===
                           AndroidAutoBrowseSeriesSequenceOrderSetting.DESC
@@ -3214,6 +3245,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         mediaManager.loadLibraryCollectionBooksWithAudio(mediaIdParts[2], mediaIdParts[4]) {
                 libraryItems ->
           DLog.d(tag, "Received ${libraryItems.size} collections")
+          prefetchAutoCovers(libraryItems)
           val children =
                   libraryItems.map { libraryItem ->
                     val progress = mediaManager.progressOf(libraryItem.id, null)
@@ -3229,6 +3261,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         DLog.d(tag, "Loading discovery from library ${mediaIdParts[2]}")
         mediaManager.loadLibraryDiscoveryBooksWithAudio(mediaIdParts[2]) { libraryItems ->
           DLog.d(tag, "Received ${libraryItems.size} libraryItems for discovery")
+          prefetchAutoCovers(libraryItems)
           val children =
                   libraryItems.map { libraryItem ->
                     val progress = mediaManager.progressOf(libraryItem.id, null)

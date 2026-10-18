@@ -8,6 +8,7 @@ import android.support.v4.media.MediaBrowserCompat
 import android.util.Log
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.player.prefetchAutoCovers
 import app.absplus.android.managers.DbManager
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.DataChange
@@ -516,6 +517,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
       // Skip searching library if it doesn't have any audio files
       if (library.stats?.numAudioFiles == 0) continue
       val result = search(library.id, query) ?: continue
+      prefetchAutoCovers((result.book.orEmpty() + result.podcast.orEmpty()).map { it.libraryItem })
       searchItems(library, result).forEach { (kind, items) -> found.getOrPut(kind) { mutableListOf() }.addAll(items) }
     }
     return found
@@ -1045,6 +1047,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
           children?.let { cb(children as MutableList) } ?: cb(mutableListOf())
         }
       } else if (libraryItemWrapper is LibraryItem) { // Server podcast episodes
+        prefetchAutoCovers(listOf(libraryItemWrapper))
         if (libraryItemWrapper.mediaType != "podcast" || libraryItemWrapper.media.getAudioTracks().isEmpty()) {
           cb(mutableListOf())
         } else {
