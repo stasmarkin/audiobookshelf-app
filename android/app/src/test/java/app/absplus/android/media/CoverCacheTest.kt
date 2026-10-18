@@ -390,6 +390,31 @@ class CoverCacheTest {
   }
 
   @Test
+  fun slowSuccessfulCoversKeepTheQueueWaiting(): Unit = runBlocking {
+    val gate = java.util.concurrent.Semaphore(0, true)
+    fetcher.answer = { _, _ -> gate.acquire(); image() }
+    val cache = cache(slotStallMs = 1_000, fakeClock = true)
+    val total = COVER_FETCH_PARALLELISM * 3
+    try {
+      // One cover arrives every 375 fake ms, but each takes 1.5 s: longer than the stall limit, yet the server is working
+      val answers = (1..total).map { i ->
+        async(Dispatchers.IO) { cache.standard("L$i", 1) }.also {
+          if (i <= COVER_FETCH_PARALLELISM) waitUntil { fetcher.calls.size == i } else Thread.sleep(20)
+        }
+      }
+      for (i in 1..total) {
+        now.addAndGet(375)
+        Thread.sleep(50)
+        gate.release(1)
+        if (i <= total - COVER_FETCH_PARALLELISM) waitUntil { fetcher.calls.size == COVER_FETCH_PARALLELISM + i }
+      }
+      assertTrue("no slow cover is given up", withTimeout(5_000) { answers.awaitAll() }.all { it is CoverAnswer.Cached })
+    } finally {
+      gate.release(100)
+    }
+  }
+
+  @Test
   fun waitersGetSlotsInArrivalOrder(): Unit = runBlocking {
     val gate = java.util.concurrent.Semaphore(0, true)
     fetcher.answer = { _, _ -> gate.acquire(); image() }
@@ -413,6 +438,18 @@ class CoverCacheTest {
     } finally {
       gate.release(100)
     }
+  }
+
+  @Test
+  fun aWatchdogRacingTheSlotNeverLosesIt() = runBlocking {
+    fetcher.answer = { _, _ -> null }
+    val cache = CoverCache(store, fetcher, { active }, { state }, { _, _ -> null }, scope, slotStallMs = 1, slotPollMs = 1, log = {})
+
+    repeat(1_500) { round ->
+      (1..COVER_FETCH_PARALLELISM * 2).map { async(Dispatchers.IO) { cache.standard("S${round}_$it", 1) } }.awaitAll()
+    }
+
+    assertEquals("every slot is back", COVER_FETCH_PARALLELISM, cache.freeSlotsForTest())
   }
 
   @Test
