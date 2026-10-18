@@ -40,4 +40,24 @@ class SyncRuntimeTest {
     f.idle()
     assertEquals(2, f.probed.size)
   }
+  @Test
+  fun autoActivityOpensALease() {
+    var now = 1_000_000L
+    SyncRuntime.clock = { now }
+    assertFalse("without the app in the foreground", SyncRuntime.mayReconcile)
+
+    SyncRuntime.onAutoActivity(now)
+    assertTrue(SyncRuntime.mayReconcile)
+    now += AUTO_RECONCILE_LEASE_MS - 1
+    assertTrue("10 minutes from Auto's request", SyncRuntime.mayReconcile)
+    now += 1
+    assertFalse(SyncRuntime.mayReconcile)
+    assertFalse("the lease is not a foreground", SyncRuntime.isForeground)
+
+    SyncRuntime.onAutoActivity(now)
+    now += AUTO_RECONCILE_LEASE_MS / 2
+    SyncRuntime.onAutoActivity(now)
+    now += AUTO_RECONCILE_LEASE_MS - 1
+    assertTrue("each request extends the lease", SyncRuntime.mayReconcile)
+  }
 }

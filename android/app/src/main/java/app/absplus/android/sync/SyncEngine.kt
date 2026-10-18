@@ -118,8 +118,8 @@ class SyncDeps(
 /**
  * Process-wide sync of the user's data with the active server: pull (reconcile) and push of the outbox.
  *
- * The outbox is pushed whenever the server is online. A reconcile runs only with the app in the foreground: in the
- * background (Android Auto, the player service) it is deferred until the next foreground return. Runs never overlap;
+ * The outbox is pushed whenever the server is online. A reconcile runs only with the app in the foreground or Android
+ * Auto in use ([SyncRuntime.mayReconcile]): otherwise (the player service alone) it is deferred until the next return. Runs never overlap;
  * a request during a run schedules one more run after it.
  */
 object SyncEngine {
@@ -165,7 +165,7 @@ object SyncEngine {
             serverState = ServerReachability.state,
             onlineEntries = ServerReachability.onlineEntries,
             serverId = ServerReachability.serverConfigId,
-            isForeground = { SyncRuntime.isForeground },
+            isForeground = { SyncRuntime.mayReconcile },
             clock = System::currentTimeMillis,
             // A failure in any sync job is logged, never a crash of the process (the player may be running)
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO +

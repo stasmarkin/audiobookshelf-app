@@ -90,7 +90,7 @@ class SyncEngineCatalogTest {
             serverState = state,
             onlineEntries = onlineEntries,
             serverId = serverId,
-            isForeground = { foreground },
+            isForeground = { foreground || SyncRuntime.mayReconcile },
             clock = { now },
             scope = scope,
             log = {},
@@ -105,6 +105,7 @@ class SyncEngineCatalogTest {
   @After
   fun tearDown() {
     SyncEngine.resetForTest()
+    SyncRuntime.resetForTest()
     scope.cancel()
     db.close()
     replica.close()
@@ -210,6 +211,32 @@ class SyncEngineCatalogTest {
     foreground = true
     SyncEngine.syncNow(SyncReason.FOREGROUND)
     awaitPasses(1)
+  }
+
+  @Test
+  fun autoLeaseExpiryDefersTheNextReconcile() = runBlocking {
+    server.book("li1")
+    foreground = false
+    SyncRuntime.resetForTest()
+    SyncRuntime.clock = { now }
+    start()
+    setState(ServerState.ONLINE)
+    settle()
+    assertEquals("in the background the catalog waits", 0, passes())
+
+    val gate = Gate()
+    SyncRuntime.onAutoActivity(now)
+    gate.awaitArrived()
+    // A request during the pass asks for one more; its user reconcile runs at once
+    SyncEngine.syncNow(SyncReason.MANUAL)
+    settle()
+    now += AUTO_RECONCILE_LEASE_MS
+    gate.release.countDown()
+    awaitPasses(1)
+    assertEquals("the pass the lease started is finished", "Title li1", title("li1"))
+
+    SyncRuntime.onAutoActivity(now)
+    awaitPasses(2)
   }
 
   @Test

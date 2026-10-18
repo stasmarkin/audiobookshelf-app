@@ -2494,6 +2494,18 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     return items.map { withOfflineMark(it, state, label) }.toMutableList()
   }
 
+  // Only valid inside a browse call (onLoadChildren, onSearch)
+  private fun browserPackage(): String? = try {
+    currentBrowserInfo.packageName
+  } catch (e: IllegalStateException) {
+    null
+  }
+
+  /** A request of Android Auto keeps the catalog reconciling while it is in use (Р20). */
+  private fun noteAutoActivity(packageName: String?) {
+    if (opensReconcileLease(packageName)) SyncRuntime.onAutoActivity()
+  }
+
   /** Android Auto's open lists follow the data, the server's state and the active server ([AutoRefresh]). */
   private fun startAutoRefresh() {
     if (!autoRefreshStarted.compareAndSet(false, true)) return
@@ -2594,6 +2606,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       }
 
       isAndroidAuto = true
+      noteAutoActivity(clientPackageName)
       startAutoRefresh()
       autoIOScope.launch { mediaManager.refreshSnapshot() }
 
@@ -2619,6 +2632,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     AbsLogger.info(tag, "onLoadChildren: parentMediaId: $parentMediaId (${DeviceManager.serverConnectionConfigString})")
 
     result.detach()
+    noteAutoActivity(browserPackage())
     autoIOScope.launch { loadAutoChildren(parentMediaId, result) }
   }
 
@@ -3241,6 +3255,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           result: Result<MutableList<MediaBrowserCompat.MediaItem>>
   ) {
     result.detach()
+    noteAutoActivity(browserPackage())
     autoIOScope.launch {
       // A reconcile or another server since the last search makes the cached results stale
       val snap = mediaManager.refreshSnapshot()

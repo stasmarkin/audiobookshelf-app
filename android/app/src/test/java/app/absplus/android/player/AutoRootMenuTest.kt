@@ -151,4 +151,8 @@ class AutoRootMenuTest {
     assertEquals("Author", withOfflineMark(item("pod1", MediaBrowserCompat.MediaItem.FLAG_BROWSABLE), offline, label).description.subtitle)
     assertEquals("Author", withOfflineMark(item("li1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), app.absplus.android.sync.ServerState.ONLINE, label).description.subtitle)
   }
+  @Test fun onlyAutoOpensTheReconcileLease() {
+    listOf(ANDROID_AUTO_PKG_NAME, ANDROID_AUTO_SIMULATOR_PKG_NAME, ANDROID_AUTOMOTIVE_PKG_NAME).forEach { assertTrue(it, opensReconcileLease(it)) }
+    listOf(null, ANDROID_GSEARCH_PKG_NAME, ANDROID_WEARABLE_PKG_NAME, "app.absplus.android").forEach { assertFalse(it.toString(), opensReconcileLease(it)) }
+  }
 }

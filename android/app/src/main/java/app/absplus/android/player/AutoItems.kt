@@ -26,3 +26,10 @@ internal fun withOfflineMark(item: MediaBrowserCompat.MediaItem, state: ServerSt
           .build()
   return MediaBrowserCompat.MediaItem(marked, item.flags)
 }
+
+/**
+ * Android Auto and Automotive in use: a reconcile may run (see [app.absplus.android.sync.SyncRuntime.onAutoActivity]).
+ * Not a watch or the Google app, which may browse while the phone lies in a pocket.
+ */
+internal fun opensReconcileLease(packageName: String?): Boolean =
+        packageName == ANDROID_AUTO_PKG_NAME || packageName == ANDROID_AUTO_SIMULATOR_PKG_NAME || packageName == ANDROID_AUTOMOTIVE_PKG_NAME

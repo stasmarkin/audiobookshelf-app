@@ -63,7 +63,7 @@ class SyncEngineTest {
             serverState = state,
             onlineEntries = onlineEntries,
             serverId = serverId,
-            isForeground = { foreground || SyncRuntime.isForeground },
+            isForeground = { foreground || SyncRuntime.mayReconcile },
             clock = { now },
             scope = scope,
             log = {},
@@ -329,6 +329,45 @@ class SyncEngineTest {
       SyncRuntime.setForeground(true)
 
       eventually("the deferred reconcile") { gets() == 1 }
+    } finally {
+      SyncRuntime.resetForTest()
+    }
+  }
+
+  @Test
+  fun autoLeaseRunsTheDeferredReconcile() = runBlocking {
+    SyncRuntime.resetForTest()
+    SyncRuntime.clock = { now }
+    setState(ServerState.ONLINE)
+    start()
+    try {
+      settle()
+      assertEquals("started in the background: reconcile deferred", 0, gets())
+
+      SyncRuntime.onAutoActivity(now)
+
+      eventually("Auto's lease runs the deferred reconcile") { gets() == 1 }
+      settle()
+      SyncRuntime.onAutoActivity(now + 1_000)
+      settle()
+      assertEquals("a request within the lease is not another return", 1, gets())
+    } finally {
+      SyncRuntime.resetForTest()
+    }
+  }
+
+  @Test
+  fun autoLeaseReconcilesBeforeTheLiveSession() = runBlocking {
+    // A process Auto started has no live session until its root load sets the server config
+    signedIn = false
+    SyncRuntime.resetForTest()
+    SyncRuntime.clock = { now }
+    setState(ServerState.ONLINE)
+    start()
+    try {
+      settle()
+      SyncRuntime.onAutoActivity(now)
+      eventually("the reconcile does not wait for the live session") { gets() == 1 }
     } finally {
       SyncRuntime.resetForTest()
     }
