@@ -8,6 +8,7 @@
 </template>
 
 <script>
+import { drawnCoverIds, loadCoverImages } from '@/utils/coverImages'
 import { FileSharer } from '@webnativellc/capacitor-filesharer'
 import requiresServer from '@/mixins/requiresServer'
 
@@ -99,38 +100,32 @@ export default {
         ctx.rotate((-Math.PI / 180) * 25)
         ctx.translate(-canvas.width / 2, -canvas.height / 2)
         ctx.translate(-130, -120)
+        // All covers at once: with each waiting for its download, one at a time would add up to minutes
+        const coverImages = await loadCoverImages(drawnCoverIds(bookCovers, 5 * 5), (id) => this.$store.getters['globals/getLibraryItemCoverSrcById'](id, null, { wait: true }))
         for (let x = 0; x < 5; x++) {
           for (let y = 0; y < 5; y++) {
             const coverIndex = index % bookCovers.length
             let libraryItemId = bookCovers[coverIndex]
             index++
 
-            await new Promise((resolve) => {
-              const img = new Image()
-              img.crossOrigin = 'anonymous'
-              img.addEventListener('load', () => {
-                let sw = img.width
-                if (img.width > img.height) {
-                  sw = img.height
+            const img = coverImages.get(libraryItemId)
+            if (img) {
+              let sw = img.width
+              if (img.width > img.height) {
+                sw = img.height
+              }
+              let sx = -(sw - img.width) / 2
+              let sy = -(sw - img.height) / 2
+              ctx.drawImage(img, sx, sy, sw, sw, 215 * x, 215 * y, 215, 215)
+              if (this.yearStats.finishedBooksWithCovers.includes(libraryItemId) && !finishedBookCoverImgs[libraryItemId]) {
+                finishedBookCoverImgs[libraryItemId] = {
+                  img,
+                  sx,
+                  sy,
+                  sw
                 }
-                let sx = -(sw - img.width) / 2
-                let sy = -(sw - img.height) / 2
-                ctx.drawImage(img, sx, sy, sw, sw, 215 * x, 215 * y, 215, 215)
-                resolve()
-                if (this.yearStats.finishedBooksWithCovers.includes(libraryItemId) && !finishedBookCoverImgs[libraryItemId]) {
-                  finishedBookCoverImgs[libraryItemId] = {
-                    img,
-                    sx,
-                    sy,
-                    sw
-                  }
-                }
-              })
-              img.addEventListener('error', () => {
-                resolve()
-              })
-              img.src = this.$store.getters['globals/getLibraryItemCoverSrcById'](libraryItemId)
-            })
+              }
+            }
           }
         }
         ctx.restore()

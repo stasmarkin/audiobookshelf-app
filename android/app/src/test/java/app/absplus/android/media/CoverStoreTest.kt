@@ -120,7 +120,7 @@ class CoverStoreTest {
     seed("C_3.tmp", now)
     seed("notes.txt", now)
     seed("D_x.jpg", now)
-    seed("E_4.bmp", now)
+    seed("E_4.tiff", now)
 
     val store = store(maxBytes = 300)
 

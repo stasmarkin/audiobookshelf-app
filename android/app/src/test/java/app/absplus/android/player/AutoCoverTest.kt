@@ -20,11 +20,8 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.joinAll
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -60,13 +57,8 @@ class AutoCoverTest {
     LibraryItem(id, "ino-$id", "lib", "f", "", "", 0L, 0L, 0L, 0L, updatedAt, null, null, false, false, "book",
       MediaType(MediaTypeMetadata("Book $id", false), coverPath), null, null, null, null, null)
 
-  private suspend fun idle() {
-    while (true) {
-      val children = scope.coroutineContext[Job]!!.children.toList()
-      if (children.isEmpty()) return
-      children.joinAll()
-    }
-  }
+  // The queue's workers live as long as the scope: wait for the queue, not for the scope's children
+  private suspend fun idle() = cache.awaitIdleForTest()
 
   @Before fun setUp() {
     // DeviceManager reads Paper on first access (the server address of a cover URL)
@@ -118,6 +110,18 @@ class AutoCoverTest {
     assertEquals((1..COVER_PREFETCH_LIMIT).map { "li$it" }.toSet(), fetched.toSet())
   }
 
+  @Test fun prefetchWaitsBehindTheScreenAndNeverShedsItsCovers() {
+    val paused = kotlinx.coroutines.test.StandardTestDispatcher()
+    val queued = CoverCache(store, CoverFetcher { _, itemId, _ ->
+      fetched += itemId
+      FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(byteArrayOf(1, 2, 3)), 3)
+    }, { server }, { state }, { _, _ -> null }, CoroutineScope(SupervisorJob() + paused), workers = 1, queueMax = 4)
+    listOf("s1", "s2", "s3").forEach { queued.standard(it, 1L) }
+    queued.prefetch(listOf("p1" to 1L, "p2" to 1L, "p3" to 1L))
+    paused.scheduler.advanceUntilIdle()
+    assertEquals("the screen's covers first, then the top of the list in the room left", listOf("s3", "s2", "s1", "p1"), fetched.toList())
+  }
+
   @Test fun aCoverAskedAfterASwitchIsNotJoinedToThePreviousServersPrefetch() {
     val paused = kotlinx.coroutines.test.StandardTestDispatcher()
     var active: ServerConnectionConfig? = server
@@ -128,11 +132,10 @@ class AutoCoverTest {
     }, { active }, { state }, { _, _ -> null }, CoroutineScope(SupervisorJob() + paused))
     queued.prefetch(listOf("li1" to 1L))
     active = other
-    var answer: app.absplus.android.media.CoverAnswer? = null
-    CoroutineScope(paused).launch { answer = queued.standard("li1", 1L) }
+    assertEquals("a miss answers at once", null, queued.standard("li1", 1L))
     paused.scheduler.advanceUntilIdle()
     assertEquals(listOf("other:li1"), fetched.toList())
-    assertTrue(answer.toString(), answer is app.absplus.android.media.CoverAnswer.Cached)
+    assertTrue("the new server's cover is cached", store.find("li1", 1L) != null)
   }
 
   @Test fun anAnswerOfAServerNoLongerActiveIsNotCached() = runBlocking {
@@ -143,9 +146,12 @@ class AutoCoverTest {
       active = other
       FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(byteArrayOf(1, 2, 3)), 3)
     }, { active }, { state }, { _, _ -> null }, scope)
-    val answer = switching.standard("li1", 1L)
-    assertTrue("the caller still gets it: $answer", answer is app.absplus.android.media.CoverAnswer.Stream)
+    val ready = CopyOnWriteArrayList<String>()
+    switching.onCoverReady = { ready += it }
+    assertEquals(null, switching.standard("li1", 1L))
+    switching.awaitIdleForTest()
     assertEquals(null, store.find("li1", 1L))
+    assertEquals("nothing to show again", emptyList<String>(), ready.toList())
   }
 
   @Test fun prefetchQueuedForAnotherServerIsDropped() {

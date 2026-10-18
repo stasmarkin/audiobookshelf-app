@@ -1,3 +1,4 @@
+import Vue from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { coverSrc } from '@/utils/coverUrl'
 
@@ -20,7 +21,9 @@ export const state = () => ({
   localFolderSelectData: null,
   hapticFeedback: 'LIGHT',
   showRSSFeedOpenCloseModal: false,
-  rssFeedEntity: null
+  rssFeedEntity: null,
+  // itemId -> how many times native announced its cover as ready; part of the cover route so the <img> asks again
+  coverEpochs: {}
 })
 
 export const getters = {
@@ -51,13 +54,14 @@ export const getters = {
           native: isAndroid(),
           serverAddress: rootGetters['user/getServerAddress'],
           token: rootGetters['user/getToken'],
-          tokenRequired: rootGetters.getDoesServerImagesRequireToken
+          tokenRequired: rootGetters.getDoesServerImagesRequireToken,
+          epoch: state.coverEpochs[libraryItem.id] || 0
         }) || placeholder
       )
     },
   getLibraryItemCoverSrcById:
     (state, getters, rootState, rootGetters) =>
-    (libraryItemId, placeholder = null) => {
+    (libraryItemId, placeholder = null, { wait = false } = {}) => {
       if (!placeholder) placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
       if (!libraryItemId) return placeholder
       return (
@@ -67,7 +71,9 @@ export const getters = {
           serverAddress: rootGetters['user/getServerAddress'],
           token: rootGetters['user/getToken'],
           tokenRequired: rootGetters.getDoesServerImagesRequireToken,
-          versioned: false
+          versioned: false,
+          epoch: state.coverEpochs[libraryItemId] || 0,
+          wait
         }) || placeholder
       )
     },
@@ -97,6 +103,9 @@ export const actions = {
 }
 
 export const mutations = {
+  bumpCoverEpochs(state, itemIds) {
+    for (const itemId of itemIds) Vue.set(state.coverEpochs, itemId, (state.coverEpochs[itemId] || 0) + 1)
+  },
   setIsModalOpen(state, val) {
     state.isModalOpen = val
   },
