@@ -210,8 +210,8 @@ class CoverCache(
   /**
    * The standard cover for a canvas that draws once: a miss online waits for its background fetch up to [timeoutMs].
    */
-  suspend fun awaitStandard(itemId: String, updatedAt: Long?, timeoutMs: Long): CoverEntry? {
-    standard(itemId, updatedAt)?.let { if (updatedAt == null || it.updatedAt >= updatedAt) return it }
+  suspend fun awaitStandard(itemId: String, updatedAt: Long?, timeoutMs: Long, announce: Boolean = true): CoverEntry? {
+    standard(itemId, updatedAt, announce)?.let { if (updatedAt == null || it.updatedAt >= updatedAt) return it }
     if (!mayFetch()) return newestCached(itemId)
     return withTimeoutOrNull(timeoutMs) { pollStored(itemId, updatedAt) } ?: newestCached(itemId)
   }
@@ -233,7 +233,9 @@ class CoverCache(
     val standard = standard(itemId, updatedAt, announce = false)
     val config = activeServer()
     if (!mayFetch() || config == null) return cachedOrMiss(standard)
-    val fetched = withContext(Dispatchers.IO) { fetcher.fetch(config, itemId, raw = true) } ?: return cachedOrMiss(standard)
+    val fetched = withContext(Dispatchers.IO) { fetcher.fetch(config, itemId, raw = true) }
+    // The standard copy may have been stored meanwhile (or is being fetched): read again rather than trust the first look
+      ?: return cachedOrMiss(awaitStandard(itemId, updatedAt, COVER_WAIT_MS, announce = false))
     return CoverAnswer.Stream(fetched.mime, fetched.body)
   }
 

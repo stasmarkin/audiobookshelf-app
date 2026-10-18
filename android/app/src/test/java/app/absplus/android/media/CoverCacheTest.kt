@@ -370,6 +370,15 @@ class CoverCacheTest {
   }
 
   @Test
+  fun aFailedRawGetsTheStandardCoverStoredMeanwhile() = runBlocking {
+    fetcher.answer = { _, raw -> if (raw) { Thread.sleep(100); null } else image() }
+
+    val answer = cache().raw("A", 2)
+
+    assertEquals("the background stored it while the original failed", 2L, (answer as CoverAnswer.Cached).entry.updatedAt)
+  }
+
+  @Test
   fun unknownStateMayFetch() {
     state = ServerState.UNKNOWN
     val cache = cache()

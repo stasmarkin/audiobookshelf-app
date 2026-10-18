@@ -8,6 +8,7 @@
 </template>
 
 <script>
+import { loadCoverImages } from '@/utils/coverImages'
 import { FileSharer } from '@webnativellc/capacitor-filesharer'
 import requiresServer from '@/mixins/requiresServer'
 
@@ -88,30 +89,24 @@ export default {
         ctx.rotate((-Math.PI / 180) * 25)
         ctx.translate(-canvas.width / 2, -canvas.height / 2)
         ctx.translate(-10, -90)
+        // All covers at once: with each waiting for its download, one at a time would add up to minutes
+        const coverImages = await loadCoverImages(bookCovers, (id) => this.$store.getters['globals/getLibraryItemCoverSrcById'](id, null, { wait: true }))
         for (let x = 0; x < 4; x++) {
           for (let y = 0; y < 3; y++) {
             const coverIndex = index % bookCovers.length
             let libraryItemId = bookCovers[coverIndex]
             index++
 
-            await new Promise((resolve) => {
-              const img = new Image()
-              img.crossOrigin = 'anonymous'
-              img.addEventListener('load', () => {
-                let sw = img.width
-                if (img.width > img.height) {
-                  sw = img.height
-                }
-                let sx = -(sw - img.width) / 2
-                let sy = -(sw - img.height) / 2
-                ctx.drawImage(img, sx, sy, sw, sw, 155 * x, 155 * y, 155, 155)
-                resolve()
-              })
-              img.addEventListener('error', () => {
-                resolve()
-              })
-              img.src = this.$store.getters['globals/getLibraryItemCoverSrcById'](libraryItemId, null, { wait: true })
-            })
+            const img = coverImages.get(libraryItemId)
+            if (img) {
+              let sw = img.width
+              if (img.width > img.height) {
+                sw = img.height
+              }
+              let sx = -(sw - img.width) / 2
+              let sy = -(sw - img.height) / 2
+              ctx.drawImage(img, sx, sy, sw, sw, 155 * x, 155 * y, 155, 155)
+            }
           }
         }
         ctx.restore()

@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises'
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
 const { coverSrc, isCoverRoute, shownGroupCovers } = await importSource('../utils/coverUrl.js')
+const { loadCoverImages } = await importSource('../utils/coverImages.js')
 const scriptOf = (source) => source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
 
 const globalsSource = (await read('../store/globals.js')).replace(/^import .*$/gm, '').replace(/^export const /gm, 'const ')
@@ -121,4 +122,23 @@ test('Year in Review waits for a missing cover', () => {
   const state = { coverEpochs: {} }
   assert.equal(gettersFor(true).getLibraryItemCoverSrcById(state, null, {}, rootGetters(null))('li1', null, { wait: true }), '/_absplus/cover/li1?wait=1')
   assert.equal(gettersFor(false).getLibraryItemCoverSrcById(state, null, {}, rootGetters('https://srv'))('li1', null, { wait: true }), 'https://srv/api/items/li1/cover', 'web mode as before')
+})
+
+test('Year in Review loads its covers all at once', async () => {
+  const images = []
+  const fakeImage = () => {
+    const listeners = {}
+    const img = { addEventListener: (name, cb) => (listeners[name] = cb), fire: (name) => listeners[name]() }
+    images.push(img)
+    return img
+  }
+  const loading = loadCoverImages(['a', 'b', 'a', 'c'], (id) => `/_absplus/cover/${id}?wait=1`, fakeImage)
+
+  assert.deepEqual(images.map((img) => img.src), ['/_absplus/cover/a?wait=1', '/_absplus/cover/b?wait=1', '/_absplus/cover/c?wait=1'], 'each cover once, all asked before any arrives')
+  images[2].fire('load')
+  images[1].fire('error')
+  images[0].fire('load')
+  const loaded = await loading
+  assert.deepEqual([...loaded.keys()], ['a', 'c'], 'a failed cover is left out')
+  assert.equal(loaded.get('a'), images[0])
 })
