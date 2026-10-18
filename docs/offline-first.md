@@ -8,8 +8,8 @@ Design for making Audiobookshelf+ fully usable without a reachable server: every
 
 | Release | PR | What works without the server | Status |
 |---|---|---|---|
-| 0 | 0-doc | This document | This release |
-| 1 | 1-reachability | "Server unreachable" is told apart from "no network"; the app reconnects by itself when the server returns | Planned |
+| 0 | 0-doc | This document | Done |
+| 1 | 1-reachability | "Server unreachable" is told apart from "no network"; the app reconnects by itself when the server returns | This release |
 | 2 | 2a-bookmarks | Bookmarks are created, renamed and deleted offline and sent later | Planned |
 | 2 | 2b-progress | Progress and "finished" are kept offline and sent later; a refused sign-in keeps the data | Planned |
 | 2 | 2c-sessions | Listening time of a stream that lost the server is kept and sent once | Planned |
