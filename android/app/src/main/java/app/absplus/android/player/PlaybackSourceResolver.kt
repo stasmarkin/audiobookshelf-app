@@ -1,5 +1,6 @@
 package app.absplus.android.player
 
+import app.absplus.android.data.Book
 import app.absplus.android.data.LibraryItem
 import app.absplus.android.data.LibraryItemWrapper
 import app.absplus.android.data.LocalLibraryItem
@@ -107,9 +108,13 @@ data class StartRequest(
     /** An Android Auto browse-tree item: a server item (with its server episode) or a device copy. */
     fun forWrapper(wrapper: LibraryItemWrapper, episode: PodcastEpisode?, playWhenReady: Boolean, playbackRate: Float?) =
             StartRequest(wrapper.id, episode?.id, (wrapper as? LibraryItem)?.ino, playWhenReady = playWhenReady,
-                    playbackRate = playbackRate, offlineFailsFast = true)
+                    playbackRate = playbackRate, expectedTracks = (wrapper as? LibraryItem)?.serverTrackCount(),
+                    offlineFailsFast = true)
   }
 }
+
+/** A server book's track count, by which a start and the Android Auto download mark both tell a partial copy. */
+fun LibraryItem.serverTrackCount(): Int? = (media as? Book)?.let { it.numTracks ?: it.tracks?.size }
 
 /**
  * What [request] plays from. A forced stream of a `local_*` id streams the copy's server item when the copy belongs to
