@@ -100,7 +100,7 @@ object WidgetRenderer {
     for (id in ids) render(context, appWidgetManager, id, state)
   }
 
-  private fun fallbackState(context: Context): State {
+  internal fun fallbackState(context: Context): State {
     DbManager.initialize(context)
     // A launcher-started process has no sync runtime; the cover cache is what shows a streamed book's cover offline
     CoverCache.init(context)
@@ -238,7 +238,7 @@ object WidgetRenderer {
     views.setViewVisibility(viewId, View.VISIBLE)
   }
 
-  private fun artworkUri(context: Context, state: State): Uri {
+  internal fun artworkUri(context: Context, state: State): Uri {
     if (state.awaiting == null) return state.session?.getCoverUri(context) ?: CoverArt.defaultUri()
     return state.awaitingCoverUri ?: CoverArt.defaultUri()
   }

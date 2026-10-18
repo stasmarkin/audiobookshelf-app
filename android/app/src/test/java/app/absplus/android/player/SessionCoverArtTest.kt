@@ -10,6 +10,12 @@ import app.absplus.android.data.LocalLibraryItem
 import app.absplus.android.data.MediaType
 import app.absplus.android.data.MediaTypeMetadata
 import app.absplus.android.data.PlaybackSession
+import app.absplus.android.managers.DbManager
+import app.absplus.android.media.COVER_CACHE_DIR
+import app.absplus.android.media.CoverCache
+import app.absplus.android.media.CoverStore
+import app.absplus.android.sync.ServerState
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,7 +55,22 @@ class SessionCoverArtTest {
   @After fun tearDown() {
     CoverArt.decoder = platformDecoder
     CoverArt.reset()
+    CoverCache.setForTest(null)
+    File(ctx.filesDir, COVER_CACHE_DIR).deleteRecursively()
   }
+
+  private fun coverCache(): CoverStore {
+    resetFileProviderRoots()
+    val store = CoverStore(File(ctx.filesDir, COVER_CACHE_DIR))
+    CoverCache.setForTest(CoverCache(store, { _, _, _ -> null }, { null }, { ServerState.OFFLINE }, { _, _ -> null }, scope))
+    return store
+  }
+
+  private fun streamedSession(id: String) = PlaybackSession(
+    "session-$id", "user", id, null, "book", MediaTypeMetadata("Book", false), DeviceInfo("d", "m", "x", 35, "0"),
+    emptyList(), "Book", "Author", "/metadata/items/$id/cover.jpg", 360.0, 0, 0L, 0L, 0L, mutableListOf(), 0.0, null, null, null,
+    "config-1", "https://abs.example", null
+  )
 
   private fun localSession(id: String, cover: Uri?): PlaybackSession {
     val item = LocalLibraryItem(
@@ -135,5 +156,45 @@ class SessionCoverArtTest {
     runBlocking { job.join() }
     assertFalse(resolved)
     assertTrue(job.isCancelled)
+  }
+
+  @Test fun streamedSessionUsesTheCachedCover() {
+    DbManager.initialize(ctx)
+    val store = coverCache()
+
+    val withoutCache = streamedSession("li_s1").getCoverUri(ctx)
+    assertTrue("nothing cached: the server URL", withoutCache.toString().startsWith("https://abs.example/api/items/li_s1/cover"))
+
+    store.put("li_s1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+    val cached = streamedSession("li_s1").getCoverUri(ctx)
+    assertEquals("content", cached.scheme)
+    assertTrue(cached.toString().contains("/cover_cache/li_s1_5.jpg"))
+  }
+
+  @Test fun copyCoverStillWins() {
+    val store = coverCache()
+    store.put("li_c1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+
+    assertEquals(coverFile("li_c1"), localSession("li_c1", coverFile("li_c1")).getCoverUri(ctx))
+  }
+
+  @Test fun cachedCoverIsDecodedLocally() {
+    val store = coverCache()
+    store.put("li_d1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+    CoverArt.decoder = { _, _ -> bitmap }
+
+    val session = streamedSession("li_d1")
+    assertTrue(resolve(session))
+    assertNotNull(art(session))
+  }
+
+  @Test fun vanishedCachedCoverFallsBackToTheDefault() {
+    val store = coverCache()
+    store.put("li_v1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!.file.delete()
+    CoverArt.decoder = { _, _ -> throw FileNotFoundException("gone") }
+
+    val session = streamedSession("li_v1")
+    assertTrue(resolve(session))
+    assertEquals(CoverArt.defaultUri().toString(), iconUri(session))
   }
 }

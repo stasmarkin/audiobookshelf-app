@@ -69,4 +69,15 @@ class AwaitingDisplayTest {
     assertEquals(7.0, json.getDouble("duration"), 0.0)
     assertEquals(2.0, json.getDouble("currentTime"), 0.0)
   }
+
+  @Test
+  fun awaitedItemWithoutACopyTakesTheCachedCover() {
+    val cached = java.io.File("/data/user/0/app/files/cover-cache/li_5.jpg")
+
+    val cover = awaitingCoverOf(null, cached)!!
+    assertTrue(cover.startsWith("file://"))
+    assertTrue(cover.contains("/cover-cache/li_5.jpg"))
+    assertEquals("a copy's cover wins", "content://copy", awaitingCoverOf("content://copy", cached))
+    assertNull(awaitingCoverOf(null, null))
+  }
 }

@@ -19,6 +19,7 @@ import app.absplus.android.device.AppVolume
 import app.absplus.android.device.NodeKind
 import app.absplus.android.device.StorageIo
 import app.absplus.android.device.VolumeIdentity
+import app.absplus.android.media.CoverCache
 import java.security.MessageDigest
 import app.absplus.android.diagnostics.DLog
 import java.io.File
@@ -90,6 +91,19 @@ internal object CoverArt {
       defaultUri()
     }
   }
+
+  /** The cover cache's file of [libraryItemId] as a content URI; null when the item was never shown online. */
+  fun cachedCoverUri(ctx: Context, libraryItemId: String?): Uri? {
+    val file = libraryItemId?.let { CoverCache.instance?.latestFile(it) } ?: return null
+    return try {
+      FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
+    } catch (e: IllegalArgumentException) {
+      null
+    }
+  }
+
+  /** A cover on this device (a copy or the cover cache), decoded here rather than fetched by Glide. */
+  fun isLocal(uri: Uri): Boolean = uri.scheme == "content" || uri.scheme == "file"
 
   /** The cached copy of a cover in an SD card download folder; null when [file] is not on a removable volume. */
   internal fun sdCardCover(ctx: Context, file: File, probe: VolumeProbe, io: StorageIo): File? {

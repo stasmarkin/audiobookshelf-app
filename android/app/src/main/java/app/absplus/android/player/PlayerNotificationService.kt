@@ -51,6 +51,7 @@ import app.absplus.android.managers.PlaybackRestoreStore.LOG_TAG as RESTORE_TAG
 import app.absplus.android.managers.SleepTimerManager
 import android.content.pm.ServiceInfo
 import androidx.media.session.MediaButtonReceiver
+import app.absplus.android.media.CoverCache
 import app.absplus.android.media.MediaManager
 import app.absplus.android.media.MediaProgressSyncer
 import app.absplus.android.media.getUriToAbsIconDrawable
@@ -567,8 +568,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                 // Local covers get bitmap
                 // Note: In Android Auto for local cover images, setting the icon uri to a local path does not work (cover is blank)
                 // so we create and set the bitmap here instead of AbMediaDescriptionAdapter
-                if (currentPlaybackSession!!.localLibraryItem?.coverContentUrl != null) {
-                  bitmap = CoverArt.decodeLocal(ctx, currentPlaybackSession!!.getCoverUri(ctx), "media session")
+                val sessionCover = currentPlaybackSession!!.getCoverUri(ctx)
+                if (CoverArt.isLocal(sessionCover)) {
+                  bitmap = CoverArt.decodeLocal(ctx, sessionCover, "media session")
                 }
                 // The default artwork when a local cover can't be decoded
                 val coverUri = currentPlaybackSession!!.getDisplayCoverUri(ctx)
@@ -1018,7 +1020,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     awaitingPresentation.onRead(item, display, awaiting.blockedItem)
   }
 
-  /** What the replica knows of [item] for the player while the queue waits on it (no cover); null without a row. */
+  /** What the replica knows of [item] for the player while the queue waits on it; null without a row. */
   private suspend fun readAwaitingDisplay(item: PlaylistQueueItem, serverConfigId: String): AwaitingDisplay? = try {
     readAwaitingDisplayRow(AWAITING_PROGRESS_BUDGET_MS, { progressRow(serverConfigId, item.libraryItemId, item.episodeId) }) { progress ->
       withContext(Dispatchers.IO) {
@@ -1028,7 +1030,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         // An incomplete copy streams too; its cover is the only one there is offline
         val copy = DeviceManager.dbManager.getLocalLibraryItemByLId(item.libraryItemId)?.takeIf { it.serverConnectionConfigId == serverConfigId }
         awaitingDisplayOf(CatalogJson.mapper.readTree(row.json), episode?.let { CatalogJson.mapper.readTree(it.json) }, progress,
-                copy?.coverContentUrl, serverConfigId, item.episodeId)
+                awaitingCoverOf(copy?.coverContentUrl, CoverCache.instance?.latestFile(item.libraryItemId)), serverConfigId, item.episodeId)
       }
     }
   } catch (e: Exception) {
