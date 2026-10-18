@@ -121,6 +121,20 @@ class AwaitingServerTest {
     assertNull((blocked.onServerState(ServerState.ONLINE, "a") as ResumeStream).position)
   }
 
+  @Test fun startsRefusedByAndroidAreNoFailedResumes() {
+    val waiting = AwaitingServer()
+    val item = PlaylistQueueItem("li2", null)
+    assertNull(waiting.onQueueBlocked(item, "a"))
+    repeat(3) {
+      assertTrue(waiting.onServerState(ServerState.ONLINE, "a") is ResumeStream)
+      waiting.onStartRefused(item, "a", playWhenReady = true)
+    }
+    assertEquals(item, waiting.blockedItem)
+    // A fourth failure that is a real one counts as the first
+    assertTrue(waiting.onServerState(ServerState.ONLINE, "a") is ResumeStream)
+    assertNull(waiting.onQueueBlocked(item, "a"))
+  }
+
   @Test fun threeFailedResumesGiveUp() {
     val waiting = AwaitingServer()
     assertNull(waiting.onStreamLost("li1", null, 50.0, true, "a"))
