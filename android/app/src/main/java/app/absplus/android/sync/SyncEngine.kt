@@ -65,7 +65,9 @@ class SyncDeps(
         /** The user a saved server is signed in as (see [UserDataStore]). */
         val ownerOf: (serverConfigId: String) -> String? = { null },
         val recentlySettledMs: Long = UserDataStore.RECENTLY_SETTLED_MS,
-        val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS
+        val unreachableRetryMs: List<Long> = UNREACHABLE_RETRY_MS,
+        /** A live session (not a cold start before JS restores it, not after a logout); gates redoing a stale answer. */
+        val signedIn: () -> Boolean = { true }
 )
 
 /**
@@ -113,7 +115,8 @@ object SyncEngine {
                     CoroutineExceptionHandler { _, e -> AbsLogger.error("SyncEngine", "Sync job failed: $e") }),
             log = { AbsLogger.info("SyncEngine", it) },
             logError = { AbsLogger.error("SyncEngine", it) },
-            ownerOf = { id -> DeviceManager.getServerConnectionConfig(id)?.userId }))
+            ownerOf = { id -> DeviceManager.getServerConnectionConfig(id)?.userId },
+            signedIn = { DeviceManager.serverConnectionConfig != null }))
   }
 
   private fun start(deps: SyncDeps) {
@@ -328,8 +331,9 @@ object SyncEngine {
             error = failure.message
             deps.logError("Reconcile ${config.id} failed: ${failure.message}")
             synchronized(lock) {
-              // A stale answer says nothing about the server: on a cold start it is the config JS sets meanwhile
-              if (failure is SyncFailure && failure.stale && !redo && deps.isForeground()) {
+              // A stale answer says nothing about the server: on a cold start it is the config JS sets meanwhile.
+              // After a logout the session is gone, and the pull waits for the next foreground as before.
+              if (failure is SyncFailure && failure.stale && !redo && deps.isForeground() && deps.signedIn()) {
                 staleReconcileRedo = true
                 wantReconcile = true
                 wantPush = true

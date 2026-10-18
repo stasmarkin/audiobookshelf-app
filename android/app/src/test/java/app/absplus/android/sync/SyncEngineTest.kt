@@ -39,6 +39,7 @@ class SyncEngineTest {
   @Volatile private var now = 100_000_000L
   private var refresh: RefreshResult = RefreshResult.Transient
   @Volatile private var failNextRun = false
+  @Volatile private var signedIn = true
   private val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
   private val store get() = SyncEngine.store!!
 
@@ -67,7 +68,8 @@ class SyncEngineTest {
             notifyWindowMs = 10,
             logError = { errors.add(it) },
             unreachableRetryMs = unreachableRetryMs,
-            recentlySettledMs = recentlySettledMs))
+            recentlySettledMs = recentlySettledMs,
+            signedIn = { signedIn }))
     settle()
   }
 
@@ -427,6 +429,27 @@ class SyncEngineTest {
     delay(200)
     settle()
     assertEquals("a stale redo is not redone again", 2, gets())
+    assertTrue(db.bookmarks().getVisible("srv").isEmpty())
+  }
+
+  @Test
+  fun reconcileDroppedByALogoutIsNotRedone() = runBlocking {
+    foreground = true
+    start()
+    api.handler = { request ->
+      if (request.method == "GET") {
+        signedIn = false
+        ApiHandler.invalidateAuthRequests()
+        200 to serverBookmarks
+      } else 200 to "{}"
+    }
+    state.value = ServerState.ONLINE
+
+    eventually("the pull") { gets() == 1 }
+    settle()
+    delay(200)
+    settle()
+    assertEquals("no redo for a session that ended", 1, gets())
     assertTrue(db.bookmarks().getVisible("srv").isEmpty())
   }
 
