@@ -170,15 +170,19 @@ class PlaybackSourceResolverTest {
 
   @Test fun androidAutoStartOfAPartialCopyStreamsAsItsMarkSays() {
     val partial = bookWithTracks("local_1", "li1", tracks = 2)
-    fun serverBook(numTracks: Int) = LibraryItem("li1", "", "lib", "f", "", "", 0L, 0L, 0L, 0L, 0L, null, null, false, false, "book",
+    fun serverBook(numTracks: Int?, tracks: Int? = null) = LibraryItem("li1", "", "lib", "f", "", "", 0L, 0L, 0L, 0L, 0L, null, null, false, false, "book",
       Book(BookMetadata("Book", null, null, null, mutableListOf(), null, null, null, null, null, null, null, false, null, null, null, null, null),
-        null, emptyList(), null, null, null, null, null, null, numTracks), null, null, null, null, null)
+        null, emptyList(), null, null, tracks?.let { n -> (0 until n).map { AudioTrack(it, 0.0, 1.0, "t$it", "", null, null, false, null, null) }.toMutableList() },
+        null, null, null, numTracks), null, null, null, null, null)
     val mark = resolverDownloadMark { _, _ -> true }
 
     val incomplete = serverBook(numTracks = 3)
     assertNull("marked not downloaded", mark(listOf(partial), "a", incomplete, null))
     assertEquals(PlaybackSource.Stream("li1", null),
       planStart(StartRequest.forWrapper(incomplete, null, playWhenReady = true, playbackRate = 1f), "a", resolver(partial)))
+    for (counted in listOf(serverBook(numTracks = null, tracks = 3), serverBook(numTracks = 0, tracks = 3))) {
+      assertEquals("an unknown count falls back to the server's tracks", 3, StartRequest.forWrapper(counted, null, true, 1f).expectedTracks)
+    }
 
     val complete = serverBook(numTracks = 2)
     assertEquals("local_1", mark(listOf(partial), "a", complete, null))

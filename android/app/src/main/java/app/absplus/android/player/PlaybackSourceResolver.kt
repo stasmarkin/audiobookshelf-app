@@ -114,7 +114,7 @@ data class StartRequest(
 }
 
 /** A server book's track count, by which a start and the Android Auto download mark both tell a partial copy. */
-fun LibraryItem.serverTrackCount(): Int? = (media as? Book)?.let { it.numTracks ?: it.tracks?.size }
+fun LibraryItem.serverTrackCount(): Int? = (media as? Book)?.let { book -> book.numTracks?.takeIf { it > 0 } ?: book.tracks?.size?.takeIf { it > 0 } }
 
 /**
  * What [request] plays from. A forced stream of a `local_*` id streams the copy's server item when the copy belongs to

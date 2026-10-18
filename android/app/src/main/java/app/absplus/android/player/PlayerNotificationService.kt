@@ -1525,7 +1525,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var sessionExpectedTracks: Pair<String, Int?>? = null
 
   private fun expectedTracksOf(session: PlaybackSession): Int? =
-          sessionExpectedTracks?.takeIf { it.first == session.id }?.second ?: (session.libraryItem?.media as? Book)?.numTracks
+          sessionExpectedTracks?.takeIf { it.first == session.id }?.second ?: session.libraryItem?.serverTrackCount()
 
   /** Android Auto's browse-tree item (server item or device copy) through [startItem]. */
   fun startWrapper(wrapper: LibraryItemWrapper, episode: PodcastEpisode?, playWhenReady: Boolean, playbackRate: Float?) {
