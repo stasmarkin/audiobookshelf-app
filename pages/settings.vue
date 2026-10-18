@@ -62,6 +62,18 @@
         <ui-text-input :value="jumpForwardOption" readonly append-icon="expand_more" style="width: 145px; max-width: 145px" />
       </div>
     </div>
+    <div class="py-3 flex items-center">
+      <p class="pr-4 w-36">{{ $strings.LabelLongJumpBackwardsTime }}</p>
+      <div @click.stop="showLongJumpBackwardsOptions">
+        <ui-text-input :value="longJumpBackwardsOption" readonly append-icon="expand_more" style="width: 145px; max-width: 145px" />
+      </div>
+    </div>
+    <div class="py-3 flex items-center">
+      <p class="pr-4 w-36">{{ $strings.LabelLongJumpForwardsTime }}</p>
+      <div @click.stop="showLongJumpForwardOptions">
+        <ui-text-input :value="longJumpForwardOption" readonly append-icon="expand_more" style="width: 145px; max-width: 145px" />
+      </div>
+    </div>
     <div class="flex items-center py-3">
       <div class="w-10 flex justify-center" @click="toggleDisableAutoRewind">
         <ui-toggle-switch v-model="settings.disableAutoRewind" @input="saveSettings" />
@@ -329,6 +341,7 @@ import jumpLabelMixin from '@/mixins/jumpLabel'
 import diagnosticLogMixin from '@/mixins/diagnosticLog'
 import { AbsDatabase, AbsDownloader } from '@/plugins/capacitor'
 import { storageStatusView } from '@/utils/downloadStorageView'
+import { LONG_JUMP_SECONDS_OPTIONS, normalizeLongJumpTime } from '@/utils/longJump'
 
 export default {
   mixins: [jumpLabelMixin, diagnosticLogMixin],
@@ -351,6 +364,8 @@ export default {
         jumpForwardTime: 10,
         externalMediaNavigation: 'time',
         jumpBackwardsTime: 10,
+        longJumpForwardTime: 0,
+        longJumpBackwardsTime: 0,
         enableMp3IndexSeeking: false,
         disableShakeToResetSleepTimer: false,
         shakeSensitivity: 'MEDIUM',
@@ -585,6 +600,15 @@ export default {
     jumpBackwardsOption() {
       return this.getJumpLabel(this.settings.jumpBackwardsTime)
     },
+    longJumpForwardOption() {
+      return this.getLongJumpLabel(this.settings.longJumpForwardTime)
+    },
+    longJumpBackwardsOption() {
+      return this.getLongJumpLabel(this.settings.longJumpBackwardsTime)
+    },
+    longJumpOptionItems() {
+      return LONG_JUMP_SECONDS_OPTIONS.map((value) => ({ text: this.getLongJumpLabel(value), value }))
+    },
     themeOptionItems() {
       return this.$theme.themes.map((theme) => ({ text: this.$strings[theme.labelKey], value: theme.id }))
     },
@@ -665,11 +689,14 @@ export default {
           text: this.getJumpLabel(value),
           value: value
         }))
+      else if (this.moreMenuSetting === 'longJumpForward' || this.moreMenuSetting === 'longJumpBackwards') return this.longJumpOptionItems
       return []
     },
     moreMenuSelected() {
       if (this.moreMenuSetting === 'jumpForward') return this.settings.jumpForwardTime
       if (this.moreMenuSetting === 'jumpBackwards') return this.settings.jumpBackwardsTime
+      if (this.moreMenuSetting === 'longJumpForward') return this.settings.longJumpForwardTime
+      if (this.moreMenuSetting === 'longJumpBackwards') return this.settings.longJumpBackwardsTime
       if (this.moreMenuSetting === 'language') return this.settings.languageCode
       if (this.moreMenuSetting === 'theme') return this.theme
       if (this.moreMenuSetting === 'downloadUsingCellular') return this.settings.downloadUsingCellular
@@ -724,6 +751,17 @@ export default {
     showJumpBackwardsOptions() {
       this.moreMenuSetting = 'jumpBackwards'
       this.showMoreMenuDialog = true
+    },
+    showLongJumpForwardOptions() {
+      this.moreMenuSetting = 'longJumpForward'
+      this.showMoreMenuDialog = true
+    },
+    showLongJumpBackwardsOptions() {
+      this.moreMenuSetting = 'longJumpBackwards'
+      this.showMoreMenuDialog = true
+    },
+    getLongJumpLabel(seconds) {
+      return normalizeLongJumpTime(seconds) ? this.getJumpLabel(seconds) : this.$strings.LabelOff
     },
     showDownloadUsingCellularOptions() {
       this.moreMenuSetting = 'downloadUsingCellular'
@@ -813,6 +851,12 @@ export default {
         this.saveSettings()
       } else if (this.moreMenuSetting === 'jumpBackwards') {
         this.settings.jumpBackwardsTime = action
+        this.saveSettings()
+      } else if (this.moreMenuSetting === 'longJumpForward') {
+        this.settings.longJumpForwardTime = action
+        this.saveSettings()
+      } else if (this.moreMenuSetting === 'longJumpBackwards') {
+        this.settings.longJumpBackwardsTime = action
         this.saveSettings()
       }
     },
@@ -980,6 +1024,8 @@ export default {
       this.settings.jumpForwardTime = deviceSettings.jumpForwardTime || 10
       this.settings.externalMediaNavigation = ['chapters', 'files'].includes(deviceSettings.externalMediaNavigation) ? deviceSettings.externalMediaNavigation : 'time'
       this.settings.jumpBackwardsTime = deviceSettings.jumpBackwardsTime || 10
+      this.settings.longJumpForwardTime = normalizeLongJumpTime(deviceSettings.longJumpForwardTime)
+      this.settings.longJumpBackwardsTime = normalizeLongJumpTime(deviceSettings.longJumpBackwardsTime)
       this.settings.enableMp3IndexSeeking = !!deviceSettings.enableMp3IndexSeeking
 
       this.settings.lockOrientation = deviceSettings.lockOrientation || 'NONE'

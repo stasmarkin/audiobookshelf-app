@@ -187,7 +187,10 @@ data class DeviceSettings(
         var autoDeleteDelayDays: Int? = 1,
         var downloadsLimitGb: Int = 0,
         // Nullable for old Paper records, which bypass Kotlin constructor defaults.
-        var externalMediaNavigation: String? = "time"
+        var externalMediaNavigation: String? = "time",
+        // Seconds, 0 = Off. Only the in-app player reads them; they live here so a settings save keeps them
+        var longJumpBackwardsTime: Int = 0,
+        var longJumpForwardTime: Int = 0
 ) {
   companion object {
     // Static method to get default device settings

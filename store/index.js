@@ -1,6 +1,7 @@
 import { Network } from '@capacitor/network'
 import { AbsAudioPlayer } from '@/plugins/capacitor'
 import { PlayMethod } from '@/plugins/constants'
+import { normalizeLongJumpTime } from '@/utils/longJump'
 
 export const state = () => ({
   deviceData: null,
@@ -73,6 +74,8 @@ export const getters = {
     if (!state.deviceData?.deviceSettings) return 10
     return state.deviceData.deviceSettings.jumpBackwardsTime || 10
   },
+  getLongJumpForwardTime: (state) => normalizeLongJumpTime(state.deviceData?.deviceSettings?.longJumpForwardTime),
+  getLongJumpBackwardsTime: (state) => normalizeLongJumpTime(state.deviceData?.deviceSettings?.longJumpBackwardsTime),
   getAltViewEnabled: (state) => {
     if (!state.deviceData?.deviceSettings) return true
     return state.deviceData.deviceSettings.enableAltView

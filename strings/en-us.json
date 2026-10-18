@@ -316,6 +316,8 @@
   "LabelLockOrientation": "Lock orientation",
   "LabelLockPlayer": "Lock Player",
   "LabelLogActions": "Log actions",
+  "LabelLongJumpBackwardsTime": "Long jump backwards time",
+  "LabelLongJumpForwardsTime": "Long jump forwards time",
   "LabelLow": "Low",
   "LabelMediaType": "Media Type",
   "LabelMedium": "Medium",

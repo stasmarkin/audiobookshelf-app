@@ -12,6 +12,10 @@ Merged into `plus`, not yet in a published release.
   to appear only after the connection attempts gave up (about 3 s per saved server, or about 30 s when the server
   answered its ping but then stalled). Downloaded books and podcast episodes can be opened and played right away.
   Continue, Recent and Libraries are added as soon as the server has answered. Fully offline it was already immediate.
+- **Long jumps** (Settings → Long jump backwards / forwards time): an optional second jump in each direction, from 15
+  seconds to 30 minutes, Off by default. When on, the full player shows it outside the short jump. The notification,
+  headset, widget and Android Auto keep the short jumps. For everyone, the full player's jump keys are now chevrons
+  centered on Play (the short jumps used circular arrows); the collapsed player keeps the arrows.
 
 ## v0.19.0 — Podcast auto downloads, SD card storage, E-ink and Bluetooth controls
 
