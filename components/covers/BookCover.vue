@@ -22,12 +22,12 @@
       </div>
     </div>
 
-    <div v-if="!hasCover" class="absolute top-0 left-0 right-0 bottom-0 w-full h-full flex items-center justify-center z-10" :style="{ padding: placeholderCoverPadding + 'rem' }">
+    <div v-if="showTitlePlaceholder" class="absolute top-0 left-0 right-0 bottom-0 w-full h-full flex items-center justify-center z-10" :style="{ padding: placeholderCoverPadding + 'rem' }">
       <div>
         <p class="text-centertruncate leading-none origin-center" style="color: rgb(247 223 187); font-size: 0.8rem" :style="{ transform: `scale(${sizeMultiplier})` }">{{ titleCleaned }}</p>
       </div>
     </div>
-    <div v-if="!hasCover" class="absolute left-0 right-0 w-full flex items-center justify-center z-10" :style="{ padding: placeholderCoverPadding + 'rem', bottom: authorBottom + 'rem' }">
+    <div v-if="showTitlePlaceholder" class="absolute left-0 right-0 w-full flex items-center justify-center z-10" :style="{ padding: placeholderCoverPadding + 'rem', bottom: authorBottom + 'rem' }">
       <p class="text-centertruncate leading-none origin-center" style="color: rgb(247 223 187); opacity: 0.75; font-size: 0.6rem" :style="{ transform: `scale(${sizeMultiplier})` }">{{ authorCleaned }}</p>
     </div>
   </div>
@@ -35,6 +35,7 @@
 
 <script>
 import { Capacitor } from '@capacitor/core'
+import { isCoverRoute } from '@/utils/coverUrl'
 
 export default {
   props: {
@@ -56,12 +57,16 @@ export default {
       loading: true,
       imageFailed: false,
       showCoverBg: false,
-      imageReady: false
+      imageReady: false,
+      coverUnavailable: false
     }
   },
   watch: {
     cover() {
       this.imageFailed = false
+    },
+    coverSrc() {
+      this.coverUnavailable = false
     }
   },
   computed: {
@@ -111,6 +116,11 @@ export default {
       return '/book_placeholder.jpg'
     },
     fullCoverUrl() {
+      // A cover the app has never seen online, while offline: drawn like a book without a cover
+      if (this.coverUnavailable) return this.placeholderUrl
+      return this.coverSrc
+    },
+    coverSrc() {
       if (this.isLocal) {
         if (this.localCover) return Capacitor.convertFileSrc(this.localCover)
         return this.placeholderUrl
@@ -125,6 +135,9 @@ export default {
     },
     hasCover() {
       return (!!this.media.coverPath && !this.isLocal) || this.localCover || this.downloadCover
+    },
+    showTitlePlaceholder() {
+      return !this.hasCover || this.coverUnavailable
     },
     sizeMultiplier() {
       var baseSize = this.squareAspectRatio ? 128 : 96
@@ -173,6 +186,10 @@ export default {
     },
     imageError(err) {
       this.loading = false
+      if (isCoverRoute(this.coverSrc)) {
+        this.coverUnavailable = true
+        return
+      }
       console.error('ImgError', err)
       this.imageFailed = true
     }
