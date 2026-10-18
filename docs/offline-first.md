@@ -15,8 +15,8 @@ Design for making Audiobookshelf+ fully usable without a reachable server: every
 | 2 | 2c-sessions | Listening time of a stream that lost the server is kept and sent once | Done |
 | 3 | 3-player | Player: downloaded items never stream, a stream waits for the server instead of failing | Done |
 | 4 | 4a-library | A copy of the catalog on the phone (no visible change yet) | Done |
-| 4 | 4a-ui | Library tab | This release |
-| 4 | 4b-series | Series tab and series pages | Planned |
+| 4 | 4a-ui | Library tab | Done |
+| 4 | 4b-series | Series tab and series pages | This release |
 | 4 | 4c-authors | Authors tab | Planned |
 | 4 | 4d-collections | Collections tab and collection pages | Planned |
 | 4 | 4e-playlists | Playlists; an offline queue waits for the server at an item that isn't downloaded | Planned |
