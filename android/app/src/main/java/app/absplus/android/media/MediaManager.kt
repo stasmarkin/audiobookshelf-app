@@ -56,13 +56,13 @@ internal suspend fun <T> replicaOr(online: () -> Boolean, replica: suspend () ->
 /** The server fallback's caches are written from OkHttp threads and read by concurrent browse requests; lists keep their order. */
 private fun <K, V> orderedMap(): MutableMap<K, V> = Collections.synchronizedMap(LinkedHashMap())
 
-/** Р21: without the server a downloaded match is preferred, since only it can play. */
+/** Without the server a downloaded match is preferred, since only it can play. */
 internal fun voicePick(found: List<LibraryItem>, online: Boolean): LibraryItem? =
         if (online) found.firstOrNull() else found.firstOrNull { it.localLibraryItemId != null } ?: found.firstOrNull()
 
 /**
- * Р22: Play without a choice resumes the latest started item of the replica, then one the server reported in progress,
- * then the first downloaded book. Without the server (Р21) a downloaded candidate comes first, since only it can play.
+ * Play without a choice resumes the latest started item of the replica, then one the server reported in progress,
+ * then the first downloaded book. Without the server a downloaded candidate comes first, since only it can play.
  */
 internal fun firstPlayableOf(
         continueItems: List<ItemInProgress>,
@@ -466,7 +466,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     return suspendCancellableCoroutine { cont -> apiHandler.getLibraryItem(mediaId) { cont.resume(it to null) } }
   }
 
-  /** What a spoken "play <query>" starts (Р21); an empty query is Play without a choice. [cb] runs on the main thread. */
+  /** What a spoken "play <query>" starts; an empty query is Play without a choice. [cb] runs on the main thread. */
   fun findForVoice(query: String?, cb: (LibraryItemWrapper?, PodcastEpisode?) -> Unit) {
     if (query.isNullOrEmpty()) return firstPlayable(cb)
     val request = playRequests.next()
@@ -480,7 +480,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     }
   }
 
-  /** Play without a choice (Р22). [cb] runs on the main thread. */
+  /** Play without a choice. [cb] runs on the main thread. */
   fun firstPlayable(cb: (LibraryItemWrapper?, PodcastEpisode?) -> Unit) {
     val request = playRequests.next()
     androidAutoIOScope.launch {
