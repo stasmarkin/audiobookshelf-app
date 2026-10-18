@@ -412,6 +412,20 @@ class DownloadItemManager(
     return true
   }
 
+  /** Whether a retry would start the item's transfers again: nothing of it is running or being saved. */
+  @Synchronized
+  fun canRetryDownloadItem(downloadItemId: String): Boolean {
+    val item = downloadItemQueue.find { it.id == downloadItemId } ?: return false
+    return DownloadControls.canRetry(item) { it in currentDownloadItemParts }
+  }
+
+  /** Whether credentials can be safely chosen for every unfinished file; a retry without them only ends in a hold. Changes nothing. */
+  @Synchronized
+  fun hasDownloadAuthorization(downloadItemId: String): Boolean {
+    val item = downloadItemQueue.find { it.id == downloadItemId } ?: return false
+    return item.downloadItemParts.none { !it.moved && downloadToken(it, item) == null }
+  }
+
   @Synchronized
   fun isStorageUnavailable(downloadItemId: String): Boolean {
     val item = downloadItemQueue.find { it.id == downloadItemId } ?: return false
@@ -1054,6 +1068,14 @@ class DownloadItemManager(
               waitForCard = true
               AbsLogger.info(tag, "Download ${item.id} is complete; finalizing waits for the SD card")
               return@scanDownloadItem
+            }
+            // Before the item leaves the queue (which protects it): progress copied from the server with the files predates this
+            scanResult?.localLibraryItem?.let { lli ->
+              try {
+                AutoDeleteManager.recordDownloaded(lli)
+              } catch (e: Exception) {
+                AbsLogger.error(tag, "Could not record the download time of ${item.id}: ${e.message}")
+              }
             }
             val event =
                     JSObject().apply {

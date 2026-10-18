@@ -7,7 +7,8 @@ const require = createRequire(import.meta.url)
 const { parseComponent, compile } = require('vue-template-compiler')
 const source = await readFile(new URL('../pages/settings.vue', import.meta.url), 'utf8')
 const { script, template } = parseComponent(source)
-const context = { jumpLabelMixin: {}, diagnosticLogMixin: {} }
+// The page's other imports are stripped below; these two are called while loading device settings
+const context = { jumpLabelMixin: {}, diagnosticLogMixin: {}, normalizeDelayDays: (v) => v ?? 1, normalizeLimitGb: (v) => v ?? 0 }
 vm.runInNewContext(script.content.replace(/^import .*$/gm, '').replace('export default', 'globalThis.page ='), context)
 
 test('existing settings and unknown navigation modes default to time; explicit selections survive reload', () => {
@@ -46,6 +47,7 @@ test('saving the selector uses the existing database bridge and preserves unrela
   const page = {
     settings: { externalMediaNavigation: 'files', jumpForwardTime: 30, jumpBackwardsTime: 15, languageCode: 'en-us', autoDownloadEnabled: true },
     $hapticsImpact: async () => {},
+    loadDownloadsStorage: async () => {},
     $db: { updateDeviceSettings: async (payload) => { saved.push(structuredClone(payload)); return { deviceSettings: payload } } },
     $store: { commit: () => {} }, $setLanguageCode: () => {}
   }

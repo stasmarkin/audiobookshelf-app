@@ -231,6 +231,18 @@ class DbManager {
   fun saveLocalMediaProgress(mediaProgress: LocalMediaProgress) {
     Paper.book("localMediaProgress").write(mediaProgress.id, mediaProgress)
   }
+  // Background writers use these: under the item's lock a write cannot slip between auto delete's last check and its delete.
+  // The player's own writes (MediaProgressSyncer) keep the plain call: they run on the main thread, which must not wait on a
+  // delete, and the book being played is never auto deleted.
+  fun saveLocalMediaProgressLocked(mediaProgress: LocalMediaProgress) {
+    LocalItemLocks.withItem(mediaProgress.localLibraryItemId) { saveLocalMediaProgress(mediaProgress) }
+  }
+  fun removeLocalMediaProgressLocked(localMediaProgressId: String) {
+    val itemId = getLocalMediaProgress(localMediaProgressId)?.localLibraryItemId
+    if (itemId == null) removeLocalMediaProgress(localMediaProgressId)
+    else LocalItemLocks.withItem(itemId) { removeLocalMediaProgress(localMediaProgressId) }
+  }
+
   // For books this will just be the localLibraryItemId for podcast episodes this will be
   // "{localLibraryItemId}-{episodeId}"
   fun getLocalMediaProgress(localMediaProgressId: String): LocalMediaProgress? {
@@ -346,6 +358,36 @@ class DbManager {
   }
   fun getPodcastAutoDownloadKeys(): List<String> {
     return Paper.book("autoDownload").allKeys
+  }
+
+  // What an online auto delete pass saw on the server about a device progress; records of the older Long format read as none
+  fun getAutoDeleteConfirmed(progressId: String): AutoDeletePolicy.Confirmation? {
+    val stored: Any? = Paper.book("autoDeleteConfirmed").read(progressId)
+    return stored as? AutoDeletePolicy.Confirmation
+  }
+  fun saveAutoDeleteConfirmed(progressId: String, confirmation: AutoDeletePolicy.Confirmation) {
+    Paper.book("autoDeleteConfirmed").write(progressId, confirmation)
+  }
+  fun removeAutoDeleteConfirmed(progressId: String) {
+    Paper.book("autoDeleteConfirmed").delete(progressId)
+  }
+  fun getAutoDeleteConfirmedKeys(): List<String> {
+    return Paper.book("autoDeleteConfirmed").allKeys
+  }
+
+  // When a download finished (progress id -> time), so progress copied from the server with it is not taken for listening
+  fun getAutoDeleteDownloadedAt(progressId: String): Long? {
+    val stored: Any? = Paper.book("autoDeleteDownloadedAt").read(progressId)
+    return stored as? Long
+  }
+  fun saveAutoDeleteDownloadedAt(progressId: String, time: Long) {
+    Paper.book("autoDeleteDownloadedAt").write(progressId, time)
+  }
+  fun removeAutoDeleteDownloadedAt(progressId: String) {
+    Paper.book("autoDeleteDownloadedAt").delete(progressId)
+  }
+  fun getAutoDeleteDownloadedAtKeys(): List<String> {
+    return Paper.book("autoDeleteDownloadedAt").allKeys
   }
 
   // App logs now live in the rolling diagnostic log (DiagnosticLog), which migrates the old "log" book once

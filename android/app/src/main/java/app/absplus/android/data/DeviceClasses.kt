@@ -182,6 +182,10 @@ data class DeviceSettings(
         var autoDownloadChargingOnly: Boolean = false,
         var autoDownloadIntervalHours: Int = 6,
         var downloadStorage: String = "internal",
+        var autoDeleteFinishedBooks: Boolean = false,
+        // Nullable so a record saved before this setting existed (Paper leaves 0) is told apart from a real 0 = right away
+        var autoDeleteDelayDays: Int? = 1,
+        var downloadsLimitGb: Int = 0,
         // Nullable for old Paper records, which bypass Kotlin constructor defaults.
         var externalMediaNavigation: String? = "time"
 ) {
@@ -220,7 +224,10 @@ data class DeviceSettings(
               autoDownloadWifiOnly = true,
               autoDownloadChargingOnly = false,
               autoDownloadIntervalHours = 6,
-              downloadStorage = "internal"
+              downloadStorage = "internal",
+              autoDeleteFinishedBooks = false,
+              autoDeleteDelayDays = 1,
+              downloadsLimitGb = 0
       )
     }
   }

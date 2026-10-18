@@ -28,6 +28,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 object AutoDownloadManager {
   enum class Status(val jsValue: String) {
     STARTED("started"),
+    // Only the cleanup ran; auto download did not, so the app throttles this separately and does not hold back the next download attempt
+    CLEANED("cleaned"),
     DISABLED("disabled"),
     CONSTRAINTS("constraints"),
     BUSY("busy"),
@@ -37,9 +39,10 @@ object AutoDownloadManager {
   /**
    * APP: app open/foreground; WORKER: periodic background work; SETTINGS: right after a podcast's auto download settings
    * were saved. A SETTINGS check only queues new episodes; retention waits for the next APP or WORKER check, so changing
-   * a setting never removes downloads by itself.
+   * a setting never removes downloads by itself. CLEANUP: the periodic auto delete work, which only cleans up (the
+   * auto download work does not clean up and keeps its own network and charging limits).
    */
-  enum class Trigger { APP, WORKER, SETTINGS }
+  enum class Trigger { APP, WORKER, SETTINGS, CLEANUP }
 
   private const val TAG = "AutoDownloadManager"
   private const val PAGE_LIMIT = 100
@@ -53,51 +56,62 @@ object AutoDownloadManager {
 
   private class StartResult(val error: String?)
 
+  private class RetryCheck(val refusal: DownloadServiceHost.ExistingDownloadResult?)
+
+  // What a started pass does: the cleanup does not depend on auto download or its network/charging limits
+  private class Plan(val status: Status, val settings: DeviceSettings? = null, val cleanup: Boolean = false, val download: Boolean = false) {
+    // On a started plan the mutex is held and the caller must unlock it
+    val runs get() = status == Status.STARTED || status == Status.CLEANED
+  }
+
   /** Worker entry point: runs preflight and, if STARTED, the whole check before returning. */
   suspend fun check(context: Context, trigger: Trigger): Status {
     val appContext = context.applicationContext
-    val (status, settings) = preflight(appContext, trigger)
-    if (status != Status.STARTED || settings == null) return status
+    val plan = preflight(appContext, trigger)
+    if (!plan.runs || plan.settings == null) return plan.status
     try {
-      runCheck(appContext, trigger, settings)
+      runCheck(appContext, trigger, plan)
     } finally {
       mutex.unlock()
     }
-    if (trigger == Trigger.WORKER) DownloadServiceHost.runQueueWhileWorking(appContext, WORKER_TRANSFER_BUDGET_MS)
-    return Status.STARTED
+    if (trigger == Trigger.WORKER && plan.download) DownloadServiceHost.runQueueWhileWorking(appContext, WORKER_TRANSFER_BUDGET_MS)
+    return plan.status
   }
 
   /** Plugin entry point: runs preflight; on STARTED the check continues in the background. Blocking (Paper I/O) — call off the main thread. */
-  fun startCheck(context: Context, trigger: Trigger): Status {
+  fun startCheck(context: Context, trigger: Trigger, skipCleanup: Boolean = false): Status {
     val appContext = context.applicationContext
-    val (status, settings) = preflight(appContext, trigger)
-    if (status != Status.STARTED || settings == null) return status
+    val plan = preflight(appContext, trigger, skipCleanup)
+    if (!plan.runs || plan.settings == null) return plan.status
     scope.launch {
       try {
-        runCheck(appContext, trigger, settings)
+        runCheck(appContext, trigger, plan)
       } finally {
         mutex.unlock()
       }
     }
-    return Status.STARTED
+    return plan.status
   }
 
   // On STARTED the mutex is held and the caller must unlock it
-  private fun preflight(appContext: Context, trigger: Trigger): Pair<Status, DeviceSettings?> {
+  private fun preflight(appContext: Context, trigger: Trigger, skipCleanup: Boolean = false): Plan {
     DbManager.initialize(appContext)
 
-    if (DeviceManager.serverConnectionConfig == null && trigger == Trigger.WORKER) {
+    if (DeviceManager.serverConnectionConfig == null && (trigger == Trigger.WORKER || trigger == Trigger.CLEANUP)) {
       DeviceManager.serverConnectionConfig = DeviceManager.deviceData.getLastServerConnectionConfig()
     }
-    if (DeviceManager.serverConnectionConfig == null) return Pair(Status.NO_SERVER, null)
+    if (DeviceManager.serverConnectionConfig == null) return Plan(Status.NO_SERVER)
 
     val settings = DeviceManager.deviceData.deviceSettings ?: DeviceSettings.default()
-    if (!settings.autoDownloadEnabled) return Pair(Status.DISABLED, null)
+    val cleanup = AutoDeleteManager.isCleanupEnabled(settings) && !skipCleanup && (trigger == Trigger.APP || trigger == Trigger.CLEANUP)
+    val autoDownload = settings.autoDownloadEnabled && trigger != Trigger.CLEANUP
+    if (!autoDownload && !cleanup) return Plan(Status.DISABLED)
 
-    if (trigger != Trigger.WORKER && !constraintsMet(appContext, settings)) return Pair(Status.CONSTRAINTS, null)
+    val download = autoDownload && (trigger == Trigger.WORKER || constraintsMet(appContext, settings))
+    if (!download && !cleanup) return Plan(Status.CONSTRAINTS)
 
-    if (!mutex.tryLock()) return Pair(Status.BUSY, null)
-    return Pair(Status.STARTED, settings)
+    if (!mutex.tryLock()) return Plan(Status.BUSY)
+    return Plan(if (download) Status.STARTED else Status.CLEANED, settings, cleanup, download)
   }
 
   // Same rule as the download queue's gate for auto-owned transfers (offline, metered, charger)
@@ -142,10 +156,29 @@ object AutoDownloadManager {
     return result
   }
 
-  private suspend fun runCheck(appContext: Context, trigger: Trigger, settings: DeviceSettings) {
+  private suspend fun runCheck(appContext: Context, trigger: Trigger, plan: Plan) {
     try {
       val serverConfigId = DeviceManager.serverConnectionConfig?.id ?: return
-      doCheck(appContext, trigger, serverConfigId, settings)
+      val api = ApiHandler(appContext)
+      val user = await<User?> { api.getCurrentUser(it) }
+      if (plan.cleanup) {
+        // Server progress is trusted for auto delete only while the connected account is the one it was loaded for
+        val ownerProgress = user?.takeIf { DeviceManager.serverConnectionConfig?.id == serverConfigId && AutoDeleteManager.isUserCurrent(it) }
+        if (user != null && ownerProgress == null) AbsLogger.info(TAG, "Auto delete: the account changed while loading the user, server progress is not used")
+        try {
+          AutoDeleteManager.runCleanup(appContext, ownerProgress)
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          AbsLogger.error(TAG, "Auto delete failed unexpectedly (${e.javaClass.simpleName}: ${e.message})")
+        }
+      }
+      if (!plan.download || plan.settings == null) return
+      if (user == null) {
+        AbsLogger.error(TAG, "Could not load the current user, ending check")
+        return
+      }
+      doCheck(appContext, trigger, serverConfigId, plan.settings, api, user)
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
@@ -153,14 +186,14 @@ object AutoDownloadManager {
     }
   }
 
-  private suspend fun doCheck(appContext: Context, trigger: Trigger, serverConfigId: String, settings: DeviceSettings) {
-    val api = ApiHandler(appContext)
-
-    val user = await<User?> { api.getCurrentUser(it) }
-    if (user == null) {
-      AbsLogger.error(TAG, "Could not load the current user, ending check")
-      return
-    }
+  private suspend fun doCheck(
+          appContext: Context,
+          trigger: Trigger,
+          serverConfigId: String,
+          settings: DeviceSettings,
+          api: ApiHandler,
+          user: User
+  ) {
     val finished = HashSet<String>()
     val progressByKey = HashMap<String, MediaProgress>()
     user.mediaProgress.forEach { progress ->
@@ -203,6 +236,31 @@ object AutoDownloadManager {
     var skipped = 0
     var failedPodcasts = 0
     var removed = 0
+    var skippedForLimit = 0
+    fun limitOn() = AutoDeletePolicy.limitBytes(DeviceManager.deviceData.deviceSettings ?: DeviceSettings.default()) != null
+
+    // Makes room for the download under the limit; false (and the reason logged) when it does not fit
+    fun fitsLimit(downloadId: String, expected: Long): Boolean {
+      val limit = AutoDeletePolicy.limitBytes(DeviceManager.deviceData.deviceSettings ?: DeviceSettings.default()) ?: return true
+      // Counted afresh each time: retention, finished or failed downloads and manual deletes change it while the pass runs
+      val used = AutoDeleteManager.usedBytes(appContext) + AutoDeleteManager.queuedBytes(appContext)
+      if (used + expected <= limit) return true
+      val freed = AutoDeleteManager.freeSpaceFor(appContext, expected, user)
+      if (freed.enough) return true
+      val remaining = used - freed.freedBytes
+      // Part of the pass's skipped count; Settings shows the limit-specific share
+      skipped++
+      skippedForLimit++
+      AbsLogger.info(TAG, "Auto download skipped: $downloadId does not fit the limit (needs $expected bytes, room ${maxOf(0L, limit - remaining)} bytes)")
+      return false
+    }
+
+    fun expectedSize(downloadId: String, episode: app.absplus.android.data.PodcastEpisode): Long {
+      if (!limitOn()) return 0L
+      val size = episode.audioFile?.metadata?.size
+      if (size == null) AbsLogger.info(TAG, "No size known for $downloadId, counting it as 0 for the downloads limit")
+      return size ?: 0L
+    }
 
     for (id in targets) {
       if (DeviceManager.serverConnectionConfig?.id != serverConfigId) {
@@ -288,11 +346,38 @@ object AutoDownloadManager {
         when (AutoDownloadPolicy.windowAction(AutoDownloadStore.get(serverConfigId, id), episode.id, state, copy)) {
           AutoDownloadPolicy.WindowAction.SKIP -> Unit
           AutoDownloadPolicy.WindowAction.RETRY -> {
+            // With a limit, room may be freed first, so a retry that cannot start must not cost finished downloads
+            var expected = 0L
+            if (limitOn()) {
+              val check = await<RetryCheck> { cb -> DownloadServiceHost.retryRefusal(appContext, downloadId) { cb(RetryCheck(it)) } }
+              if (check == null || check.refusal != null) {
+                Log.d(TAG, "Retry of $downloadId not applied: ${check?.refusal ?: "timed out"}")
+                continue
+              }
+              val queuedItem = DownloadServiceHost.queueSnapshot().firstOrNull { it.id == downloadId }
+              expected = if (queuedItem == null) 0L else AutoDeleteManager.retryExtraBytes(queuedItem)
+              if (!fitsLimit(downloadId, expected)) continue
+            }
             val result = await<DownloadServiceHost.ExistingDownloadResult> { DownloadServiceHost.retryExisting(appContext, downloadId, it) }
-            if (result == DownloadServiceHost.ExistingDownloadResult.RETRIED) retried++
-            else Log.d(TAG, "Retry of $downloadId not applied: $result")
+            if (result == DownloadServiceHost.ExistingDownloadResult.RETRIED) {
+              retried++
+            } else {
+              Log.d(TAG, "Retry of $downloadId not applied: $result")
+            }
           }
           AutoDownloadPolicy.WindowAction.ENQUEUE -> {
+            // With a limit, the destination is checked before room is freed: a refused start would cost finished books for nothing
+            if (limitOn()) {
+              val refusal = LibraryItemDownloadStarter.destinationRefusal(appContext, item, episode)
+              if (refusal != null) {
+                skipped++
+                AbsLogger.info(TAG, "Skipped $downloadId: $refusal")
+                continue
+              }
+            }
+            // Before ownership is recorded: an episode skipped for the limit must stay a plain new episode
+            val expected = expectedSize(downloadId, episode)
+            if (!fitsLimit(downloadId, expected)) continue
             // Ownership is recorded before the item exists, so the queue never sees it as a manual download
             if (!AutoDownloadStore.markAutoQueued(serverConfigId, id, episode.id)) continue
             item.userMediaProgress = progressByKey["$id/${episode.id}"]
@@ -338,6 +423,7 @@ object AutoDownloadManager {
       AutoDownloadStore.forgetEpisodes(serverConfigId, id, owned.autoDownloadedEpisodeIds.filter { it !in serverEpisodeIds })
     }
 
-    AbsLogger.info(TAG, "Auto download check finished: queued $queued, retried $retried, skipped $skipped, removed $removed, failed podcasts $failedPodcasts")
+    AutoDeleteManager.setSkippedForLimit(appContext, skippedForLimit)
+    AbsLogger.info(TAG, "Auto download check finished: queued $queued, retried $retried, skipped $skipped (for the limit $skippedForLimit), removed $removed, failed podcasts $failedPodcasts")
   }
 }

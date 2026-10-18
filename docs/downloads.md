@@ -34,7 +34,7 @@ The state comes from the parts' flags (`downloadId`, `completed`, `moved`, `isMo
 
 Both remove the download: they stop its transfers, drop it from the queue and its saved record, and delete the app's own partial (staging) files. Cancel is offered while a download is active or queued; Clear when it has stopped (failed or lost folder access). Neither is possible while a finished file is being saved to its folder (a moment; "try again") or once the download is finishing.
 
-Finished files a removed download already placed in a **device folder** are kept there (a later download of the same item reuses them; Rescan Folder can link them). Finished files in **app storage** (internal or SD card) are deleted, since nothing else can reach them. A file a saved local item uses, or one that existed before the download (`reusedExistingFile`), is never deleted. A completed download is not in the queue, so Clear can't reach it; deleting a downloaded book stays with the local item's existing delete.
+Finished files a removed download already placed in a **device folder** are kept there (a later download of the same item reuses them; Rescan Folder can link them). Finished files in **app storage** (internal or SD card) are deleted, since nothing else can reach them. A file a saved local item uses, or one that existed before the download (`reusedExistingFile`), is never deleted. A completed download is not in the queue, so Clear can't reach it; deleting a downloaded book stays with the local item's existing delete. Finished books can also be deleted automatically, and the space downloads take can be capped; see [auto-delete.md](auto-delete.md).
 
 The download notification's Cancel cancels every download that can be removed, with the same rules.
 

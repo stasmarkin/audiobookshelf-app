@@ -427,6 +427,13 @@ export default {
         else this.$toast.error('Failed to delete')
       }
     },
+    // Auto delete may have removed this book in the background
+    async onLocalItemsChanged() {
+      if (!this.localLibraryItem) return
+      if (!(await this.$db.getLocalLibraryItem(this.localLibraryItemId))) {
+        this.$router.replace(this.isIos ? '/downloads' : `/localMedia/folders/${this.folderId}`)
+      }
+    },
     async init() {
       this.localLibraryItem = await this.$db.getLocalLibraryItem(this.localLibraryItemId)
 
@@ -457,6 +464,7 @@ export default {
     }
   },
   async mounted() {
+    this.$eventBus.$on('local-library-items-changed', this.onLocalItemsChanged)
     this.init()
     const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
     // Left the page before the listener was registered
@@ -467,6 +475,7 @@ export default {
     this.itemMovedListener = listener
   },
   beforeDestroy() {
+    this.$eventBus.$off('local-library-items-changed', this.onLocalItemsChanged)
     this.itemMovedListener?.remove()
   }
 }

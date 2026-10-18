@@ -127,6 +127,17 @@ object DeviceManager {
         }
       }
     }
+    // Auto delete added: the delay's default is 1 day and 0 is valid, so only "never saved" (null) is backfilled
+    deviceData.deviceSettings?.let {
+      if (it.autoDeleteDelayDays == null) {
+        it.autoDeleteDelayDays = 1
+        try {
+          dbManager.saveDeviceData(deviceData)
+        } catch (e: Exception) {
+          Log.e(tag, "Failed to save backfilled auto delete settings", e)
+        }
+      }
+    }
   }
 
   /**

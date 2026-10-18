@@ -944,7 +944,7 @@ class ApiHandler(var ctx:Context) {
     if (updateLogs.isNotEmpty()) {
       MediaEventManager.syncEvent(mediaProgress, "Sync on server connection")
     }
-    DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+    DeviceManager.dbManager.saveLocalMediaProgressLocked(localMediaProgress)
   }
 
   // Pushes local audio progress (currentTime/progress/isFinished/duration) to the server -

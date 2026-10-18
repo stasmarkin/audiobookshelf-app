@@ -241,7 +241,7 @@ class FolderScanner(private val ctx: Context) {
     if (savedProgress != null) {
       result.localMediaProgress =
               repointLocalProgress(savedProgress, item.libraryItemId, item.serverConnectionConfigId, item.serverAddress, item.serverUserId)
-      DeviceManager.dbManager.saveLocalMediaProgress(savedProgress)
+      DeviceManager.dbManager.saveLocalMediaProgressLocked(savedProgress)
     } else item.userMediaProgress?.let { progress ->
       val progressId =
               if (item.episodeId.isNullOrEmpty()) localItem.id
@@ -266,7 +266,7 @@ class FolderScanner(private val ctx: Context) {
                       item.libraryItemId,
                       item.episodeId
               )
-      DeviceManager.dbManager.saveLocalMediaProgress(result.localMediaProgress!!)
+      DeviceManager.dbManager.saveLocalMediaProgressLocked(result.localMediaProgress!!)
     }
     DeviceManager.dbManager.saveLocalLibraryItem(localItem)
     callback(result)

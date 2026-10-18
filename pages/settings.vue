@@ -199,6 +199,33 @@
       <p v-if="downloadStorageView.sdSelectable || downloadStorageValue === 'sd'" class="text-xs text-fg-muted pb-1">{{ $strings.MessageDownloadStorageHint }}</p>
     </template>
 
+    <template v-if="isAndroid">
+      <!-- Auto delete and storage settings -->
+      <p class="uppercase text-xs font-semibold text-fg-muted mb-2 mt-10">{{ $strings.HeaderAutoDeleteSettings }}</p>
+      <div class="flex items-center py-3">
+        <div class="w-10 flex justify-center">
+          <ui-toggle-switch v-model="settings.autoDeleteFinishedBooks" @input="saveSettings" />
+        </div>
+        <p class="pl-4">{{ $strings.LabelAutoDeleteBooks }}</p>
+      </div>
+      <p class="text-xs text-fg-muted pb-1">{{ $strings.MessageAutoDeleteHelp }}</p>
+      <div v-if="settings.autoDeleteFinishedBooks" class="py-3 flex items-center">
+        <p class="pr-4 w-36">{{ $strings.LabelAutoDeleteDelay }}</p>
+        <div @click.stop="showAutoDeleteDelayOptions">
+          <ui-text-input :value="autoDeleteDelayOption" readonly append-icon="expand_more" style="width: 145px; max-width: 145px" />
+        </div>
+      </div>
+      <div class="py-3 flex items-center">
+        <p class="pr-4 w-36">{{ $strings.LabelDownloadsLimit }}</p>
+        <div @click.stop="showDownloadsLimitOptions">
+          <ui-text-input :value="downloadsLimitOption" readonly append-icon="expand_more" style="width: 145px; max-width: 145px" />
+        </div>
+      </div>
+      <p class="text-xs text-fg-muted pb-1">{{ $strings.MessageDownloadsLimitHelp }}</p>
+      <p v-if="downloadsStorageText" class="text-xs text-fg-muted pt-1">{{ downloadsStorageText }}</p>
+      <p v-if="downloadsStorage && downloadsStorage.skippedForLimit > 0 && settings.downloadsLimitGb > 0 && settings.autoDownloadEnabled" class="text-xs text-fg-muted pt-1">{{ $getString('LabelDownloadsSkippedForLimit', [downloadsStorage.skippedForLimit]) }}</p>
+    </template>
+
     <!-- Podcast auto download settings -->
     <template v-if="isAndroid">
       <p class="uppercase text-xs font-semibold text-fg-muted mb-2 mt-10">{{ $strings.HeaderAutoDownloadSettings }}</p>
@@ -297,9 +324,10 @@
 
 <script>
 import { Dialog } from '@capacitor/dialog'
+import { AUTO_DELETE_DELAY_DAYS, DOWNLOADS_LIMIT_GB, downloadsFreeBytes, normalizeDelayDays, normalizeLimitGb } from '@/utils/autoDeleteSettings'
 import jumpLabelMixin from '@/mixins/jumpLabel'
 import diagnosticLogMixin from '@/mixins/diagnosticLog'
-import { AbsDatabase } from '@/plugins/capacitor'
+import { AbsDatabase, AbsDownloader } from '@/plugins/capacitor'
 import { storageStatusView } from '@/utils/downloadStorageView'
 
 export default {
@@ -348,8 +376,12 @@ export default {
         autoDownloadKeepCount: 3,
         autoDownloadWifiOnly: true,
         autoDownloadChargingOnly: false,
-        autoDownloadIntervalHours: 6
+        autoDownloadIntervalHours: 6,
+        autoDeleteFinishedBooks: false,
+        autoDeleteDelayDays: 1,
+        downloadsLimitGb: 0
       },
+      downloadsStorage: null,
       theme: 'dark',
       lockCurrentOrientation: false,
       settingInfo: {
@@ -511,6 +543,27 @@ export default {
     autoDownloadIntervalItems() {
       return [1, 6, 12, 24].map((h) => ({ text: h === 1 ? this.$strings.LabelEveryHour : this.$getString('LabelEveryHours', [h]), value: h }))
     },
+    autoDeleteDelayItems() {
+      return AUTO_DELETE_DELAY_DAYS.map((d) => ({ text: d === 0 ? this.$strings.LabelAutoDeleteRightAway : d === 1 ? this.$strings.LabelOneDay : this.$getString('LabelDaysCount', [d]), value: d }))
+    },
+    downloadsLimitItems() {
+      return DOWNLOADS_LIMIT_GB.map((gb) => ({ text: gb === 0 ? this.$strings.LabelOff : this.$getString('LabelDownloadsLimitGb', [gb]), value: gb }))
+    },
+    autoDeleteDelayOption() {
+      return this.autoDeleteDelayItems.find((i) => i.value === this.settings.autoDeleteDelayDays)?.text || 'Error'
+    },
+    downloadsLimitOption() {
+      return this.downloadsLimitItems.find((i) => i.value === this.settings.downloadsLimitGb)?.text || 'Error'
+    },
+    downloadsStorageText() {
+      const info = this.downloadsStorage
+      if (!info) return ''
+      const used = this.$bytesPretty(info.usedBytes, 1)
+      // Free space is that of the storage new downloads go to (Download storage above)
+      const freeBytes = downloadsFreeBytes(this.downloadStorageStatus)
+      if (freeBytes === null) return this.$getString('LabelDownloadsStorageUsed', [used])
+      return this.$getString('LabelDownloadsStorage', [used, this.$bytesPretty(freeBytes, 1)])
+    },
     autoDownloadKeepCountOption() {
       return String(this.settings.autoDownloadKeepCount)
     },
@@ -600,6 +653,8 @@ export default {
       else if (this.moreMenuSetting === 'diagnosticLevel') return this.diagnosticLevelItems
       else if (this.moreMenuSetting === 'autoDownloadKeepCount') return this.autoDownloadKeepCountItems
       else if (this.moreMenuSetting === 'autoDownloadIntervalHours') return this.autoDownloadIntervalItems
+      else if (this.moreMenuSetting === 'autoDeleteDelayDays') return this.autoDeleteDelayItems
+      else if (this.moreMenuSetting === 'downloadsLimitGb') return this.downloadsLimitItems
       else if (this.moreMenuSetting === 'jumpForward')
         return this.jumpForwardSecondsOptions.map((value) => ({
           text: this.getJumpLabel(value),
@@ -626,6 +681,8 @@ export default {
       if (this.moreMenuSetting === 'hapticFeedback') return this.settings.hapticFeedback
       if (this.moreMenuSetting === 'autoDownloadKeepCount') return this.settings.autoDownloadKeepCount
       if (this.moreMenuSetting === 'autoDownloadIntervalHours') return this.settings.autoDownloadIntervalHours
+      if (this.moreMenuSetting === 'autoDeleteDelayDays') return this.settings.autoDeleteDelayDays
+      if (this.moreMenuSetting === 'downloadsLimitGb') return this.settings.downloadsLimitGb
       return null
     }
   },
@@ -696,6 +753,22 @@ export default {
       this.moreMenuSetting = 'autoDownloadIntervalHours'
       this.showMoreMenuDialog = true
     },
+    showAutoDeleteDelayOptions() {
+      this.moreMenuSetting = 'autoDeleteDelayDays'
+      this.showMoreMenuDialog = true
+    },
+    showDownloadsLimitOptions() {
+      this.moreMenuSetting = 'downloadsLimitGb'
+      this.showMoreMenuDialog = true
+    },
+    async loadDownloadsStorage() {
+      if (!this.isAndroid) return
+      try {
+        this.downloadsStorage = await AbsDownloader.getDownloadsStorage()
+      } catch (error) {
+        console.error('Failed to load downloads storage', error)
+      }
+    },
     clickMenuAction(action) {
       this.showMoreMenuDialog = false
       if (this.moreMenuSetting === 'shakeSensitivity') {
@@ -728,6 +801,12 @@ export default {
         this.saveSettings()
       } else if (this.moreMenuSetting === 'autoDownloadIntervalHours') {
         this.settings.autoDownloadIntervalHours = action
+        this.saveSettings()
+      } else if (this.moreMenuSetting === 'autoDeleteDelayDays') {
+        this.settings.autoDeleteDelayDays = action
+        this.saveSettings()
+      } else if (this.moreMenuSetting === 'downloadsLimitGb') {
+        this.settings.downloadsLimitGb = action
         this.saveSettings()
       } else if (this.moreMenuSetting === 'jumpForward') {
         this.settings.jumpForwardTime = action
@@ -889,6 +968,7 @@ export default {
         this.deviceData = updatedDeviceData
         this.$setLanguageCode(updatedDeviceData.deviceSettings?.languageCode || 'en-us')
         this.setDeviceSettings()
+        this.loadDownloadsStorage()
       }
     },
     setDeviceSettings() {
@@ -933,6 +1013,10 @@ export default {
       this.settings.autoDownloadWifiOnly = deviceSettings.autoDownloadWifiOnly !== false
       this.settings.autoDownloadChargingOnly = !!deviceSettings.autoDownloadChargingOnly
       this.settings.autoDownloadIntervalHours = [1, 6, 12, 24].includes(deviceSettings.autoDownloadIntervalHours) ? deviceSettings.autoDownloadIntervalHours : 6
+
+      this.settings.autoDeleteFinishedBooks = !!deviceSettings.autoDeleteFinishedBooks
+      this.settings.autoDeleteDelayDays = normalizeDelayDays(deviceSettings.autoDeleteDelayDays)
+      this.settings.downloadsLimitGb = normalizeLimitGb(deviceSettings.downloadsLimitGb)
     },
     async init() {
       this.loading = true
@@ -942,6 +1026,7 @@ export default {
       this.$store.commit('setDeviceData', this.deviceData)
       this.setDeviceSettings()
       this.loading = false
+      this.loadDownloadsStorage()
     }
   },
   mounted() {

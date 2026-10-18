@@ -19,6 +19,8 @@ import app.absplus.android.server.RefreshResult
 import app.absplus.android.managers.ItemUpdate
 import app.absplus.android.managers.SecureStorage
 import app.absplus.android.widget.WidgetRenderer
+import app.absplus.android.managers.AutoDeleteManager
+import app.absplus.android.managers.AutoDeleteScheduler
 import app.absplus.android.managers.AutoDownloadScheduler
 import app.absplus.android.services.StorageMoveService
 import com.fasterxml.jackson.core.json.JsonReadFeature
@@ -342,7 +344,7 @@ class AbsDatabase : Plugin() {
   @PluginMethod
   fun removeLocalMediaProgress(call:PluginCall) {
     val localMediaProgressId = call.getString("localMediaProgressId", "").toString()
-    DeviceManager.dbManager.removeLocalMediaProgress(localMediaProgressId)
+    DeviceManager.dbManager.removeLocalMediaProgressLocked(localMediaProgressId)
     call.resolve()
   }
 
@@ -415,7 +417,7 @@ class AbsDatabase : Plugin() {
           episodeId = mediaProgress.episodeId)
 
         Log.d(tag, "syncServerMediaProgressWithLocalMediaProgress: Saving new local media progress $localMediaProgress")
-        DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+        DeviceManager.dbManager.saveLocalMediaProgressLocked(localMediaProgress)
         call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
       } else {
         Log.e(tag, "syncServerMediaProgressWithLocalMediaProgress: Local library item not found")
@@ -431,7 +433,7 @@ class AbsDatabase : Plugin() {
         MediaEventManager.syncEvent(mediaProgress, "Received from webhook event")
 
         localMediaProgress.updateFromServerMediaProgress(mediaProgress)
-        DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+        DeviceManager.dbManager.saveLocalMediaProgressLocked(localMediaProgress)
         call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
       }
     }
@@ -500,7 +502,7 @@ class AbsDatabase : Plugin() {
     }
 
     // Save local media progress locally
-    DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+    DeviceManager.dbManager.saveLocalMediaProgressLocked(localMediaProgress)
 
     val lmpstring = jacksonMapper.writeValueAsString(localMediaProgress)
     Log.d(tag, "updateLocalMediaProgressFinished: Local Media Progress String $lmpstring")
@@ -570,7 +572,7 @@ class AbsDatabase : Plugin() {
     }
 
     // Save local media progress locally
-    DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+    DeviceManager.dbManager.saveLocalMediaProgressLocked(localMediaProgress)
 
     val lmpstring = jacksonMapper.writeValueAsString(localMediaProgress)
     Log.d(tag, "updateLocalEbookProgress: Local Media Progress String $lmpstring")
@@ -635,7 +637,10 @@ class AbsDatabase : Plugin() {
 
       GlobalScope.launch(Dispatchers.IO) {
         try {
+          // A count left from a pass under a limit that is now off would keep showing in Settings
+          if (newDeviceSettings.downloadsLimitGb == 0) AutoDeleteManager.setSkippedForLimit(mainActivity, 0)
           AutoDownloadScheduler.reschedule(mainActivity)
+          AutoDeleteScheduler.reschedule(mainActivity)
         } catch (e: Exception) {
           Log.e(tag, "Failed to reschedule auto download", e)
         }

@@ -185,6 +185,29 @@ object DownloadServiceHost {
   fun hasQueuedDownload(libraryItemId: String): Boolean =
           manager?.let { m -> synchronized(m) { m.downloadItemQueue.any { it.libraryItemId == libraryItemId } } } ?: false
 
+  /**
+   * Why a retry of the queued download would be refused right now, or null when it could start; changes nothing. The
+   * same refusals as [retryExisting], found before anything is spent on the retry (a held download only answers HELD
+   * once a retry has tried it, so a missing credential is reported here too).
+   */
+  fun retryRefusal(context: Context, downloadItemId: String, callback: (ExistingDownloadResult?) -> Unit) {
+    val queue = ensure(context)
+    scope.launch {
+      restoreJob?.join()
+      val existing = queue.findDownloadItem(downloadItemId)
+      callback(
+              when {
+                existing == null -> ExistingDownloadResult.NOT_FOUND
+                queue.isStorageUnavailable(downloadItemId) -> ExistingDownloadResult.STORAGE_UNAVAILABLE
+                queue.foldersWithoutAccess(downloadItemId).isNotEmpty() -> ExistingDownloadResult.FOLDER_ACCESS
+                !queue.canRetryDownloadItem(downloadItemId) ->
+                        if (existing.downloadItemParts.any { it.authorizationHold }) ExistingDownloadResult.HELD else ExistingDownloadResult.ACTIVE
+                !queue.hasDownloadAuthorization(downloadItemId) -> ExistingDownloadResult.HELD
+                else -> null
+              })
+    }
+  }
+
   fun retryExisting(
           context: Context,
           downloadItemId: String,

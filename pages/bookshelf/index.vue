@@ -328,9 +328,17 @@ export default {
     },
     initListeners() {
       this.$eventBus.$on('library-changed', this.libraryChanged)
+      this.$eventBus.$on('local-library-items-changed', this.localItemsChanged)
     },
     removeListeners() {
       this.$eventBus.$off('library-changed', this.libraryChanged)
+      this.$eventBus.$off('local-library-items-changed', this.localItemsChanged)
+    },
+    // Downloads removed in the background: shelves must not keep Play pointing at them
+    localItemsChanged() {
+      this.lastServerFetch = 0
+      this.lastLocalFetch = 0
+      this.fetchCategories()
     }
   },
   async mounted() {
