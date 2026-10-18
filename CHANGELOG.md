@@ -16,6 +16,13 @@ Merged into `plus`, not yet in a published release.
   downloaded match; Play without a choice resumes the latest started book or episode. The downloaded mark follows the
   same rule as playback, so a copy downloaded with another account of the same server is not marked. A library that was
   never copied is read from the server as before.
+- **Covers offline:** covers you have seen online now show offline: on the shelves, tabs, Home, search, collections,
+  playlists, item pages and in the player, also after a cold start in airplane mode. The app keeps up to 150 MB of
+  covers on the device and drops the least recently shown ones beyond that; a cover seen once is not downloaded again.
+  The notification, lock screen and widget use the same copy, so a streamed book shown before keeps its cover there
+  offline too, and so does the book a queue waits for. Item pages and the player show the standard cover offline
+  instead of the full-size original. Known limit: a book whose cover was never shown online shows its title and author
+  offline.
 - **The player opens on the book a queue waits for:** pressing Play on a series, collection or playlist whose next
   book is not downloaded while the server is away now opens the player on that book (title, author, its position, the
   downloaded cover if there is one, "Waiting for server"), instead of only a "Waiting for the server" toast, or of the

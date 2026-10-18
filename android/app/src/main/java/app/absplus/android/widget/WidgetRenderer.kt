@@ -25,6 +25,7 @@ import app.absplus.android.data.PlaybackSession
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.diagnostics.DLog
 import app.absplus.android.managers.DbManager
+import app.absplus.android.media.CoverCache
 import app.absplus.android.managers.PlaybackRestoreStore
 import app.absplus.android.player.AwaitingDisplay
 import app.absplus.android.player.CoverArt
@@ -101,6 +102,8 @@ object WidgetRenderer {
 
   private fun fallbackState(context: Context): State {
     DbManager.initialize(context)
+    // A launcher-started process has no sync runtime; the cover cache is what shows a streamed book's cover offline
+    CoverCache.init(context)
     val session = DeviceManager.deviceData.lastPlaybackSession
     return State(
       session = session,

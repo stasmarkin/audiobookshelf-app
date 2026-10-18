@@ -15,6 +15,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.io.File
 
 /**
  * The book (or episode) a queue waits on while the server is away, as the replica knows it: what the player, the
@@ -27,7 +28,7 @@ data class AwaitingDisplay(
         val serverConfigId: String,
         val title: String,
         val author: String?,
-        /** The cover of a copy on this device (its coverContentUrl); null: a placeholder. */
+        /** The cover of a copy on this device or of the cover cache; null: a placeholder. */
         val coverUri: String?,
         val duration: Double,
         val currentTime: Double
@@ -64,6 +65,9 @@ fun awaitingDisplayOf(itemJson: JsonNode?, episodeJson: JsonNode?, progress: Med
   return AwaitingDisplay(libraryItemId, episodeId ?: episodeJson?.text("id"), serverConfigId, title,
           metadata.text("authorName") ?: metadata.text("author"), coverUri, duration, currentTime)
 }
+
+/** The copy's cover first; otherwise the cover cache's file, which the player and the app read as a `file:` URI. */
+fun awaitingCoverOf(copyCoverUrl: String?, cachedFile: File?): String? = copyCoverUrl ?: cachedFile?.let { Uri.fromFile(it).toString() }
 
 private fun JsonNode.text(field: String): String? = get(field)?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
 
