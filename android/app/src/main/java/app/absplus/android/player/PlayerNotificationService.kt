@@ -2553,7 +2553,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       var previous = ServerReachability.serverConfigId.value
       ServerReachability.serverConfigId.collect { id ->
         if (id != previous) {
-          mediaManager.resetServerItems()
+          mediaManager.dropServerSelection()
           forceReloadingAndroidAuto = true
           notifyAuto(autoRefresh.onServerSwitched())
         }
