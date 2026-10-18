@@ -11,7 +11,10 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class SyncFailure(message: String) : Exception(message)
+class SyncFailure(message: String) : Exception(message) {
+  /** Dropped as [HttpOutcome.STALE] after a logout or server switch, not refused by the server. */
+  val stale: Boolean get() = message == HttpOutcome.STALE.message
+}
 
 /** Pulls the user's data from the server into userdata.db: progress, bookmarks and the user object. */
 class UserDataReconciler(

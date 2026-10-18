@@ -2,6 +2,7 @@ package app.absplus.android.sync
 
 import app.absplus.android.data.ServerConnectionConfig
 import app.absplus.android.db.inMemoryReplica
+import app.absplus.android.server.ApiHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,6 +49,7 @@ class SyncEngineCatalogTest {
   private val onlineEntries = MutableStateFlow(0L)
   private val serverId = MutableStateFlow<String?>("srv")
   @Volatile private var foreground = true
+  @Volatile private var signedIn = true
   @Volatile private var now = 100_000_000L
   @Volatile private var beforeEventWrite: suspend () -> Unit = {}
   @Volatile private var currentLibraryId: () -> String? = { "lib1" }
@@ -95,7 +97,8 @@ class SyncEngineCatalogTest {
             logError = { errors.add(it) },
             notifyWindowMs = 10,
             catalog = CatalogDeps(replica, currentLibraryId = { currentLibraryId() }, http = syncHttp(api), minIntervalMs = CATALOG_INTERVAL_MS,
-                    beforeEventWrite = { beforeEventWrite() })))
+                    beforeEventWrite = { beforeEventWrite() }),
+            signedIn = { signedIn }))
     settle()
   }
 
@@ -231,6 +234,64 @@ class SyncEngineCatalogTest {
     SyncEngine.syncNow(SyncReason.MANUAL)
     gate.release.countDown()
     awaitPasses(2)
+  }
+
+  @Test
+  fun passDroppedAsStaleIsRedoneOnce() = runBlocking {
+    server.book("li1")
+    val bumps = AtomicInteger(1)
+    // The page is in flight when JS sets the server config on a cold start, which bumps the auth generation
+    server.onItemsPage = { if (bumps.getAndDecrement() > 0) ApiHandler.invalidateAuthRequests() }
+    start()
+    setState(ServerState.ONLINE)
+
+    awaitPasses(2)
+    assertEquals("Title li1", title("li1"))
+  }
+
+  @Test
+  fun staleRedoIsNotRedoneAgain() = runBlocking {
+    server.book("li1")
+    server.onItemsPage = { ApiHandler.invalidateAuthRequests() }
+    start()
+    setState(ServerState.ONLINE)
+
+    awaitPasses(2)
+    assertNull(title("li1"))
+  }
+
+  @Test
+  fun passDroppedByALogoutIsNotRedone() = runBlocking {
+    server.book("li1")
+    server.onItemsPage = {
+      signedIn = false
+      ApiHandler.invalidateAuthRequests()
+    }
+    start()
+    setState(ServerState.ONLINE)
+
+    awaitPasses(1)
+    assertNull(title("li1"))
+  }
+
+  @Test
+  fun stalePassInTheBackgroundWaitsForTheForeground() = runBlocking {
+    server.book("li1")
+    val bumps = AtomicInteger(1)
+    server.onItemsPage = {
+      if (bumps.getAndDecrement() > 0) {
+        foreground = false
+        ApiHandler.invalidateAuthRequests()
+      }
+    }
+    start()
+    setState(ServerState.ONLINE)
+    awaitPasses(1)
+
+    foreground = true
+    SyncEngine.syncNow(SyncReason.FOREGROUND)
+    awaitPasses(2)
+    assertEquals("Title li1", title("li1"))
   }
 
   @Test
