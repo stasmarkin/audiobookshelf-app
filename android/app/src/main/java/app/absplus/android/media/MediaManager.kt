@@ -576,13 +576,11 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   }
 
   /**
-   * Another server became active: the menu no longer lists the old server's libraries, nor starts its items. The caches
-   * keyed by library id stay, as loads still under way write to them; the new server's library ids never match.
+   * Another server became active: its menu must not list the old server's libraries. The other server caches stay (loads
+   * under way still write to them); they are looked up by the ids of the new server's lists.
    */
-  fun dropServerSelection() {
+  fun dropServerLibraries() {
     serverLibraries = listOf()
-    serverLibraryItems = ConcurrentHashMap()
-    podcastEpisodeLibraryItemMap = ConcurrentHashMap()
   }
 
   fun checkResetServerItems():Boolean {
