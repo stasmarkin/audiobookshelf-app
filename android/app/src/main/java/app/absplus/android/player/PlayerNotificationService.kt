@@ -569,8 +569,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                 // Note: In Android Auto for local cover images, setting the icon uri to a local path does not work (cover is blank)
                 // so we create and set the bitmap here instead of AbMediaDescriptionAdapter
                 val sessionCover = currentPlaybackSession!!.getCoverUri(ctx)
+                // On the main thread: the bitmap the session already resolved, else a downscaled decode
                 if (CoverArt.isLocal(sessionCover)) {
-                  bitmap = CoverArt.decodeLocal(ctx, sessionCover, "media session")
+                  bitmap = currentPlaybackSession!!.resolvedCoverBitmapOrNull()
+                          ?: CoverArt.decodeLocal(ctx, sessionCover, "media session", CoverArt.DESCRIPTION_COVER_PX)
                 }
                 // The default artwork when a local cover can't be decoded
                 val coverUri = currentPlaybackSession!!.getDisplayCoverUri(ctx)

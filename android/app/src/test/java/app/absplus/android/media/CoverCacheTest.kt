@@ -155,10 +155,13 @@ class CoverCacheTest {
       Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("fake")
         .body(byteArrayOf(1, 2, 3, 4).toResponseBody(type.toMediaType())).build()
     }).build()
-    val cache = cache(OkHttpCoverFetcher(client))
+    val logged = CopyOnWriteArrayList<String>()
+    val cache = cache(OkHttpCoverFetcher(client, log = { logged += it }))
 
     assertSame("a portal page is not a cover", CoverAnswer.Miss, cache.standard("A", 2))
+    assertSame(CoverAnswer.Miss, cache.standard("A", 2))
     assertEquals(emptySet<String>(), files())
+    assertEquals("a refusal is logged once, without the URL or token", listOf("Cover not available: type text/html"), logged.toList())
 
     type = "image/webp"
     val answer = cache.standard("A", 2) as CoverAnswer.Cached
@@ -256,6 +259,50 @@ class CoverCacheTest {
       check(System.currentTimeMillis() < deadline) { "timed out" }
       Thread.sleep(10)
     }
+  }
+
+  private fun fakeServer(type: String, body: ByteArray) = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+    Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("fake")
+      .body(body.toResponseBody(type.toMediaType())).build()
+  }).build()
+
+  @Test
+  fun imageTypeTheCacheDoesNotKeepIsStreamedNotStored() = runBlocking {
+    val avif = byteArrayOf(5, 6, 7, 8)
+    val cache = cache(OkHttpCoverFetcher(fakeServer("image/avif", avif), log = {}))
+
+    val answer = cache.standard("A", 2) as CoverAnswer.Stream
+    assertEquals("image/avif", answer.mime)
+    assertTrue(avif.contentEquals(answer.body.readBytes()))
+    assertEquals(emptySet<String>(), files())
+  }
+
+  @Test
+  fun rawWithTheExactVersionCachedDoesNotFetchTheStandardAgain() = runBlocking {
+    seed("A", 2)
+
+    assertTrue(cache().raw("A", 2) is CoverAnswer.Stream)
+    idle()
+
+    assertEquals(listOf("A" to true), fetcher.calls.toList())
+  }
+
+  @Test
+  fun latestFileKeepsThePlayingCoverFromEviction() {
+    val small = CoverStore(File(tmp.root, "small"), maxBytes = 9)
+    val cache = CoverCache(small, fetcher, { active }, { state }, { _, _ -> null }, scope)
+    for (id in listOf("A", "B", "C")) small.put(id, 1, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+
+    assertEquals("A_1.jpg", cache.latestFile("A")!!.name)
+    small.put("D", 1, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+
+    assertEquals("A_1.jpg", cache.latestFile("A")?.name)
+    assertEquals(null, small.find("B", 1))
+  }
+
+  @Test
+  fun aTricklingServerCannotHoldAFetchSlotForever() {
+    assertEquals(COVER_CALL_TIMEOUT_MS.toInt(), coverHttpClient().callTimeoutMillis)
   }
 }
 

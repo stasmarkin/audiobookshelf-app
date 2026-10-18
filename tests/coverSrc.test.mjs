@@ -11,7 +11,7 @@ const { coverSrc, isCoverRoute, shownGroupCovers } = await importSource('../util
 const scriptOf = (source) => source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'return')
 
 const globalsSource = (await read('../store/globals.js')).replace(/^import .*$/gm, '').replace(/^export const /gm, 'const ')
-const gettersFor = (native) => new Function('Capacitor', 'coverSrc', `${globalsSource}\nreturn getters`)({ isNativePlatform: () => native }, coverSrc)
+const gettersFor = (native, platform = native ? 'android' : 'web') => new Function('Capacitor', 'coverSrc', `${globalsSource}\nreturn getters`)({ getPlatform: () => platform }, coverSrc)
 
 const rootGetters = (serverAddress, tokenRequired = false) => ({ 'user/getServerAddress': serverAddress, 'user/getToken': 't', getDoesServerImagesRequireToken: tokenRequired })
 const coverOf = (native, item, serverAddress, raw = false) => gettersFor(native).getLibraryItemCoverSrc(null, null, {}, rootGetters(serverAddress))(item, '/book_placeholder.jpg', raw)
@@ -26,6 +26,7 @@ test('native builds the cover route', () => {
   assert.equal(coverOf(true, book(), null), '/_absplus/cover/li1?ts=1700', 'offline without a server address the getter still gives the route')
   assert.equal(coverOf(false, book(), null), '/book_placeholder.jpg', 'web mode without a server address: the placeholder, as before')
   assert.equal(gettersFor(true).getLibraryItemCoverSrcById(null, null, {}, rootGetters(null))('li1'), '/_absplus/cover/li1')
+  assert.equal(gettersFor(true, 'ios').getLibraryItemCoverSrc(null, null, {}, rootGetters('https://srv'))(book(), '/p.jpg'), 'https://srv/api/items/li1/cover?ts=1700', 'iOS has no route handler: server URL')
 })
 
 test('web keeps the server URL', () => {

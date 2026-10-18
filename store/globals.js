@@ -1,6 +1,9 @@
 import { Capacitor } from '@capacitor/core'
 import { coverSrc } from '@/utils/coverUrl'
 
+// Only the Android shell answers the cover route; iOS and the web dev server keep the server URL
+const isAndroid = () => Capacitor.getPlatform() === 'android'
+
 export const state = () => ({
   isModalOpen: false,
   itemDownloads: [],
@@ -45,7 +48,7 @@ export const getters = {
           itemId: libraryItem.id,
           updatedAt: libraryItem.updatedAt || null,
           raw,
-          native: Capacitor.isNativePlatform(),
+          native: isAndroid(),
           serverAddress: rootGetters['user/getServerAddress'],
           token: rootGetters['user/getToken'],
           tokenRequired: rootGetters.getDoesServerImagesRequireToken
@@ -60,7 +63,7 @@ export const getters = {
       return (
         coverSrc({
           itemId: libraryItemId,
-          native: Capacitor.isNativePlatform(),
+          native: isAndroid(),
           serverAddress: rootGetters['user/getServerAddress'],
           token: rootGetters['user/getToken'],
           tokenRequired: rootGetters.getDoesServerImagesRequireToken,

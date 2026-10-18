@@ -59,12 +59,19 @@ class SessionCoverArtTest {
     File(ctx.filesDir, COVER_CACHE_DIR).deleteRecursively()
   }
 
-  private fun coverCache(): CoverStore {
+  private val server = app.absplus.android.data.ServerConnectionConfig("config-1", 0, "Home", "https://abs.example", "2.20.0", "u", "user", "tok", null)
+
+  private fun coverCache(state: ServerState = ServerState.OFFLINE): CoverStore {
     resetFileProviderRoots()
     val store = CoverStore(File(ctx.filesDir, COVER_CACHE_DIR))
-    CoverCache.setForTest(CoverCache(store, { _, _, _ -> null }, { null }, { ServerState.OFFLINE }, { _, _ -> null }, scope))
+    CoverCache.setForTest(CoverCache(store, { _, _, _ -> null }, { server }, { state }, { _, _ -> null }, scope))
     return store
   }
+
+  private fun libraryItem(id: String, updatedAt: Long) = app.absplus.android.data.LibraryItem(
+    id, "ino", "lib", "folder", "/p", "p", 0L, 0L, 0L, 0L, updatedAt, null, null, false, false, "book",
+    app.absplus.android.data.MediaType(MediaTypeMetadata("Book", false), null), null, null, null, null, null
+  )
 
   private fun streamedSession(id: String) = PlaybackSession(
     "session-$id", "user", id, null, "book", MediaTypeMetadata("Book", false), DeviceInfo("d", "m", "x", 35, "0"),
@@ -196,5 +203,19 @@ class SessionCoverArtTest {
     val session = streamedSession("li_v1")
     assertTrue(resolve(session))
     assertEquals(CoverArt.defaultUri().toString(), iconUri(session))
+  }
+
+  @Test fun onlineAnOlderCachedCoverGivesWayToTheServer() {
+    DbManager.initialize(ctx)
+    coverCache(ServerState.ONLINE).put("li_o1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+    val session = streamedSession("li_o1").apply { libraryItem = libraryItem("li_o1", 9) }
+    assertTrue("online, the cover changed since it was cached", session.getCoverUri(ctx).toString().startsWith("https://abs.example/api/items/li_o1/cover"))
+
+    coverCache(ServerState.OFFLINE)
+    assertEquals("offline the older cover is shown", "content", session.getCoverUri(ctx).scheme)
+
+    coverCache(ServerState.ONLINE)
+    assertEquals("the same version online stays cached", "content", streamedSession("li_o1").apply { libraryItem = libraryItem("li_o1", 5) }.getCoverUri(ctx).scheme)
+    assertEquals("without the item's updatedAt nothing changes", "content", streamedSession("li_o1").getCoverUri(ctx).scheme)
   }
 }

@@ -168,7 +168,7 @@ class PlaybackSession(
             return Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
 
     // A streamed book shown online before has its cover in the cover cache, also offline and after a restart
-    CoverArt.cachedCoverUri(ctx, libraryItemId)?.let { return it }
+    CoverArt.cachedCoverUri(ctx, libraryItemId, libraryItem?.updatedAt)?.let { return it }
 
     // As of v2.17.0 token is not needed with cover image requests
     if (checkIsServerVersionGte("2.17.0")) {
@@ -196,6 +196,9 @@ class PlaybackSession(
   /** Bitmap for the cover art, once resolved */
   @JsonIgnore
   private var resolvedCoverBitmap: Bitmap? = null
+
+  @JsonIgnore
+  fun resolvedCoverBitmapOrNull(): Bitmap? = resolvedCoverBitmap
 
   /**
    * Builds the current session metadata, including the cover art bitmap if it has already been resolved.

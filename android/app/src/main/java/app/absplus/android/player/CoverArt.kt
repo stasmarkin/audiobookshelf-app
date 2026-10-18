@@ -2,6 +2,7 @@ package app.absplus.android.player
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
@@ -39,6 +40,8 @@ internal object CoverArt {
   enum class Failure { MISSING, PERMISSION, CORRUPT, IO, INVALID }
 
   const val FAILURE_TTL_MS = 5 * 60 * 1000L
+  /** Longest side of a cover decoded on the main thread for the media session queue. */
+  const val DESCRIPTION_COVER_PX = 512
   private const val MAX_REMEMBERED = 32
   private const val TAG = "CoverArt"
   private const val SD_COVER_DIR = "sd-covers"
@@ -46,18 +49,19 @@ internal object CoverArt {
 
   // Replaceable in tests; production decodes through the platform decoder
   internal var decoder: (Context, Uri) -> Bitmap? = ::platformDecode
+  internal var scaledDecoder: (Context, Uri, Int) -> Bitmap? = ::platformDecodeScaled
   internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
 
   private val failedAt = LinkedHashMap<String, Long>()
 
   fun defaultUri(): Uri = Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
 
-  /** Decodes a local cover; null when it can't be used (a failure is categorised and logged once). */
-  fun decodeLocal(ctx: Context, uri: Uri, where: String): Bitmap? {
+  /** Decodes a local cover, at most [maxPx] on its longest side when given; null when it can't be used (logged once). */
+  fun decodeLocal(ctx: Context, uri: Uri, where: String, maxPx: Int = 0): Bitmap? {
     val key = uri.toString()
     if (isUnavailable(uri)) return null
     val bitmap = try {
-      decoder(ctx, uri)
+      if (maxPx > 0) scaledDecoder(ctx, uri, maxPx) else decoder(ctx, uri)
     } catch (e: Exception) {
       record(key, classify(e) ?: throw e, where)
       return null
@@ -92,11 +96,16 @@ internal object CoverArt {
     }
   }
 
-  /** The cover cache's file of [libraryItemId] as a content URI; null when the item was never shown online. */
-  fun cachedCoverUri(ctx: Context, libraryItemId: String?): Uri? {
-    val file = libraryItemId?.let { CoverCache.instance?.latestFile(it) } ?: return null
+  /**
+   * The cover cache's file of [libraryItemId] as a content URI; null when the item was never shown online, or when it is
+   * older than [knownUpdatedAt] and the server can be asked (offline an older cover beats none).
+   */
+  fun cachedCoverUri(ctx: Context, libraryItemId: String?, knownUpdatedAt: Long? = null): Uri? {
+    val cache = CoverCache.instance ?: return null
+    val entry = libraryItemId?.let { cache.latestEntry(it) } ?: return null
+    if (knownUpdatedAt != null && entry.updatedAt < knownUpdatedAt && cache.mayFetch()) return null
     return try {
-      FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
+      FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", entry.file)
     } catch (e: IllegalArgumentException) {
       null
     }
@@ -151,6 +160,25 @@ internal object CoverArt {
     }
     if (firstInWindow) DLog.w(TAG, "Local cover art unavailable ($failure, $where) - using default artwork, playback continues")
   }
+
+  private fun platformDecodeScaled(ctx: Context, uri: Uri, maxPx: Int): Bitmap? =
+    if (Build.VERSION.SDK_INT < 28) {
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      (ctx.contentResolver.openInputStream(uri) ?: throw FileNotFoundException()).use { BitmapFactory.decodeStream(it, null, bounds) }
+      var sample = 1
+      while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
+      (ctx.contentResolver.openInputStream(uri) ?: throw FileNotFoundException()).use {
+        BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+      }
+    } else {
+      ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { decoder, info, _ ->
+        val longest = maxOf(info.size.width, info.size.height)
+        if (longest > maxPx) {
+          val scale = maxPx.toFloat() / longest
+          decoder.setTargetSize(maxOf(1, (info.size.width * scale).toInt()), maxOf(1, (info.size.height * scale).toInt()))
+        }
+      }
+    }
 
   private fun platformDecode(ctx: Context, uri: Uri): Bitmap? =
     if (Build.VERSION.SDK_INT < 28) {

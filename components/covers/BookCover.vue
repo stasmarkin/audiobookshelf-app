@@ -168,6 +168,8 @@ export default {
       this.$nextTick(() => {
         this.imageReady = true
       })
+      // The placeholder after a failed cover route is not the cover: nothing to measure or report
+      if (this.coverUnavailable) return
       if (!this.noBg && this.$refs.cover && this.cover !== this.placeholderUrl) {
         var { naturalWidth, naturalHeight } = this.$refs.cover
         var aspectRatio = naturalHeight / naturalWidth
