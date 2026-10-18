@@ -15,6 +15,8 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -24,6 +26,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -35,6 +39,12 @@ const val COVER_CONNECT_TIMEOUT_MS = 10_000L
 const val COVER_READ_TIMEOUT_MS = 20_000L
 // The read timeout is per read: a server trickling bytes would otherwise hold a fetch slot without end
 const val COVER_CALL_TIMEOUT_MS = 30_000L
+// A queued fetch gives up after this long without any answer: a server hanging on /cover must not queue minutes
+const val COVER_SLOT_STALL_MS = 10_000L
+private const val SLOT_POLL_MS = 250L
+private const val SLOT_WAITING = 0
+private const val SLOT_TAKEN = 1
+private const val SLOT_ABANDONED = 2
 private const val REFUSAL_LOG_EVERY_MS = 5 * 60 * 1000L
 
 private val MIME_TO_EXT = mapOf("image/jpeg" to "jpg", "image/png" to "png", "image/webp" to "webp", "image/gif" to "gif")
@@ -116,7 +126,15 @@ class CoverCache(
   private val serverState: () -> ServerState,
   private val replicaUpdatedAt: suspend (serverConfigId: String, itemId: String) -> Long?,
   private val scope: CoroutineScope,
+  private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+  private val slotStallMs: Long = COVER_SLOT_STALL_MS,
+  private val slotPollMs: Long = SLOT_POLL_MS,
+  private val log: (String) -> Unit = { DLog.w("CoverCache", it) },
 ) {
+  // Monotonic clock values can be negative: "never" must be below any of them
+  @Volatile private var lastProgressAt = Long.MIN_VALUE
+  private var lastStallLogAt = Long.MIN_VALUE
+
   // A fetch gives a stored entry, or the bytes of an image type the store doesn't keep (each waiter gets its own stream)
   private sealed interface Fetched {
     data class Stored(val entry: CoverEntry) : Fetched
@@ -186,7 +204,7 @@ class CoverCache(
   private suspend fun fetchOnce(itemId: String, version: Long): Fetched? {
     val key = "${itemId}_$version"
     val job = synchronized(inFlight) {
-      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { permits.withPermit { download(itemId, version) } }.also { job ->
+      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { downloadInSlot(itemId, version) }.also { job ->
         inFlight[key] = job
         job.invokeOnCompletion { synchronized(inFlight) { if (inFlight[key] === job) inFlight.remove(key) } }
       }
@@ -194,11 +212,51 @@ class CoverCache(
     return job.await()
   }
 
+  /**
+   * Downloads once a fetch slot is free, waiting in arrival order while the server keeps answering; null once no fetch
+   * finished for [slotStallMs]. The slot is taken and the wait abandoned through one CAS, so a permit is never lost.
+   */
+  private suspend fun downloadInSlot(itemId: String, version: Long): Fetched? = coroutineScope {
+    val waitStartedAt = clock()
+    val slot = AtomicInteger(SLOT_WAITING)
+    val result = AtomicReference<Fetched?>()
+    val work = launch {
+      permits.withPermit {
+        if (slot.compareAndSet(SLOT_WAITING, SLOT_TAKEN)) result.set(download(itemId, version))
+      }
+    }
+    val watchdog = launch {
+      while (slot.get() == SLOT_WAITING && clock() - maxOf(lastProgressAt, waitStartedAt) < slotStallMs) delay(slotPollMs)
+      if (slot.compareAndSet(SLOT_WAITING, SLOT_ABANDONED)) {
+        work.cancel()
+        logStall()
+      }
+    }
+    work.join()
+    watchdog.cancel()
+    result.get()
+  }
+
+  internal fun freeSlotsForTest(): Int = permits.availablePermits
+
+  private fun logStall() {
+    val now = clock()
+    synchronized(inFlight) {
+      if (lastStallLogAt != Long.MIN_VALUE && now - lastStallLogAt < REFUSAL_LOG_EVERY_MS) return
+      lastStallLogAt = now
+    }
+    log("Cover fetch gave up: slot wait stalled")
+  }
+
   private fun download(itemId: String, version: Long): Fetched? {
     // The server may have gone away while this request waited for a free slot
     if (!mayFetch()) return null
     val config = activeServer() ?: return null
-    val fetched = fetcher.fetch(config, itemId, raw = false) ?: return null
+    val startedAt = clock()
+    val fetched = fetcher.fetch(config, itemId, raw = false)
+    // A cover (however slow) or a quick refusal shows the server answers; a request that hung until its timeout does not
+    clock().let { if (fetched != null || it - startedAt < slotStallMs) lastProgressAt = it }
+    if (fetched == null) return null
     return fetched.body.use { body ->
       val ext = fetched.ext
       if (ext != null) {
