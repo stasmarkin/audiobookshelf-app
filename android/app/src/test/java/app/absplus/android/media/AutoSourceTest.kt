@@ -94,10 +94,18 @@ class AutoSourceTest {
   @Test fun continueAddsTheServersItemsOfLibrariesOutsideTheReplica() {
     val replica = listOf(inLibrary("a", "lib1", 100))
     val server = listOf(inLibrary("a", "lib1", 500), inLibrary("b", "lib1", 400), inLibrary("s", "lib2", 300))
-    val merged = mergeContinue(replica, server, setOf("lib1"))
+    val merged = mergeContinue(replica, server, setOf("lib1"), "srv", "srv")
     assertEquals(listOf("s", "a"), merged.map { it.libraryItemWrapper.id })
     assertEquals("the replica's entry of an item is kept", 100, merged.last().progressLastUpdate)
-    assertEquals(listOf("a", "b", "s"), mergeContinue(emptyList(), server, emptySet()).map { it.libraryItemWrapper.id })
+    assertEquals(listOf("a", "b", "s"), mergeContinue(emptyList(), server, emptySet(), "srv", "srv").map { it.libraryItemWrapper.id })
+  }
+
+  @Test fun continueLeavesOutAnotherServersItems() {
+    val replica = listOf(inLibrary("a", "lib1", 100))
+    val server = listOf(inLibrary("old", "libX", 900))
+    assertEquals(listOf("a"), mergeContinue(replica, server, setOf("lib1"), "srv-old", "srv").map { it.libraryItemWrapper.id })
+    assertEquals(listOf("a"), mergeContinue(replica, server, setOf("lib1"), null, "srv").map { it.libraryItemWrapper.id })
+    assertEquals(listOf("old", "a"), mergeContinue(replica, server, setOf("lib1"), "srv", "srv").map { it.libraryItemWrapper.id })
   }
 
   @Test fun aProgressReadMovesTheSwitchedItemFirst() {

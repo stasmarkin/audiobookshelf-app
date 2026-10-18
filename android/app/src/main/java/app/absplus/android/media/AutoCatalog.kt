@@ -259,6 +259,10 @@ class AutoCatalog(
     return items
   }
 
+  /** The download mark of one item (episode) against [copies] read by the caller. */
+  fun downloadMarkOf(copies: List<LocalLibraryItem>, sc: String, item: LibraryItem, episodeId: String?): String? =
+          downloadMark(copies, sc, item, episodeId)
+
   fun markEpisodes(sc: String, podcast: LibraryItem, episodes: List<PodcastEpisode>) {
     if (episodes.isEmpty()) return
     val copies = localItems()

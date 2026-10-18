@@ -130,7 +130,7 @@ class AutoRootMenuTest {
   }
 
   @Test fun onlyAutoControllersStartWithoutAChoice() {
-    listOf(ANDROID_AUTO_PKG_NAME, ANDROID_AUTO_SIMULATOR_PKG_NAME, ANDROID_AUTOMOTIVE_PKG_NAME).forEach { assertTrue(it, isAutoController(it)) }
+    listOf(ANDROID_AUTO_PKG_NAME, ANDROID_AUTO_SIMULATOR_PKG_NAME, ANDROID_AUTOMOTIVE_PKG_NAME, ANDROID_GSEARCH_PKG_NAME).forEach { assertTrue(it, isAutoController(it)) }
     listOf(null, "", "android.media.session.MediaController", "com.android.bluetooth", "app.absplus.android", ANDROID_WEARABLE_PKG_NAME)
       .forEach { assertFalse(it.toString(), isAutoController(it)) }
   }

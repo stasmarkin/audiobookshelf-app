@@ -83,8 +83,15 @@ internal fun firstPlayableOf(
  * Continue: the replica's items, plus those the server reported for libraries the replica does not have; one entry per
  * item (episode), the latest progress first.
  */
-internal fun mergeContinue(replica: List<ItemInProgress>, server: List<ItemInProgress>, replicaLibraryIds: Set<String>): List<ItemInProgress> {
-  val fromServer = server.filter { (it.libraryItemWrapper as? LibraryItem)?.libraryId !in replicaLibraryIds }
+internal fun mergeContinue(
+        replica: List<ItemInProgress>,
+        server: List<ItemInProgress>,
+        replicaLibraryIds: Set<String>,
+        serverListOf: String?,
+        activeServerId: String?
+): List<ItemInProgress> {
+  // The server's list of another server (or account) is history of that one, not of the active server
+  val fromServer = if (serverListOf == null || serverListOf != activeServerId) emptyList() else server.filter { (it.libraryItemWrapper as? LibraryItem)?.libraryId !in replicaLibraryIds }
   return (replica + fromServer).distinctBy { it.libraryItemWrapper.id to it.episode?.id }
           .sortedByDescending { it.progressLastUpdate }.take(AUTO_CONTINUE_LIMIT)
 }
@@ -224,6 +231,8 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   // Read only for the next unfinished episode after a podcast ends; browse progress is media_progress (progressOf)
   var serverUserMediaProgress:MutableList<MediaProgress> = mutableListOf()
   var serverItemsInProgress = listOf<ItemInProgress>()
+  // The server the in-progress list was read from
+  @Volatile private var serverItemsInProgressOf: String? = null
   var serverLibraries = listOf<Library>()
 
   var userSettingsPlaybackRate:Float? = null
@@ -276,8 +285,15 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   }
 
   /** Continue: the snapshot's items and the server's for libraries the replica lacks. */
-  fun continueItems(snap: AutoSnapshot?): List<ItemInProgress> =
-          mergeContinue(snap?.continueItems.orEmpty(), serverItemsInProgress, snap?.libraries.orEmpty().mapTo(HashSet()) { it.id })
+  fun continueItems(snap: AutoSnapshot?): List<ItemInProgress> {
+    val active = catalog.activeServer()
+    if (serverItemsInProgressOf != null && serverItemsInProgressOf != active) {
+      serverItemsInProgress = listOf()
+      serverItemsInProgressOf = null
+    }
+    return mergeContinue(snap?.continueItems.orEmpty(), serverItemsInProgress, snap?.libraries.orEmpty().mapTo(HashSet()) { it.id },
+            serverItemsInProgressOf, active)
+  }
 
   /** The libraries of the snapshot, then the server's libraries the snapshot lacks (never reconciled). */
   private fun autoLibraries(snap: AutoSnapshot? = snapshot): List<Library> {
@@ -321,6 +337,18 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   fun markDownloads(items: List<LibraryItem>): List<LibraryItem> {
     val sc = catalog.activeServer() ?: return items
     return catalog.markItems(sc, items)
+  }
+
+  /** Download marks of the server's in-progress books and episodes, by the replica's rule; the copies are read once. */
+  private fun markInProgress(items: List<ItemInProgress>) {
+    val sc = catalog.activeServer() ?: return
+    val copies by lazy { DeviceManager.dbManager.getLocalLibraryItems() }
+    items.forEach { inProgress ->
+      val item = inProgress.libraryItemWrapper as? LibraryItem ?: return@forEach
+      val episode = inProgress.episode
+      if (episode != null) episode.localEpisodeId = catalog.downloadMarkOf(copies, sc, item, episode.id)
+      else item.localLibraryItemId = catalog.downloadMarkOf(copies, sc, item, null)
+    }
   }
 
   private fun markShelves(shelves: List<LibraryShelfType>): List<LibraryShelfType> {
@@ -556,11 +584,14 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     if (serverItemsInProgress.isNotEmpty()) {
       cb(serverItemsInProgress)
     } else {
+      val requestedFrom = DeviceManager.serverConnectionConfigId
       apiHandler.getAllItemsInProgress { itemsInProgress ->
         serverItemsInProgress = itemsInProgress.filter {
           val libraryItem = it.libraryItemWrapper as LibraryItem
           libraryItem.checkHasTracks()
         }
+        markInProgress(serverItemsInProgress)
+        serverItemsInProgressOf = requestedFrom.takeIf { it.isNotEmpty() }
         cb(serverItemsInProgress)
       }
     }
