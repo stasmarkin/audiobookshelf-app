@@ -157,7 +157,7 @@ test('nativeHttp does not report request errors that say nothing about the serve
     await flush()
     assert.deepEqual(broken.AbsData.reports, [], `${code} is not unreachable`)
   }
-  for (const code of ['SocketTimeoutException', 'UnknownHostException', 'NoRouteToHostException', 'SSLHandshakeException', 'SocketException']) {
+  for (const code of ['SocketTimeoutException', 'UnknownHostException', 'NoRouteToHostException', 'SSLHandshakeException', 'SocketException', 'IOException', 'EOFException']) {
     const down = await nativeHttp({
       respond: () => {
         throw javaError(code)
