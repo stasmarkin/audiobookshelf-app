@@ -16,6 +16,13 @@ Merged into `plus`, not yet in a published release.
   downloaded match; Play without a choice resumes the latest started book or episode. The downloaded mark follows the
   same rule as playback, so a copy downloaded with another account of the same server is not marked. A library that was
   never copied is read from the server as before.
+- **Android Auto offline:** without the server, a book or episode that is not downloaded says "Not available offline"
+  in its subtitle, and choosing it shows that message at once instead of nothing happening. Covers you have seen show in
+  Android Auto also offline, and covers of lists you open online are kept for later. Open lists update when the catalog,
+  your progress or the server's state changes, but not on every playback tick. While Android Auto is in use, the
+  catalog copy syncs with the server as when the app is open (until 10 minutes after Android Auto's last request), so
+  new books appear in the car without opening the phone; this widens the rule that the catalog syncs only with the app
+  in the foreground.
 - **Covers offline:** covers you have seen online now show offline: on the shelves, tabs, Home, search, collections,
   playlists, item pages and in the player, also after a cold start in airplane mode. The app keeps up to 150 MB of
   covers on the device and drops the least recently shown ones beyond that; a cover seen once is not downloaded again.
