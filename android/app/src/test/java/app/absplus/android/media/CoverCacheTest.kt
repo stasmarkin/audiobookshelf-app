@@ -15,6 +15,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -41,8 +42,8 @@ class CoverCacheTest {
   private val fetcher = FakeFetcher()
   private val store by lazy { CoverStore(File(tmp.root, COVER_CACHE_DIR)) }
 
-  private fun cache(fetch: CoverFetcher = fetcher) =
-    CoverCache(store, fetch, { active }, { state }, { _, id -> replica[id] }, scope)
+  private fun cache(fetch: CoverFetcher = fetcher, slotStallMs: Long = COVER_SLOT_STALL_MS) =
+    CoverCache(store, fetch, { active }, { state }, { _, id -> replica[id] }, scope, slotStallMs = slotStallMs)
 
   private fun seed(itemId: String, updatedAt: Long) {
     store.put(itemId, updatedAt, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!
@@ -315,6 +316,39 @@ class CoverCacheTest {
 
     assertEquals(listOf(true to 0L), timeouts.filter { it.first })
     assertTrue("the standard cover keeps the call timeout", timeouts.single { !it.first }.second > 0L)
+  }
+
+  @Test
+  fun stalledSlotsGiveUpInsteadOfQueueing(): Unit = runBlocking {
+    val release = CountDownLatch(1)
+    fetcher.answer = { id, _ -> if (id.startsWith("H")) release.await(10, TimeUnit.SECONDS); image() }
+    seed("C", 1)
+    val cache = cache(slotStallMs = 300)
+    try {
+      val hanging = (1..COVER_FETCH_PARALLELISM).map { async(Dispatchers.IO) { cache.standard("H$it", 1) } }
+      waitUntil { fetcher.calls.size == COVER_FETCH_PARALLELISM }
+
+      val miss = withTimeout(3_000) { cache.standard("B", 1) }
+      val older = withTimeout(3_000) { cache.standard("C", 2) }
+
+      assertSame("no cover arrives: the card draws its title", CoverAnswer.Miss, miss)
+      assertEquals("the older cached version instead", 1L, (older as CoverAnswer.Cached).entry.updatedAt)
+      assertEquals(0, fetcher.callsFor("B") + fetcher.callsFor("C"))
+      release.countDown()
+      hanging.awaitAll()
+    } finally {
+      release.countDown()
+    }
+  }
+
+  @Test
+  fun aMovingQueueKeepsWaiting() = runBlocking {
+    fetcher.answer = { _, _ -> Thread.sleep(100); image() }
+    val cache = cache(slotStallMs = 1_000)
+
+    val answers = (1..COVER_FETCH_PARALLELISM * 4).map { async(Dispatchers.IO) { cache.standard("M$it", 1) } }.awaitAll()
+
+    assertTrue("every queued cover arrives", answers.all { it is CoverAnswer.Cached })
   }
 
   @Test

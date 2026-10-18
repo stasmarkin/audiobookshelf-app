@@ -24,7 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -35,6 +35,9 @@ const val COVER_CONNECT_TIMEOUT_MS = 10_000L
 const val COVER_READ_TIMEOUT_MS = 20_000L
 // The read timeout is per read: a server trickling bytes would otherwise hold a fetch slot without end
 const val COVER_CALL_TIMEOUT_MS = 30_000L
+// A queued fetch gives up after this long without any cover arriving: a server hanging on /cover must not queue minutes
+const val COVER_SLOT_STALL_MS = 5_000L
+private const val SLOT_POLL_MS = 250L
 private const val REFUSAL_LOG_EVERY_MS = 5 * 60 * 1000L
 
 private val MIME_TO_EXT = mapOf("image/jpeg" to "jpg", "image/png" to "png", "image/webp" to "webp", "image/gif" to "gif")
@@ -116,7 +119,11 @@ class CoverCache(
   private val serverState: () -> ServerState,
   private val replicaUpdatedAt: suspend (serverConfigId: String, itemId: String) -> Long?,
   private val scope: CoroutineScope,
+  private val clock: () -> Long = System::currentTimeMillis,
+  private val slotStallMs: Long = COVER_SLOT_STALL_MS,
 ) {
+  @Volatile private var lastProgressAt = 0L
+
   // A fetch gives a stored entry, or the bytes of an image type the store doesn't keep (each waiter gets its own stream)
   private sealed interface Fetched {
     data class Stored(val entry: CoverEntry) : Fetched
@@ -186,7 +193,7 @@ class CoverCache(
   private suspend fun fetchOnce(itemId: String, version: Long): Fetched? {
     val key = "${itemId}_$version"
     val job = synchronized(inFlight) {
-      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { permits.withPermit { download(itemId, version) } }.also { job ->
+      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { if (!acquireSlot()) null else try { download(itemId, version) } finally { permits.release() } }.also { job ->
         inFlight[key] = job
         job.invokeOnCompletion { synchronized(inFlight) { if (inFlight[key] === job) inFlight.remove(key) } }
       }
@@ -194,11 +201,21 @@ class CoverCache(
     return job.await()
   }
 
+  /** Waits for a fetch slot while covers keep arriving; false once nothing arrived for [slotStallMs]. */
+  private suspend fun acquireSlot(): Boolean {
+    val waitStartedAt = clock()
+    while (true) {
+      if (withTimeoutOrNull(SLOT_POLL_MS) { permits.acquire() } != null) return true
+      if (clock() - maxOf(lastProgressAt, waitStartedAt) >= slotStallMs) return false
+    }
+  }
+
   private fun download(itemId: String, version: Long): Fetched? {
     // The server may have gone away while this request waited for a free slot
     if (!mayFetch()) return null
     val config = activeServer() ?: return null
     val fetched = fetcher.fetch(config, itemId, raw = false) ?: return null
+    lastProgressAt = clock()
     return fetched.body.use { body ->
       val ext = fetched.ext
       if (ext != null) {
