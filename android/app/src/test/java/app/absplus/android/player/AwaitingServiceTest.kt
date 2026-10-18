@@ -1,6 +1,8 @@
 package app.absplus.android.player
 
 import android.content.Context
+import android.content.Intent
+import android.view.KeyEvent
 import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.data.DeviceData
 import app.absplus.android.data.DeviceInfo
@@ -15,6 +17,9 @@ import app.absplus.android.media.MediaProgressSyncer
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import app.absplus.android.player.PlayerNotificationService.PlaylistQueueItem
+import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.ServerReachability
+import app.absplus.android.sync.SyncTestFixture
 import app.absplus.android.sync.ServerState
 import com.google.android.exoplayer2.Player
 import java.lang.reflect.Proxy
@@ -155,5 +160,78 @@ class AwaitingServiceTest {
     assertEquals("session-a", pns.currentPlaybackSession?.id)
     assertTrue("the lost stream still waits", pns.awaiting.isStreamLost)
     assertTrue(playerCalls.contains("pause"))
+  }
+
+  private fun stopKey(action: Int) = Intent(Intent.ACTION_MEDIA_BUTTON).putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(action, KeyEvent.KEYCODE_MEDIA_STOP))
+
+  @Test
+  fun stopKeyWhileWaitingEndsTheWait() {
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    showB()
+    val callback = MediaSessionCallback(pns)
+    callback.onMediaButtonEvent(stopKey(KeyEvent.ACTION_DOWN))
+    assertTrue("the DOWN of Stop does nothing yet", pns.awaiting.isAwaiting)
+    callback.onMediaButtonEvent(stopKey(KeyEvent.ACTION_UP))
+    assertNull(pns.awaitingDisplay)
+    assertFalse(pns.awaiting.isAwaiting)
+    assertTrue(pns.playlistQueue.isEmpty())
+  }
+
+  @Test
+  fun stopKeyOfALostStreamPausesAndKeepsTheSession() {
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    pns.currentPlaybackSession = sessionA()
+    pns.awaiting.onStreamLost("book-a", null, 15.0, wasPlaying = true, serverConfigId = "config-1")
+    MediaSessionCallback(pns).onMediaButtonEvent(stopKey(KeyEvent.ACTION_UP))
+    assertEquals("session-a", pns.currentPlaybackSession?.id)
+    assertTrue("the lost stream still waits", pns.awaiting.isStreamLost)
+    assertTrue(playerCalls.contains("pause"))
+  }
+
+  // The server answers its ping, but the app has not signed in yet (a cold start offline): no live session
+  private fun withServerPingedBeforeTheSignIn(test: (SyncTestFixture) -> Unit) {
+    val f = SyncTestFixture()
+    try {
+      f.save(f.config("config-1"))
+      ActiveServer.init(ctx)
+      ActiveServer.remember("config-1")
+      ServerReachability.start(ctx, f.probe)
+      f.idle()
+      assertEquals(ServerState.ONLINE, ServerReachability.state.value)
+      test(f)
+    } finally {
+      f.close()
+    }
+  }
+
+  @Test
+  fun aServerPingedBeforeTheLiveSessionKeepsTheQueueWaitingUntilTheSession() = withServerPingedBeforeTheSignIn { f ->
+    pns.watchServerForAwaiting()
+    showB()
+    f.idle()
+    assertTrue("the play request would have no address: the wait is kept", pns.awaiting.isAwaiting)
+    assertEquals(itemB, pns.awaiting.blockedItem)
+    assertFalse("nothing starts", pns.awaitingPresentation.isResuming)
+
+    // Set without a sign-in report, as Android Auto or a restore does
+    DeviceManager.serverConnectionConfig = f.config("config-1")
+    f.idle()
+    assertFalse("the live session hands out the wait's resume", pns.awaiting.isAwaiting)
+  }
+
+  @Test
+  fun aQueueReachingAStreamBeforeTheSignInWaitsInsteadOfRequestingIt() = withServerPingedBeforeTheSignIn { f ->
+    // No apiHandler: a play request would fail the test
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns) { error("no server calls") }
+    pns.playlistQueue = listOf(PlaylistQueueItem("book-a", null), itemB)
+    pns.playlistQueueIndex = 0
+    pns.advancePlaylistQueue()
+    // The plan reads the downloads off the main thread
+    val deadline = System.currentTimeMillis() + 5_000
+    while (pns.awaiting.blockedItem == null && System.currentTimeMillis() < deadline) {
+      f.idle()
+      Thread.sleep(10)
+    }
+    assertEquals("the queue waits on B, no play request", itemB, pns.awaiting.blockedItem)
   }
 }
