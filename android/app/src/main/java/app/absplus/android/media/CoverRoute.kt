@@ -15,7 +15,8 @@ import kotlinx.coroutines.runBlocking
 
 const val COVER_ROUTE_PREFIX = "/_absplus/cover/"
 
-data class CoverRequest(val itemId: String, val updatedAt: Long?, val raw: Boolean)
+/** [wait]: a canvas that draws once (Year in Review) waits for a missing cover instead of getting a 404. */
+data class CoverRequest(val itemId: String, val updatedAt: Long?, val raw: Boolean, val wait: Boolean = false)
 
 /** A cover route on the app's own origin; the same path on any other host is a normal request. */
 fun isCoverRoute(uri: Uri, appOrigin: Uri): Boolean =
@@ -29,7 +30,7 @@ fun parseCoverRoute(uri: Uri): CoverRequest? {
   val itemId = Uri.decode(path.substring(COVER_ROUTE_PREFIX.length))
   if (!DownloadIdentifiers.isSafe(itemId)) return null
   val updatedAt = uri.getQueryParameter("ts")?.toLongOrNull()?.takeIf { it >= 0 }
-  return CoverRequest(itemId, updatedAt, raw = uri.getQueryParameter("raw") == "1")
+  return CoverRequest(itemId, updatedAt, raw = uri.getQueryParameter("raw") == "1", wait = uri.getQueryParameter("wait") == "1")
 }
 
 /** The WebView answer for [uri], or null when it is not a cover route. */
@@ -39,13 +40,20 @@ fun interceptCoverRoute(uri: Uri, appOrigin: Uri, cache: CoverCache?): WebResour
   return cache?.let { coverResponse(it, request) } ?: notFound()
 }
 
-fun coverResponse(cache: CoverCache, req: CoverRequest): WebResourceResponse {
-  if (req.updatedAt != null && !req.raw) cache.cached(req.itemId, req.updatedAt)?.let { fileResponse(it) }?.let { return it }
+fun coverResponse(cache: CoverCache, req: CoverRequest, waitMs: Long = COVER_WAIT_MS): WebResourceResponse {
+  if (req.wait && !req.raw && cache.mayFetch()) {
+    // Few images, on a screen that needs the server anyway: the body waits for the background fetch, bounded
+    return WebResourceResponse("image/jpeg", null, 200, "OK", noStore(), LazyCoverStream {
+      runBlocking { cache.awaitStandard(req.itemId, req.updatedAt, waitMs) }?.let { FileInputStream(it.file) }
+    })
+  }
+  // Never waits on the network: a miss is a 404 now (the card shows its title) and the cover is fetched in the background
+  if (!req.raw) return cache.standard(req.itemId, req.updatedAt)?.let { fileResponse(it) } ?: notFound()
   // Offline answers come straight from the index: an older cached version beats no cover
   if (!cache.mayFetch()) return cache.newestCached(req.itemId)?.let { fileResponse(it) } ?: notFound()
-  // Chromium reads the body on its own thread, so the download happens there, not on the interception thread
+  // The original streams from the server; Chromium reads the body on its own thread, at most until the answer starts
   val body = LazyCoverStream {
-    when (val answer = runBlocking { if (req.raw) cache.raw(req.itemId, req.updatedAt) else cache.standard(req.itemId, req.updatedAt) }) {
+    when (val answer = runBlocking { cache.raw(req.itemId, req.updatedAt) }) {
       is CoverAnswer.Cached -> FileInputStream(answer.entry.file)
       is CoverAnswer.Stream -> answer.body
       CoverAnswer.Miss -> null

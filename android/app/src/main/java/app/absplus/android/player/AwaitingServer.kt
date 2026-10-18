@@ -143,6 +143,13 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
   fun onQueueBlocked(item: PlaylistQueueItem, serverConfigId: String, playWhenReady: Boolean = true): AwaitingAction? =
           startWait(Blocked(item, serverConfigId, playWhenReady))
 
+  /** Android refused the service the start of [item] from the background: it waits for a Play, which is no failed resume. */
+  fun onStartRefused(item: PlaylistQueueItem, serverConfigId: String, playWhenReady: Boolean) {
+    if (!resumeInFlight) waitingSince = clock()
+    resumeInFlight = false
+    wait = Blocked(item, serverConfigId, playWhenReady)
+  }
+
   /**
    * The play request of [resume] failed. The server answers but refuses: give up at once. It is away again, or a proxy
    * answered for it ([isServerGoneStatus]): wait as before (a failed resume; the third in a row gives up).

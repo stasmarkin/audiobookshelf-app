@@ -1,5 +1,6 @@
 package app.absplus.android.plugins
 
+import app.absplus.android.media.CoverCache
 import android.content.Context
 import app.absplus.android.db.replica.DEFAULT_SEARCH_LIMIT
 import app.absplus.android.db.replica.DEFAULT_SHELF_LIMIT
@@ -169,6 +170,9 @@ class AbsData : Plugin() {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+  // A cover the WebView was refused is stored now: the app asks for it again
+  private val coverReady: (String) -> Unit = { itemId -> scope.launch { notifyListeners("onCoverReady", JSObject().put("itemId", itemId)) } }
+
   override fun load() {
     SyncRuntime.ensureInit(context)
     scope.launch {
@@ -183,9 +187,12 @@ class AbsData : Plugin() {
       }
     }
     scope.launch { SyncEngine.syncState.collect { notifyListeners("onSyncState", syncState(it)) } }
+    CoverCache.instance?.onCoverReady = coverReady
   }
 
   override fun handleOnDestroy() {
+    // Only our own listener: a newer plugin instance may have set its own already
+    CoverCache.instance?.let { if (it.onCoverReady === coverReady) it.onCoverReady = null }
     scope.cancel()
     io.cancel()
     super.handleOnDestroy()

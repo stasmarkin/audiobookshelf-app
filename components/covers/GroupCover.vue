@@ -34,7 +34,8 @@ export default {
       isFannedOut: false,
       isDetached: false,
       isAttaching: false,
-      isInit: false
+      isInit: false,
+      initGeneration: 0
     }
   },
   watch: {
@@ -46,6 +47,11 @@ export default {
           this.$nextTick(this.init)
         }
       }
+    },
+    // The DOM is built by hand: a cover native announced as ready needs a rebuild to be asked for again
+    coverEpochKey() {
+      this.isInit = false
+      this.$nextTick(this.init)
     }
   },
   computed: {
@@ -55,6 +61,10 @@ export default {
     },
     store() {
       return this.$store || this.$nuxt.$store
+    },
+    coverEpochKey() {
+      const epochs = this.store.state.globals.coverEpochs || {}
+      return this.bookItems.map((book) => epochs[book.id] || 0).join(',')
     },
     router() {
       return this.$router || this.$nuxt.$router
@@ -138,11 +148,9 @@ export default {
     async init() {
       if (this.isInit) return
       this.isInit = true
+      // A rebuild (a cover announced as ready) may start while an earlier one awaits its probes: only the latest draws
+      const generation = ++this.initGeneration
 
-      if (this.coverDiv) {
-        this.coverDiv.remove()
-        this.coverDiv = null
-      }
       var validCovers = this.bookItems
         .map((bookItem) => {
           return {
@@ -152,6 +160,7 @@ export default {
         })
         .filter((b) => b.coverUrl !== '')
       if (!validCovers.length) {
+        this.replaceCoverDiv(null)
         this.noValidCovers = true
         return
       }
@@ -160,11 +169,13 @@ export default {
       validCovers = validCovers.slice(0, 10)
       // Every cover is probed, also a single one drawn with a background: a cover route can fail offline
       var probes = await Promise.all(validCovers.map((cover) => this.probeCover(cover.coverUrl)))
+      if (generation !== this.initGeneration) return
       validCovers = shownGroupCovers(
         validCovers.map((cover, i) => ({ ...cover, needsBg: probes[i].needsBg })),
         probes.map((probe) => probe.loaded)
       )
       if (!validCovers.length) {
+        this.replaceCoverDiv(null)
         this.noValidCovers = true
         return
       }
@@ -195,10 +206,13 @@ export default {
 
       this.coverImageEls = coverImageEls
 
-      if (this.$refs.wrapper) {
-        this.coverDiv = outerdiv
-        this.$refs.wrapper.appendChild(outerdiv)
-      }
+      if (this.$refs.wrapper) this.replaceCoverDiv(outerdiv)
+    },
+    /** The previous covers stay until their replacement is ready, then go. */
+    replaceCoverDiv(div) {
+      if (this.coverDiv) this.coverDiv.remove()
+      this.coverDiv = div
+      if (div) this.$refs.wrapper.appendChild(div)
     }
   },
   mounted() {},
