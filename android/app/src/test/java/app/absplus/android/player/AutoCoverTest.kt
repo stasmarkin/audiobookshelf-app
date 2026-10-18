@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -115,6 +116,23 @@ class AutoCoverTest {
     idle()
     assertEquals(COVER_PREFETCH_LIMIT, fetched.size)
     assertEquals((1..COVER_PREFETCH_LIMIT).map { "li$it" }.toSet(), fetched.toSet())
+  }
+
+  @Test fun aCoverAskedAfterASwitchIsNotJoinedToThePreviousServersPrefetch() {
+    val paused = kotlinx.coroutines.test.StandardTestDispatcher()
+    var active: ServerConnectionConfig? = server
+    val other = ServerConnectionConfig("other", 1, "Other", "https://other.example", "2.20.0", "u2", "user", "tok2", null)
+    val queued = CoverCache(store, CoverFetcher { config, itemId, _ ->
+      fetched += "${config.id}:$itemId"
+      FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(byteArrayOf(1, 2, 3)), 3)
+    }, { active }, { state }, { _, _ -> null }, CoroutineScope(SupervisorJob() + paused))
+    queued.prefetch(listOf("li1" to 1L))
+    active = other
+    var answer: app.absplus.android.media.CoverAnswer? = null
+    CoroutineScope(paused).launch { answer = queued.standard("li1", 1L) }
+    paused.scheduler.advanceUntilIdle()
+    assertEquals(listOf("other:li1"), fetched.toList())
+    assertTrue(answer.toString(), answer is app.absplus.android.media.CoverAnswer.Cached)
   }
 
   @Test fun prefetchQueuedForAnotherServerIsDropped() {

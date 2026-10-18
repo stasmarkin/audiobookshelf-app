@@ -201,9 +201,9 @@ class CoverCache(
     return CoverAnswer.Stream(fetched.mime, fetched.body)
   }
 
-  /** [serverConfigId]: the server the request is for; null is whichever is active when a slot frees up. */
-  private suspend fun fetchOnce(itemId: String, version: Long, serverConfigId: String? = null): Fetched? {
-    val key = "${itemId}_$version"
+  /** [serverConfigId]: the server the request is for, by default the active one; a download for another is not shared. */
+  private suspend fun fetchOnce(itemId: String, version: Long, serverConfigId: String? = activeServer()?.id): Fetched? {
+    val key = "${itemId}_$version@$serverConfigId"
     val job = synchronized(inFlight) {
       inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { permits.withPermit { download(itemId, version, serverConfigId) } }.also { job ->
         inFlight[key] = job
@@ -216,7 +216,7 @@ class CoverCache(
   private fun download(itemId: String, version: Long, serverConfigId: String?): Fetched? {
     // The server may have gone away, or another one become active, while this request waited for a free slot
     if (!mayFetch()) return null
-    val config = activeServer()?.takeIf { serverConfigId == null || it.id == serverConfigId } ?: return null
+    val config = activeServer()?.takeIf { it.id == serverConfigId } ?: return null
     val fetched = fetcher.fetch(config, itemId, raw = false) ?: return null
     return fetched.body.use { body ->
       val ext = fetched.ext
