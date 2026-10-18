@@ -80,14 +80,19 @@ class CoverStore(
     }
   }
 
-  /** Stores a new version, replacing older versions of [itemId]; null when nothing was stored. */
-  fun put(itemId: String, updatedAt: Long, ext: String, write: (OutputStream) -> Unit): CoverEntry? {
+  /**
+   * Stores a new version, replacing older versions of [itemId]; null when nothing was stored. [accept] is asked again
+   * just before the file replaces the cached one (the download may no longer be wanted).
+   */
+  fun put(itemId: String, updatedAt: Long, ext: String, accept: () -> Boolean = { true }, write: (OutputStream) -> Unit): CoverEntry? {
     if (!DownloadIdentifiers.isSafe(itemId) || updatedAt < 0 || ext !in COVER_EXTENSIONS) return null
     if (isOlderThanCached(itemId, updatedAt)) return null
     val base = "${itemId}_$updatedAt"
-    val tmp = File(dir, "$base.$TMP_EXTENSION")
+    var tmp: File? = null
     try {
       dir.mkdirs()
+      // Its own temporary file: two writes of one version (two servers' downloads) must not write into each other
+      tmp = File.createTempFile("$base.", ".$TMP_EXTENSION", dir)
       FileOutputStream(tmp).use { write(LimitedOutputStream(it, maxFileBytes)) }
       val bytes = tmp.length()
       if (bytes == 0L) throw IOException("empty cover")
@@ -95,6 +100,7 @@ class CoverStore(
       synchronized(lock) {
         // A newer version may have landed while this one was being written.
         if (isOlderThanCached(itemId, updatedAt)) throw IOException("a newer cover is cached")
+        if (!accept()) throw IOException("cover no longer wanted")
         if (!tmp.renameTo(file)) throw IOException("rename failed: $file")
         file.setLastModified(clock())
         entries.remove(itemId)?.let { old ->
@@ -108,7 +114,7 @@ class CoverStore(
         return entry
       }
     } catch (e: Exception) {
-      tmp.delete()
+      tmp?.delete()
       return null
     }
   }

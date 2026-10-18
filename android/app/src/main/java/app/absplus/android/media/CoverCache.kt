@@ -218,10 +218,12 @@ class CoverCache(
     if (!mayFetch()) return null
     val config = activeServer()?.takeIf { it.id == serverConfigId } ?: return null
     val fetched = fetcher.fetch(config, itemId, raw = false) ?: return null
+    // The answer of a server no longer active goes to the caller, never into the cache shared by servers
+    fun stillActive() = activeServer()?.id == serverConfigId
     return fetched.body.use { body ->
       val ext = fetched.ext
-      if (ext != null) {
-        store.put(itemId, version, ext) { body.copyTo(it) }?.let { Fetched.Stored(it) }
+      if (ext != null && stillActive()) {
+        store.put(itemId, version, ext, ::stillActive) { body.copyTo(it) }?.let { Fetched.Stored(it) }
       } else {
         readUpTo(body, MAX_COVER_FILE_BYTES)?.let { Fetched.Unstored(fetched.mime, it) }
       }

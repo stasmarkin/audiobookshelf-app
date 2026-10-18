@@ -199,4 +199,36 @@ class CoverStoreTest {
     store.touch(entry)
     assertTrue(entry.file.lastModified() > firstTouch)
   }
+  @Test
+  fun twoWritesOfOneVersionDoNotMix() {
+    val store = store()
+    val firstStarted = java.util.concurrent.CountDownLatch(1)
+    val secondDone = java.util.concurrent.CountDownLatch(1)
+    val first = Thread {
+      store.put("A", 1, "jpg") {
+        it.write(1)
+        it.flush()
+        firstStarted.countDown()
+        secondDone.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        it.write(byteArrayOf(1, 1))
+      }
+    }
+    first.start()
+    assertTrue(firstStarted.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    store.put("A", 1, "jpg") { it.write(byteArrayOf(2, 2, 2, 2)) }
+    secondDone.countDown()
+    first.join(5_000)
+
+    val content = store.find("A", 1)!!.file.readBytes().toList()
+    assertTrue("one whole write, not a mix: $content", content == listOf<Byte>(1, 1, 1) || content == listOf<Byte>(2, 2, 2, 2))
+    assertEquals("no temporary file left", setOf("A_1.jpg"), files())
+  }
+
+  @Test
+  fun aWriteNoLongerWantedIsNotStored() {
+    val store = store()
+    assertNull(store.put("A", 1, "jpg", accept = { false }) { it.write(byteArrayOf(1)) })
+    assertNull(store.find("A", 1))
+    assertEquals(emptySet<String>(), files())
+  }
 }

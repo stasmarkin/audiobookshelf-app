@@ -135,6 +135,19 @@ class AutoCoverTest {
     assertTrue(answer.toString(), answer is app.absplus.android.media.CoverAnswer.Cached)
   }
 
+  @Test fun anAnswerOfAServerNoLongerActiveIsNotCached() = runBlocking {
+    var active: ServerConnectionConfig? = server
+    val other = ServerConnectionConfig("other", 1, "Other", "https://other.example", "2.20.0", "u2", "user", "tok2", null)
+    val switching = CoverCache(store, CoverFetcher { _, _, _ ->
+      // The user switches servers while the answer is on its way
+      active = other
+      FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(byteArrayOf(1, 2, 3)), 3)
+    }, { active }, { state }, { _, _ -> null }, scope)
+    val answer = switching.standard("li1", 1L)
+    assertTrue("the caller still gets it: $answer", answer is app.absplus.android.media.CoverAnswer.Stream)
+    assertEquals(null, store.find("li1", 1L))
+  }
+
   @Test fun prefetchQueuedForAnotherServerIsDropped() {
     val paused = kotlinx.coroutines.test.StandardTestDispatcher()
     var active: ServerConnectionConfig? = server
