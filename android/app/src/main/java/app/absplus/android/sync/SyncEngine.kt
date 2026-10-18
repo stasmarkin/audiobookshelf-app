@@ -682,8 +682,8 @@ object SyncEngine {
             else -> deps.log("Catalog ${config.id}: ${result.libraries} libraries, failed ${result.failedLibraries}")
           }
           applyBufferedEvents(passId)
-          // A stale stop says nothing about the server: on a cold start it is the config JS sets meanwhile
-          val stale = result?.stoppedBy == HttpOutcome.STALE && !staleRedo
+          // A stale stop says nothing about the server: on a cold start it is the config JS sets meanwhile; not after a logout
+          val stale = result?.stoppedBy == HttpOutcome.STALE && !staleRedo && deps.signedIn()
           val (again, afterReconnect) = synchronized(lock) {
             val more = catalogAgain || stale
             val socket = socketAgain
