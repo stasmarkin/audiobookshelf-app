@@ -120,10 +120,18 @@ class AutoRootMenuTest {
   }
 
   @Test fun searchCacheKeyFollowsTheSnapshot() {
-    val key = autoSearchCacheKey("dune", "srv", 1)
-    assertEquals(key, autoSearchCacheKey("dune", "srv", 1))
-    assertNotEquals(key, autoSearchCacheKey("dune", "srv", 2))
-    assertNotEquals(key, autoSearchCacheKey("dune", "srv2", 1))
-    assertNotEquals(key, autoSearchCacheKey("dune2", "srv", 1))
+    val key = autoSearchCacheKey("dune", "srv", 1, true, 0)
+    assertEquals(key, autoSearchCacheKey("dune", "srv", 1, true, 0))
+    assertNotEquals(key, autoSearchCacheKey("dune", "srv", 2, true, 0))
+    assertNotEquals(key, autoSearchCacheKey("dune", "srv2", 1, true, 0))
+    assertNotEquals(key, autoSearchCacheKey("dune2", "srv", 1, true, 0))
+    assertNotEquals("an answer before the server load is not reused after it", key, autoSearchCacheKey("dune", "srv", 1, false, 0))
+    assertNotEquals("a download changed the marks", key, autoSearchCacheKey("dune", "srv", 1, true, 1))
+  }
+
+  @Test fun onlyAutoControllersStartWithoutAChoice() {
+    listOf(ANDROID_AUTO_PKG_NAME, ANDROID_AUTO_SIMULATOR_PKG_NAME, ANDROID_AUTOMOTIVE_PKG_NAME).forEach { assertTrue(it, isAutoController(it)) }
+    listOf(null, "", "android.media.session.MediaController", "com.android.bluetooth", "app.absplus.android", ANDROID_WEARABLE_PKG_NAME)
+      .forEach { assertFalse(it.toString(), isAutoController(it)) }
   }
 }

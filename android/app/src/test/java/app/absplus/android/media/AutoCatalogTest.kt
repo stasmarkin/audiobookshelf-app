@@ -48,7 +48,7 @@ class AutoCatalogTest {
           reader = { if (hasReader) reader else null },
           activeServerId = { active },
           progressRows = { sc -> progress.filter { it.serverConfigId == sc } },
-          hasAudio = { sc, lib -> db.items().rows(sc, lib).any { it.numTracks > 0 || it.numEpisodes > 0 } },
+          hasAudio = { sc, lib -> db.items().hasAudio(sc, lib) },
           episodeOwner = { sc, id -> db.episodes().byIds(sc, listOf(id)).firstOrNull()?.libraryItemId },
           localItems = { localItemsCalls++; copies },
           downloadMark = resolverDownloadMark { _, _ -> true })

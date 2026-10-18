@@ -8,13 +8,17 @@ import android.support.v4.media.MediaBrowserCompat
 import android.util.Log
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.managers.DbManager
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
 import app.absplus.android.sync.SyncEngine
 import app.absplus.android.server.ApiHandler
 import com.getcapacitor.JSObject
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,53 +53,116 @@ internal suspend fun <T> replicaOr(online: () -> Boolean, replica: suspend () ->
   }
 }
 
+/** The server fallback's caches are written from OkHttp threads and read by concurrent browse requests; lists keep their order. */
+private fun <K, V> orderedMap(): MutableMap<K, V> = Collections.synchronizedMap(LinkedHashMap())
+
 /** Р21: without the server a downloaded match is preferred, since only it can play. */
 internal fun voicePick(found: List<LibraryItem>, online: Boolean): LibraryItem? =
         if (online) found.firstOrNull() else found.firstOrNull { it.localLibraryItemId != null } ?: found.firstOrNull()
 
-/** Р22: Play without a choice resumes the latest started item, else the first downloaded book. */
-internal fun firstPlayableOf(continueItems: List<ItemInProgress>, localBooks: List<LibraryItemWrapper>): Pair<LibraryItemWrapper, PodcastEpisode?>? =
-        continueItems.firstOrNull()?.let { it.libraryItemWrapper to it.episode } ?: localBooks.firstOrNull()?.let { it to null }
+/**
+ * Р22: Play without a choice resumes the latest started item of the replica, then one the server reported in progress,
+ * then the first downloaded book. Without the server (Р21) a downloaded candidate comes first, since only it can play.
+ */
+internal fun firstPlayableOf(
+        continueItems: List<ItemInProgress>,
+        serverItems: List<ItemInProgress>,
+        localBooks: List<LibraryItemWrapper>,
+        online: Boolean = true
+): Pair<LibraryItemWrapper, PodcastEpisode?>? {
+  val candidates = continueItems + serverItems
+  fun downloaded(item: ItemInProgress) = item.libraryItemWrapper is LocalLibraryItem ||
+          (if (item.episode != null) item.episode.localEpisodeId != null else (item.libraryItemWrapper as? LibraryItem)?.localLibraryItemId != null)
+  val pick = if (online) candidates.firstOrNull() else candidates.firstOrNull(::downloaded)
+  return pick?.let { it.libraryItemWrapper to it.episode }
+          ?: localBooks.firstOrNull()?.let { it to null }
+          ?: candidates.firstOrNull()?.let { it.libraryItemWrapper to it.episode }
+}
+
+/**
+ * Continue: the replica's items, plus those the server reported for libraries the replica does not have; one entry per
+ * item (episode), the latest progress first.
+ */
+internal fun mergeContinue(replica: List<ItemInProgress>, server: List<ItemInProgress>, replicaLibraryIds: Set<String>): List<ItemInProgress> {
+  val fromServer = server.filter { (it.libraryItemWrapper as? LibraryItem)?.libraryId !in replicaLibraryIds }
+  return (replica + fromServer).distinctBy { it.libraryItemWrapper.id to it.episode?.id }
+          .sortedByDescending { it.progressLastUpdate }.take(AUTO_CONTINUE_LIMIT)
+}
+
+/** Only the latest of overlapping play requests starts: a slow earlier resolve must not replace a later choice. */
+internal class LatestRequest {
+  private val counter = AtomicLong()
+  fun next(): Long = counter.incrementAndGet()
+  fun isLatest(request: Long): Boolean = counter.get() == request
+}
 
 /**
  * When [MediaManager.refreshSnapshot] recomputes the snapshot, only rereads its progress, or keeps it. A change of the
- * catalog, the progress or the user, and a switch of the active server, make it stale; a playback tick only rereads the
- * progress, at most every [progressEveryMs].
+ * catalog, the user or the downloaded copies, and a switch of the active server, recompute it. A progress change
+ * recomputes at most every [everyMs] (Continue moves), its progress map is read at once; a playback tick only rereads
+ * the progress, at most every [everyMs].
  */
-internal class SnapshotGate(private val clock: () -> Long, private val progressEveryMs: Long = 10_000) {
+internal class SnapshotGate(private val clock: () -> Long, private val everyMs: Long = 10_000) {
   enum class Action { RECOMPUTE, PROGRESS, NONE }
-  data class Decision(val action: Action, val version: Long, val ticks: Long)
+  data class Decision(val action: Action, val catalog: Long, val progress: Long, val ticks: Long, val copies: Long)
 
-  private var version = 1L
-  private var builtVersion = 0L
-  private var builtServer: String? = null
+  private var catalog = 1L
+  private var progress = 0L
   private var ticks = 0L
+  private var builtCatalog = 0L
+  private var builtProgress = 0L
+  private var builtCopies = 0L
+  private var builtServer: String? = null
+  private var readProgress = 0L
   private var readTicks = 0L
+  private var recomputedAt = 0L
   private var progressReadAt = 0L
 
   @Synchronized fun onData(scope: String) {
     when (scope) {
-      "catalog", "progress", "user" -> version++
+      "catalog", "user" -> catalog++
+      "progress" -> progress++
       "playback" -> ticks++
     }
   }
 
-  @Synchronized fun decide(activeServerId: String?): Decision = Decision(when {
-    builtVersion != version || builtServer != activeServerId -> Action.RECOMPUTE
-    ticks != readTicks && clock() - progressReadAt >= progressEveryMs -> Action.PROGRESS
-    else -> Action.NONE
-  }, version, ticks)
+  /** [copiesVersion]: the version of the downloaded copies, which the download marks follow. */
+  @Synchronized fun decide(activeServerId: String?, copiesVersion: Long = 0): Decision {
+    val now = clock()
+    val action = when {
+      builtCatalog != catalog || builtServer != activeServerId || builtCopies != copiesVersion -> Action.RECOMPUTE
+      builtProgress != progress && now - recomputedAt >= everyMs -> Action.RECOMPUTE
+      readProgress != progress -> Action.PROGRESS
+      ticks != readTicks && now - progressReadAt >= everyMs -> Action.PROGRESS
+      else -> Action.NONE
+    }
+    return Decision(action, catalog, progress, ticks, copiesVersion)
+  }
 
   /** [decision] was carried out for [activeServerId]; changes that came meanwhile stay pending. */
   @Synchronized fun done(decision: Decision, activeServerId: String?) {
     if (decision.action == Action.NONE) return
+    val now = clock()
     if (decision.action == Action.RECOMPUTE) {
-      builtVersion = decision.version
+      builtCatalog = decision.catalog
+      builtProgress = decision.progress
+      builtCopies = decision.copies
       builtServer = activeServerId
+      recomputedAt = now
     }
+    readProgress = decision.progress
     readTicks = decision.ticks
-    progressReadAt = clock()
+    progressReadAt = now
   }
+}
+
+/** [snapshot] with a newer progress map; Continue follows its order (the item switched to comes first). */
+internal fun withProgress(snapshot: AutoSnapshot, progress: Map<String, MediaProgress>): AutoSnapshot {
+  val continueItems = snapshot.continueItems.map { item ->
+    val key = item.episode?.let { "${item.libraryItemWrapper.id}-${it.id}" } ?: item.libraryItemWrapper.id
+    progress[key]?.let { item.copy(progressLastUpdate = it.lastUpdate) } ?: item
+  }.sortedByDescending { it.progressLastUpdate }
+  return snapshot.copy(progress = progress, continueItems = continueItems)
 }
 
 /** The current [AutoSnapshot], refreshed as [gate] decides; recomputes never overlap. */
@@ -104,6 +171,7 @@ internal class SnapshotCache(
         private val activeServer: () -> String?,
         private val compute: suspend () -> AutoSnapshot?,
         private val progress: suspend () -> Map<String, MediaProgress>?,
+        private val copiesVersion: () -> Long = { 0L },
         private val onError: (Exception) -> Unit = {}
 ) {
   @Volatile var current: AutoSnapshot? = null
@@ -112,11 +180,11 @@ internal class SnapshotCache(
 
   suspend fun refresh(): AutoSnapshot? = mutex.withLock {
     val active = activeServer()
-    val decision = gate.decide(active)
+    val decision = gate.decide(active, copiesVersion())
     try {
       when (decision.action) {
         SnapshotGate.Action.RECOMPUTE -> current = compute()
-        SnapshotGate.Action.PROGRESS -> progress()?.let { map -> current = current?.copy(progress = map) }
+        SnapshotGate.Action.PROGRESS -> progress()?.let { map -> current = current?.let { withProgress(it, map) } }
         SnapshotGate.Action.NONE -> {}
       }
       gate.done(decision, active)
@@ -135,16 +203,16 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   // Items the server answers brought, by id: what a selected node starts without reading it again
   private var serverLibraryItems: MutableMap<String, LibraryItem> = ConcurrentHashMap()
 
-  private var cachedLibraryAuthors : MutableMap<String, MutableMap<String, LibraryAuthorItem>> = hashMapOf()
-  private var cachedLibraryAuthorItems : MutableMap<String, MutableMap<String, List<LibraryItem>>> = hashMapOf()
-  private var cachedLibraryAuthorSeriesItems : MutableMap<String, MutableMap<String, List<LibraryItem>>> = hashMapOf()
-  private var cachedLibrarySeries : MutableMap<String, List<LibrarySeriesItem>> = hashMapOf()
-  private var cachedLibrarySeriesItem : MutableMap<String, MutableMap<String, List<LibraryItem>>> = hashMapOf()
-  private var cachedLibraryCollections : MutableMap<String, MutableMap<String, LibraryCollection>> = hashMapOf()
-  private var cachedLibraryRecentShelves : MutableMap<String, MutableList<LibraryShelfType>> = hashMapOf()
-  private var cachedLibraryDiscovery : MutableMap<String, MutableList<LibraryItem>> = hashMapOf()
-  private var cachedLibraryPodcasts : MutableMap<String, MutableMap<String, LibraryItem>> = hashMapOf()
-  private var isLibraryPodcastsCached : MutableMap<String, Boolean> = hashMapOf()
+  private var cachedLibraryAuthors : MutableMap<String, MutableMap<String, LibraryAuthorItem>> = ConcurrentHashMap()
+  private var cachedLibraryAuthorItems : MutableMap<String, MutableMap<String, List<LibraryItem>>> = ConcurrentHashMap()
+  private var cachedLibraryAuthorSeriesItems : MutableMap<String, MutableMap<String, List<LibraryItem>>> = ConcurrentHashMap()
+  private var cachedLibrarySeries : MutableMap<String, List<LibrarySeriesItem>> = ConcurrentHashMap()
+  private var cachedLibrarySeriesItem : MutableMap<String, MutableMap<String, List<LibraryItem>>> = ConcurrentHashMap()
+  private var cachedLibraryCollections : MutableMap<String, MutableMap<String, LibraryCollection>> = ConcurrentHashMap()
+  private var cachedLibraryRecentShelves : MutableMap<String, MutableList<LibraryShelfType>> = ConcurrentHashMap()
+  private var cachedLibraryDiscovery : MutableMap<String, MutableList<LibraryItem>> = ConcurrentHashMap()
+  private var cachedLibraryPodcasts : MutableMap<String, MutableMap<String, LibraryItem>> = ConcurrentHashMap()
+  private var isLibraryPodcastsCached : MutableMap<String, Boolean> = ConcurrentHashMap()
   var allLibraryPersonalizationsDone : Boolean = false
   private var libraryPersonalizationsDone : Int = 0
 
@@ -173,9 +241,11 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   private val androidAutoLoadLock = Any()
 
   private val snapshotGate = SnapshotGate({ System.currentTimeMillis() })
-  private val snapshots = SnapshotCache(snapshotGate, { catalog.activeServer() }, { catalog.snapshot() }, { catalog.progressMap() }) {
+  private val snapshots = SnapshotCache(snapshotGate, { catalog.activeServer() }, { catalog.snapshot() }, { catalog.progressMap() },
+          { DbManager.localLibraryItemsVersion }) {
     Log.e(tag, "refreshSnapshot: replica read failed", it)
   }
+  private val playRequests = LatestRequest()
   private val watchingDataChanges = AtomicBoolean(false)
 
   /** The Android Auto root from the replica of the active server; see [refreshSnapshot]. */
@@ -193,6 +263,21 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     }
     return snapshots.refresh()
   }
+
+  /**
+   * The snapshot for a deep node: the current one of the same server at once (a refresh runs behind it), so a node does
+   * not wait for a recompute; without one, or after a server switch, the fresh one.
+   */
+  suspend fun snapshotForNode(): AutoSnapshot? {
+    val current = snapshot
+    if (current == null || current.serverConfigId != catalog.activeServer()) return refreshSnapshot()
+    androidAutoIOScope.launch { refreshSnapshot() }
+    return current
+  }
+
+  /** Continue: the snapshot's items and the server's for libraries the replica lacks. */
+  fun continueItems(snap: AutoSnapshot?): List<ItemInProgress> =
+          mergeContinue(snap?.continueItems.orEmpty(), serverItemsInProgress, snap?.libraries.orEmpty().mapTo(HashSet()) { it.id })
 
   /** The libraries of the snapshot, then the server's libraries the snapshot lacks (never reconciled). */
   private fun autoLibraries(snap: AutoSnapshot? = snapshot): List<Library> {
@@ -313,10 +398,15 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
    * replica, then the server while reachable. [cb] runs on the main thread.
    */
   fun resolveForPlay(mediaId: String, cb: (LibraryItemWrapper?, PodcastEpisode?) -> Unit) {
+    val request = playRequests.next()
     androidAutoIOScope.launch {
       val (item, episode) = resolveNow(mediaId)
-      mainHandler.post { cb(item, episode) }
+      postIfLatest(request) { cb(item, episode) }
     }
+  }
+
+  private fun postIfLatest(request: Long, block: () -> Unit) {
+    mainHandler.post { if (playRequests.isLatest(request)) block() else Log.d(tag, "A later play request replaced request $request") }
   }
 
   private suspend fun resolveNow(mediaId: String): Pair<LibraryItemWrapper?, PodcastEpisode?> {
@@ -338,24 +428,28 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   }
 
   /** What a spoken "play <query>" starts (Р21); an empty query is Play without a choice. [cb] runs on the main thread. */
-  fun findForVoice(query: String?, cb: (LibraryItemWrapper?) -> Unit) {
-    if (query.isNullOrEmpty()) return firstPlayable { item, _ -> cb(item) }
+  fun findForVoice(query: String?, cb: (LibraryItemWrapper?, PodcastEpisode?) -> Unit) {
+    if (query.isNullOrEmpty()) return firstPlayable(cb)
+    val request = playRequests.next()
     androidAutoIOScope.launch {
       val found = autoLibraries(snapshot ?: refreshSnapshot()).flatMap { library ->
         val result = search(library.id, query) ?: return@flatMap emptyList()
         (result.book.orEmpty() + result.podcast.orEmpty()).map { it.libraryItem }.filter { it.checkHasTracks() }
       }
       val pick = voicePick(found, online())
-      mainHandler.post { cb(pick) }
+      postIfLatest(request) { cb(pick, null) }
     }
   }
 
   /** Play without a choice (Р22). [cb] runs on the main thread. */
   fun firstPlayable(cb: (LibraryItemWrapper?, PodcastEpisode?) -> Unit) {
+    val request = playRequests.next()
     androidAutoIOScope.launch {
-      val continueItems = (snapshot ?: refreshSnapshot())?.continueItems.orEmpty()
-      val first = firstPlayableOf(continueItems, if (continueItems.isEmpty()) DeviceManager.dbManager.getLocalLibraryItems("book") else emptyList())
-      mainHandler.post { cb(first?.first, first?.second) }
+      val snap = snapshot ?: refreshSnapshot()
+      val replicaItems = snap?.continueItems.orEmpty()
+      val serverItems = continueItems(snap).filter { it !in replicaItems }
+      val first = firstPlayableOf(replicaItems, serverItems, DeviceManager.dbManager.getLocalLibraryItems("book"), online())
+      postIfLatest(request) { cb(first?.first, first?.second) }
     }
   }
 
@@ -437,19 +531,19 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     val serverConnConfig = if (DeviceManager.isConnectedToServer) DeviceManager.serverConnectionConfig else DeviceManager.deviceData.getLastServerConnectionConfig()
 
     if (!DeviceManager.isConnectedToServer || !DeviceManager.checkConnectivity(ctx) || serverConnConfig == null || serverConnConfig.id != serverConfigIdUsed) {
-      podcastEpisodeLibraryItemMap = mutableMapOf()
+      podcastEpisodeLibraryItemMap = ConcurrentHashMap()
       serverLibraries = listOf()
       serverLibraryItems = ConcurrentHashMap()
-      cachedLibraryAuthors = hashMapOf()
-      cachedLibraryAuthorItems = hashMapOf()
-      cachedLibraryAuthorSeriesItems = hashMapOf()
-      cachedLibrarySeries = hashMapOf()
-      cachedLibrarySeriesItem = hashMapOf()
-      cachedLibraryCollections = hashMapOf()
-      cachedLibraryRecentShelves = hashMapOf()
-      cachedLibraryDiscovery = hashMapOf()
-      cachedLibraryPodcasts = hashMapOf()
-      isLibraryPodcastsCached = hashMapOf()
+      cachedLibraryAuthors = ConcurrentHashMap()
+      cachedLibraryAuthorItems = ConcurrentHashMap()
+      cachedLibraryAuthorSeriesItems = ConcurrentHashMap()
+      cachedLibrarySeries = ConcurrentHashMap()
+      cachedLibrarySeriesItem = ConcurrentHashMap()
+      cachedLibraryCollections = ConcurrentHashMap()
+      cachedLibraryRecentShelves = ConcurrentHashMap()
+      cachedLibraryDiscovery = ConcurrentHashMap()
+      cachedLibraryPodcasts = ConcurrentHashMap()
+      isLibraryPodcastsCached = ConcurrentHashMap()
       serverItemsInProgress = listOf()
       allLibraryPersonalizationsDone = false
       libraryPersonalizationsDone = 0
@@ -507,7 +601,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
           else if (shelf.id == "listen-again") return@map
           else if (shelf.id == "recently-added") {
             if (!cachedLibraryRecentShelves.containsKey(libraryId)) {
-              cachedLibraryRecentShelves[libraryId] = mutableListOf()
+              cachedLibraryRecentShelves[libraryId] = CopyOnWriteArrayList()
             }
             if (cachedLibraryRecentShelves[libraryId]?.find { it.id == shelf.id } == null) {
               cachedLibraryRecentShelves[libraryId]!!.add(shelf)
@@ -515,7 +609,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
           }
           else if (shelf.id == "discover") {
             if (!cachedLibraryDiscovery.containsKey(libraryId)) {
-              cachedLibraryDiscovery[libraryId] = mutableListOf()
+              cachedLibraryDiscovery[libraryId] = CopyOnWriteArrayList()
             }
             (shelf as LibraryShelfBookEntity).entities?.map {
               cachedLibraryDiscovery[libraryId]!!.add(it)
@@ -527,7 +621,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
         } else if (shelf.type == "series") {
           if (shelf.id == "recent-series") {
             if (!cachedLibraryRecentShelves.containsKey(libraryId)) {
-              cachedLibraryRecentShelves[libraryId] = mutableListOf()
+              cachedLibraryRecentShelves[libraryId] = CopyOnWriteArrayList()
             }
             if (cachedLibraryRecentShelves[libraryId]?.find { it.id == shelf.id } == null) {
               cachedLibraryRecentShelves[libraryId]!!.add(shelf)
@@ -538,7 +632,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
           else if (shelf.id == "listen-again") return@map
           else if (shelf.id == "newest-episodes") {
             if (!cachedLibraryRecentShelves.containsKey(libraryId)) {
-              cachedLibraryRecentShelves[libraryId] = mutableListOf()
+              cachedLibraryRecentShelves[libraryId] = CopyOnWriteArrayList()
             }
             if (cachedLibraryRecentShelves[libraryId]?.find { it.id == shelf.id } == null) {
               cachedLibraryRecentShelves[libraryId]!!.add(shelf)
@@ -555,7 +649,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
         } else if (shelf.type == "podcast") {
           if (shelf.id == "recently-added"){
             if (!cachedLibraryRecentShelves.containsKey(libraryId)) {
-              cachedLibraryRecentShelves[libraryId] = mutableListOf()
+              cachedLibraryRecentShelves[libraryId] = CopyOnWriteArrayList()
             }
             if (cachedLibraryRecentShelves[libraryId]?.find { it.id == shelf.id } == null) {
               cachedLibraryRecentShelves[libraryId]!!.add(shelf)
@@ -567,7 +661,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
         } else if (shelf.type =="authors") {
           if (shelf.id == "newest-authors") {
             if (!cachedLibraryRecentShelves.containsKey(libraryId)) {
-              cachedLibraryRecentShelves[libraryId] = mutableListOf()
+              cachedLibraryRecentShelves[libraryId] = CopyOnWriteArrayList()
             }
             if (cachedLibraryRecentShelves[libraryId]?.find { it.id == shelf.id } == null) {
               cachedLibraryRecentShelves[libraryId]!!.add(shelf)
@@ -593,11 +687,11 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     }
     // Ensure that there is map for library
     if (!cachedLibraryPodcasts.containsKey(libraryId)) {
-      cachedLibraryPodcasts[libraryId] = mutableMapOf()
+      cachedLibraryPodcasts[libraryId] = orderedMap()
     }
     if (isLibraryPodcastsCached.getOrElse(libraryId) {false}) {
       Log.d(tag, "loadLibraryPodcasts: Found from cache: $libraryId")
-      cb(cachedLibraryPodcasts[libraryId]?.values?.sortedBy { libraryItem -> (libraryItem.media as Podcast).metadata.title })
+      cb(cachedLibraryPodcasts[libraryId]?.let { synchronized(it) { it.values.toList() } }?.sortedBy { libraryItem -> (libraryItem.media as Podcast).metadata.title })
     } else {
       apiHandler.getLibraryItems(libraryId) { libraryItems ->
         val libraryItemsWithAudio = libraryItems.filter { li -> li.checkHasTracks() }
@@ -652,7 +746,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   private fun serverLibrarySeriesItemsWithAudio(libraryId:String, seriesId:String, cb: (List<LibraryItem>) -> Unit) {
     // Check "cache" first
     if (!cachedLibrarySeriesItem.containsKey(libraryId)) {
-      cachedLibrarySeriesItem[libraryId] = hashMapOf()
+      cachedLibrarySeriesItem[libraryId] = orderedMap()
     }
     if (cachedLibrarySeriesItem[libraryId]!!.containsKey(seriesId)) {
       Log.d(tag, "Items for series $seriesId found from cache | Library $libraryId")
@@ -681,7 +775,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     // Check "cache" first
     if (cachedLibraryAuthors.containsKey(libraryId)) {
       Log.d(tag, "Authors with books found from cache | Library $libraryId ")
-      cb(cachedLibraryAuthors[libraryId]!!.values.toList())
+      cb(cachedLibraryAuthors[libraryId]!!.let { synchronized(it) { it.values.toList() } })
     } else {
       // Fetch data from server and add it to local "cache"
       apiHandler.getLibraryAuthors(libraryId) { authorItems ->
@@ -690,7 +784,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
         var authorItemsWithBooks = authorItems.filter { li -> li.bookCount != null && li.bookCount!! > 0 }
         authorItemsWithBooks = authorItemsWithBooks.sortedBy { it.name }
         // Ensure that there is map for library
-        cachedLibraryAuthors[libraryId] = mutableMapOf()
+        cachedLibraryAuthors[libraryId] = orderedMap()
         // Cache authors
         authorItemsWithBooks.forEach {
           if (!cachedLibraryAuthors[libraryId]!!.containsKey(it.id)) {
@@ -709,7 +803,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   private fun serverAuthorBooksWithAudio(libraryId:String, authorId:String, cb: (List<LibraryItem>) -> Unit) {
     // Ensure that there is map for library
     if (!cachedLibraryAuthorItems.containsKey(libraryId)) {
-        cachedLibraryAuthorItems[libraryId] = mutableMapOf()
+        cachedLibraryAuthorItems[libraryId] = orderedMap()
     }
     // Check "cache" first
     if (cachedLibraryAuthorItems[libraryId]!!.containsKey(authorId)) {
@@ -739,7 +833,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
     val authorSeriesKey = "$authorId|$seriesId"
     // Ensure that there is map for library
     if (!cachedLibraryAuthorSeriesItems.containsKey(libraryId)) {
-      cachedLibraryAuthorSeriesItems[libraryId] = mutableMapOf()
+      cachedLibraryAuthorSeriesItems[libraryId] = orderedMap()
     }
     // Check "cache" first
     if (cachedLibraryAuthorSeriesItems[libraryId]!!.containsKey(authorSeriesKey)) {
@@ -775,14 +869,14 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   private fun serverLibraryCollectionsWithAudio(libraryId:String, cb: (List<LibraryCollection>) -> Unit) {
     if (cachedLibraryCollections.containsKey(libraryId)) {
       Log.d(tag, "Collections with books found from cache | Library $libraryId ")
-      cb(cachedLibraryCollections[libraryId]!!.values.toList())
+      cb(cachedLibraryCollections[libraryId]!!.let { synchronized(it) { it.values.toList() } })
     } else {
       apiHandler.getLibraryCollections(libraryId) { libraryCollections ->
         Log.d(tag, "Collections with books loaded from server | Library $libraryId ")
         val libraryCollectionsWithAudio = libraryCollections.filter { lc -> lc.audiobookCount > 0 }
 
         // Cache collections
-        cachedLibraryCollections[libraryId] = hashMapOf()
+        cachedLibraryCollections[libraryId] = orderedMap()
         libraryCollectionsWithAudio.forEach {
           if (!cachedLibraryCollections[libraryId]!!.containsKey(it.id)) {
             cachedLibraryCollections[libraryId]!![it.id] = it
@@ -842,7 +936,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
   private fun loadPodcastItem(libraryId: String, libraryItemId: String, cb: (LibraryItem?) -> Unit) {
     // Ensure that there is map for library
     if (!cachedLibraryPodcasts.containsKey(libraryId)) {
-      cachedLibraryPodcasts[libraryId] = mutableMapOf()
+      cachedLibraryPodcasts[libraryId] = orderedMap()
     }
     if (cachedLibraryPodcasts[libraryId]!!.containsKey(libraryItemId)) {
       Log.d(tag, "loadPodcastItem: Podcast found from cache | Library $libraryItemId ")

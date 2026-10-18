@@ -17,8 +17,16 @@ internal fun servableWithoutServer(mediaId: String, readyLibraryIds: Set<String>
   return true
 }
 
-/** The key of Android Auto's cached search results: the same query after a reconcile or on another server searches again. */
-internal fun autoSearchCacheKey(query: String, serverConfigId: String?, generation: Long?): String = "$query\u0000$serverConfigId\u0000$generation"
+/**
+ * The key of Android Auto's cached search results: the same query searches again after a reconcile, on another server,
+ * once the server load finished (a never reconciled library is searched on the server) and after a download changed.
+ */
+internal fun autoSearchCacheKey(query: String, serverConfigId: String?, generation: Long?, firstLoadDone: Boolean, copiesVersion: Long): String =
+  listOf(query, serverConfigId, generation, firstLoadDone, copiesVersion).joinToString("\u0000")
+
+/** Android Auto (or its simulator, or Automotive) is the controller of a session command, not a headset or the widget. */
+internal fun isAutoController(packageName: String?): Boolean =
+  packageName == ANDROID_AUTO_PKG_NAME || packageName == ANDROID_AUTO_SIMULATOR_PKG_NAME || packageName == ANDROID_AUTOMOTIVE_PKG_NAME
 
 /** The nodes served without any replica: see [servableWithoutServer]. */
 internal fun servableBeforeFirstLoad(mediaId: String): Boolean = servableWithoutServer(mediaId, emptySet())

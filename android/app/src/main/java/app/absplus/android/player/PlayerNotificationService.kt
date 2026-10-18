@@ -189,8 +189,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private val startGate = StartGate()
   private val pauseOrigin = PauseOrigin()
 
-  var isAndroidAuto = false
-    private set
+  private var isAndroidAuto = false
 
   // Playlist queue for native background advancement (bypasses WebView/JS layer)
   data class PlaylistQueueItem(
@@ -2441,7 +2440,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     val fromReplica = snapshot?.libraries.orEmpty().filter { firstLoadDone || it.id in ready }
     val ids = fromReplica.mapTo(HashSet()) { it.id }
     val libraries = fromReplica + manager?.serverLibraries.orEmpty().filter { it.id !in ids }
-    val continueItems = if (firstLoadDone || ready.isNotEmpty()) snapshot?.continueItems.orEmpty() else emptyList()
+    val continueItems = when {
+      firstLoadDone -> manager?.continueItems(snapshot) ?: snapshot?.continueItems.orEmpty()
+      ready.isNotEmpty() -> snapshot?.continueItems.orEmpty()
+      else -> emptyList()
+    }
     val recentsLoaded = ready.isNotEmpty() || manager?.allLibraryPersonalizationsDone == true
     return BrowseTree(this, continueItems, libraries, recentsLoaded)
   }
@@ -2538,8 +2541,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   }
 
   private suspend fun loadAutoChildren(parentMediaId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
-    // Every node reads the fresh snapshot: after a restart the host may ask a deep node first
-    val snap = mediaManager.refreshSnapshot()
+    // The root and Continue wait for a stale snapshot; a deep node takes the current one of the same server (after a
+    // restart the host may ask a deep node first, which then waits for the first one)
+    val snap = if (parentMediaId == AUTO_MEDIA_ROOT || parentMediaId == CONTINUE_ROOT) mediaManager.refreshSnapshot() else mediaManager.snapshotForNode()
     // Prevent crashing if app is restarted while browsing (nodes the replica or the device can answer are served)
     if (!servableWithoutServer(parentMediaId, snap?.readyLibraryIds.orEmpty()) && !firstLoadDone) {
       result.sendResult(null)
@@ -2576,7 +2580,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       result.sendResult(localBrowseItems)
     } else if (parentMediaId == CONTINUE_ROOT) {
       val localBrowseItems: MutableList<MediaBrowserCompat.MediaItem> = mutableListOf()
-      snap?.continueItems.orEmpty().forEach { itemInProgress ->
+      mediaManager.continueItems(snap).forEach { itemInProgress ->
         val progress: MediaProgressWrapper?
         val mediaDescription: MediaDescriptionCompat
         if (itemInProgress.episode != null) {
@@ -3156,7 +3160,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     autoIOScope.launch {
       // A reconcile or another server since the last search makes the cached results stale
       val snap = mediaManager.refreshSnapshot()
-      val key = autoSearchCacheKey(query, snap?.serverConfigId, snap?.generation)
+      val key = autoSearchCacheKey(query, snap?.serverConfigId, snap?.generation, firstLoadDone, DbManager.localLibraryItemsVersion)
       if (cachedSearch != key) {
         DLog.d(tag, "Search bundle: $extras")
         val found = mediaManager.searchAll(query)

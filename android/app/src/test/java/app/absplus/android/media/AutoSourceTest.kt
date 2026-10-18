@@ -70,9 +70,71 @@ class AutoSourceTest {
   @Test fun playWithoutChoiceResumesTheLatest() {
     val latest = ItemInProgress(item("latest"), null, 200, false)
     val older = ItemInProgress(item("older"), null, 100, false)
-    assertEquals("latest", firstPlayableOf(listOf(latest, older), listOf(localBook("local_1")))!!.first.id)
-    assertEquals("local_1", firstPlayableOf(emptyList(), listOf(localBook("local_1")))!!.first.id)
-    assertNull(firstPlayableOf(emptyList(), emptyList()))
+    val fromServer = ItemInProgress(item("server"), null, 300, false)
+    assertEquals("latest", firstPlayableOf(listOf(latest, older), listOf(fromServer), listOf(localBook("local_1")))!!.first.id)
+    assertEquals("without the replica, the server's item in progress", "server",
+            firstPlayableOf(emptyList(), listOf(fromServer), listOf(localBook("local_1")))!!.first.id)
+    assertEquals("local_1", firstPlayableOf(emptyList(), emptyList(), listOf(localBook("local_1")))!!.first.id)
+    assertNull(firstPlayableOf(emptyList(), emptyList(), emptyList()))
+  }
+
+  @Test fun playWithoutChoiceOfflinePrefersADownload() {
+    val latest = ItemInProgress(item("latest"), null, 200, false)
+    val downloaded = ItemInProgress(item("downloaded", downloaded = true), null, 100, false)
+    assertEquals("downloaded", firstPlayableOf(listOf(latest, downloaded), emptyList(), listOf(localBook("local_1")), online = false)!!.first.id)
+    assertEquals("local_1", firstPlayableOf(listOf(latest), emptyList(), listOf(localBook("local_1")), online = false)!!.first.id)
+    assertEquals("latest", firstPlayableOf(listOf(latest), emptyList(), emptyList(), online = false)!!.first.id)
+    assertEquals("latest", firstPlayableOf(listOf(latest, downloaded), emptyList(), emptyList(), online = true)!!.first.id)
+  }
+
+  private fun inLibrary(id: String, library: String, lastUpdate: Long) = ItemInProgress(
+          LibraryItem(id, "ino-$id", library, "f", "/$id", id, 1, 1, 1, 1, 1, null, null, false, false, "book",
+                  MediaType(MediaTypeMetadata(id, false), null), null, null, null, null, null), null, lastUpdate, false)
+
+  @Test fun continueAddsTheServersItemsOfLibrariesOutsideTheReplica() {
+    val replica = listOf(inLibrary("a", "lib1", 100))
+    val server = listOf(inLibrary("a", "lib1", 500), inLibrary("b", "lib1", 400), inLibrary("s", "lib2", 300))
+    val merged = mergeContinue(replica, server, setOf("lib1"))
+    assertEquals(listOf("s", "a"), merged.map { it.libraryItemWrapper.id })
+    assertEquals("the replica's entry of an item is kept", 100, merged.last().progressLastUpdate)
+    assertEquals(listOf("a", "b", "s"), mergeContinue(emptyList(), server, emptySet()).map { it.libraryItemWrapper.id })
+  }
+
+  @Test fun aProgressReadMovesTheSwitchedItemFirst() {
+    val snap = snapshot(1, listOf("a", "b"))
+    val progress = mapOf("b" to MediaProgress("p", "b", null, 10.0, 0.5, 5.0, false, null, null, 900, 1, null))
+    val read = withProgress(snap, progress)
+    assertEquals(listOf("b", "a"), read.continueItems.map { it.libraryItemWrapper.id })
+    assertEquals(1, read.generation)
+  }
+
+  @Test fun onlyTheLatestPlayRequestStarts() {
+    val requests = LatestRequest()
+    val a = requests.next()
+    val b = requests.next()
+    assertFalse("the slow earlier choice", requests.isLatest(a))
+    assertTrue(requests.isLatest(b))
+  }
+
+  @Test fun progressRecomputesAtMostEveryTenSeconds() {
+    var now = 0L
+    val gate = SnapshotGate({ now })
+    gate.done(gate.decide("srv"), "srv")
+    now = 1_000
+    gate.onData("progress")
+    val soon = gate.decide("srv")
+    assertEquals(SnapshotGate.Action.PROGRESS, soon.action)
+    gate.done(soon, "srv")
+    assertEquals(SnapshotGate.Action.NONE, gate.decide("srv").action)
+    now = 10_000
+    assertEquals(SnapshotGate.Action.RECOMPUTE, gate.decide("srv").action)
+  }
+
+  @Test fun aDownloadChangeRecomputes() {
+    val gate = SnapshotGate({ 0L })
+    gate.done(gate.decide("srv", copiesVersion = 1), "srv")
+    assertEquals(SnapshotGate.Action.NONE, gate.decide("srv", copiesVersion = 1).action)
+    assertEquals(SnapshotGate.Action.RECOMPUTE, gate.decide("srv", copiesVersion = 2).action)
   }
 
   @Test fun snapshotIsReusedUntilDataChanges() {
@@ -121,16 +183,22 @@ class AutoSourceTest {
   @Test fun aChangeDuringARecomputeIsNotLost() {
     val gate = SnapshotGate({ 0L })
     val decision = gate.decide("srv")
-    gate.onData("progress")
+    gate.onData("catalog")
     gate.done(decision, "srv")
     assertEquals(SnapshotGate.Action.RECOMPUTE, gate.decide("srv").action)
+
+    val next = gate.decide("srv")
+    gate.onData("progress")
+    gate.done(next, "srv")
+    assertEquals("a progress change during it is read", SnapshotGate.Action.PROGRESS, gate.decide("srv").action)
   }
 
   private fun snapshot(generation: Long, continueIds: List<String>, server: String = "srv") = AutoSnapshot(server, emptyList(), emptySet(), emptySet(),
           continueIds.map { ItemInProgress(item(it), null, 1, false) }, emptyMap(), generation)
 
   @Test fun staleSnapshotIsRecomputedOnTheNextRead() = runTest {
-    val gate = SnapshotGate({ 0L })
+    var now = 0L
+    val gate = SnapshotGate({ now })
     var generation = 0L
     var continueIds = listOf("a")
     val cache = SnapshotCache(gate, { "srv" }, { snapshot(++generation, continueIds) }, { emptyMap() })
@@ -139,6 +207,7 @@ class AutoSourceTest {
 
     continueIds = listOf("b", "a")
     gate.onData("progress")
+    now = 10_000
     val second = cache.refresh()!!
     assertNotSame(first, second)
     assertEquals(2, second.generation)

@@ -183,7 +183,7 @@ class AutoCatalog(
       parseOne<LibraryCollection>(collection.put("books", books))
     }
     val withAudio = collections.filter { c -> c.books.orEmpty().any { it.checkHasTracks() } }
-    withAudio.forEach { c -> c.books?.let { markItems(sc, it) } }
+    markItems(sc, withAudio.flatMap { it.books.orEmpty() })
     AutoAnswer(withAudio, reconciled && allReconciled)
   }
 
@@ -328,7 +328,7 @@ class AutoCatalog(
               activeServerId = { ActiveServer.current()?.id },
               progressRows = { sc -> SyncEngine.store?.progressRows(sc).orEmpty() },
               // The replica has no library stats, by which the server's list drops libraries without audio
-              hasAudio = { sc, libraryId -> ReplicaDatabase.get(app).items().rows(sc, libraryId).any { it.numTracks > 0 || it.numEpisodes > 0 } },
+              hasAudio = { sc, libraryId -> ReplicaDatabase.get(app).items().hasAudio(sc, libraryId) },
               episodeOwner = { sc, id -> ReplicaDatabase.get(app).episodes().byIds(sc, listOf(id)).firstOrNull()?.libraryItemId },
               localItems = { DeviceManager.dbManager.getLocalLibraryItems() },
               downloadMark = resolverDownloadMark(

@@ -24,8 +24,9 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlay() {
     DLog.d(tag, "ON PLAY MEDIA SESSION COMPAT")
-    // Android Auto's Play with nothing to resume starts the latest started item (Р22); elsewhere it stays a no-op
-    playerNotificationService.play(if (playerNotificationService.isAndroidAuto) ({ startFirstPlayable { playerNotificationService.onMediaButtonHandled() } }) else null)
+    // Android Auto's Play with nothing to resume starts the latest started item (Р22); a headset or the widget stays a no-op
+    val fromAuto = isAutoController(playerNotificationService.mediaSession.currentControllerInfo.packageName)
+    playerNotificationService.play(if (fromAuto) ({ startFirstPlayable { playerNotificationService.onMediaButtonHandled() } }) else null)
   }
 
   private fun startFirstPlayable(onNothing: () -> Unit = {}) {
@@ -42,8 +43,8 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlayFromSearch(query: String?, extras: Bundle?) {
     DLog.d(tag, "ON PLAY FROM SEARCH $query")
-    playerNotificationService.mediaManager.findForVoice(query) { li ->
-      li?.let { playerNotificationService.startWrapper(it, null, true, playerNotificationService.mediaManager.getSavedPlaybackRate()) }
+    playerNotificationService.mediaManager.findForVoice(query) { li, episode ->
+      li?.let { playerNotificationService.startWrapper(it, episode, true, playerNotificationService.mediaManager.getSavedPlaybackRate()) }
     }
   }
 

@@ -61,6 +61,11 @@ abstract class LibraryItemDao {
   @Query("SELECT COUNT(*) FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId")
   abstract suspend fun count(sc: String, libraryId: String): Int
 
+  /** Whether the library has an item with audio: a book with tracks or a podcast with episodes. */
+  @Query("""SELECT EXISTS(SELECT 1 FROM library_items WHERE serverConfigId = :sc AND libraryId = :libraryId
+            AND (numTracks > 0 OR numEpisodes > 0))""")
+  abstract suspend fun hasAudio(sc: String, libraryId: String): Boolean
+
   suspend fun json(sc: String, ids: List<String>): List<IdJson> = inChunks(ids) { jsonChunk(sc, it) }.flatten()
 
   /** For the ids of one page. */

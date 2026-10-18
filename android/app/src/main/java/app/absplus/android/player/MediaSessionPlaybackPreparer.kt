@@ -46,8 +46,8 @@ class MediaSessionPlaybackPreparer(var playerNotificationService:PlayerNotificat
   override fun onPrepareFromSearch(query: String, playWhenReady: Boolean, extras: Bundle?) {
     Log.d(tag, "ON PREPARE FROM SEARCH $query")
     val mediaManager = playerNotificationService.mediaManager
-    mediaManager.findForVoice(query) { li ->
-      li?.let { playerNotificationService.startWrapper(it, null, playWhenReady, mediaManager.getSavedPlaybackRate()) }
+    mediaManager.findForVoice(query) { li, episode ->
+      li?.let { playerNotificationService.startWrapper(it, episode, playWhenReady, mediaManager.getSavedPlaybackRate()) }
     }
   }
 
