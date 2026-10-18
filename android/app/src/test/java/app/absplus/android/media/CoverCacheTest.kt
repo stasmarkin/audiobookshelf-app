@@ -301,6 +301,23 @@ class CoverCacheTest {
   }
 
   @Test
+  fun rawOriginalIsNotCutByTheCallTimeout() = runBlocking {
+    val timeouts = CopyOnWriteArrayList<Pair<Boolean, Long>>()
+    val client = coverHttpClient().newBuilder().addInterceptor(Interceptor { chain ->
+      timeouts += chain.request().url.query.orEmpty().contains("raw=1") to chain.call().timeout().timeoutNanos()
+      Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("fake")
+        .body(byteArrayOf(1, 2, 3).toResponseBody("image/jpeg".toMediaType())).build()
+    }).build()
+    val fetch = OkHttpCoverFetcher(client, log = {})
+
+    fetch.fetch(server, "A", raw = true)!!.body.close()
+    fetch.fetch(server, "A", raw = false)!!.body.close()
+
+    assertEquals(listOf(true to 0L), timeouts.filter { it.first })
+    assertTrue("the standard cover keeps the call timeout", timeouts.single { !it.first }.second > 0L)
+  }
+
+  @Test
   fun aTricklingServerCannotHoldAFetchSlotForever() {
     assertEquals(COVER_CALL_TIMEOUT_MS.toInt(), coverHttpClient().callTimeoutMillis)
   }

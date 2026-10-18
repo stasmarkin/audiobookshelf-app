@@ -214,6 +214,12 @@ class SessionCoverArtTest {
     coverCache(ServerState.OFFLINE)
     assertEquals("offline the older cover is shown", "content", session.getCoverUri(ctx).scheme)
 
+    coverCache(ServerState.UNKNOWN)
+    assertEquals("a widget-started process does not know the server yet: the older cover", "content", session.getCoverUri(ctx).scheme)
+
+    coverCache(ServerState.UNAUTHORIZED)
+    assertEquals("Glide would fetch without the custom headers: the older cover", "content", session.getCoverUri(ctx).scheme)
+
     coverCache(ServerState.ONLINE)
     assertEquals("the same version online stays cached", "content", streamedSession("li_o1").apply { libraryItem = libraryItem("li_o1", 5) }.getCoverUri(ctx).scheme)
     assertEquals("without the item's updatedAt nothing changes", "content", streamedSession("li_o1").getCoverUri(ctx).scheme)

@@ -98,12 +98,13 @@ internal object CoverArt {
 
   /**
    * The cover cache's file of [libraryItemId] as a content URI; null when the item was never shown online, or when it is
-   * older than [knownUpdatedAt] and the server can be asked (offline an older cover beats none).
+   * older than [knownUpdatedAt] and the server is known to be online (otherwise an older cover beats none: a
+   * widget-started process has no reachability yet, and Glide fetches without the server's custom headers).
    */
   fun cachedCoverUri(ctx: Context, libraryItemId: String?, knownUpdatedAt: Long? = null): Uri? {
     val cache = CoverCache.instance ?: return null
     val entry = libraryItemId?.let { cache.latestEntry(it) } ?: return null
-    if (knownUpdatedAt != null && entry.updatedAt < knownUpdatedAt && cache.mayFetch()) return null
+    if (knownUpdatedAt != null && entry.updatedAt < knownUpdatedAt && cache.isOnline()) return null
     return try {
       FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", entry.file)
     } catch (e: IllegalArgumentException) {

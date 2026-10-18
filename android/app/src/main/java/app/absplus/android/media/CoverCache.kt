@@ -63,6 +63,8 @@ class OkHttpCoverFetcher(
   private val clock: () -> Long = System::currentTimeMillis,
 ) : CoverFetcher {
   private val loggedAt = HashMap<String, Long>()
+  // The call timeout covers reading the body too: a multi-megabyte original streamed to the WebView must not be cut
+  private val rawClient by lazy { client.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).build() }
 
   private fun refuse(reason: String): FetchedCover? {
     val now = clock()
@@ -82,7 +84,7 @@ class OkHttpCoverFetcher(
       header("Accept", "image/webp,image/*;q=0.8")
     }.build()
     val response = try {
-      client.newCall(request).execute()
+      (if (raw) rawClient else client).newCall(request).execute()
     } catch (e: IOException) {
       return refuse(e.javaClass.simpleName)
     }
@@ -126,6 +128,9 @@ class CoverCache(
 
   // UNKNOWN on a cold start may fetch: an <img> never asks again, so first cards would stay without covers
   fun mayFetch(): Boolean = activeServer() != null && serverState() != ServerState.OFFLINE
+
+  /** The server is known to answer; UNKNOWN and UNAUTHORIZED are not enough to drop a cached cover for its URL. */
+  fun isOnline(): Boolean = activeServer() != null && serverState() == ServerState.ONLINE
 
   /** The exact cached version, marked as used; no network. */
   fun cached(itemId: String, updatedAt: Long): CoverEntry? = store.find(itemId, updatedAt)?.also { store.touch(it) }

@@ -168,8 +168,14 @@ export default {
       this.$nextTick(() => {
         this.imageReady = true
       })
-      // The placeholder after a failed cover route is not the cover: nothing to measure or report
-      if (this.coverUnavailable) return
+      // The placeholder after a failed cover route is not the cover: no background (the player reuses this component
+      // across books) and no cover to report
+      if (this.coverUnavailable) {
+        this.showCoverBg = false
+        if (this.$refs.coverBg) this.$refs.coverBg.style.backgroundImage = ''
+        this.$emit('imageLoaded', null)
+        return
+      }
       if (!this.noBg && this.$refs.cover && this.cover !== this.placeholderUrl) {
         var { naturalWidth, naturalHeight } = this.$refs.cover
         var aspectRatio = naturalHeight / naturalWidth
