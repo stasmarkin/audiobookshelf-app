@@ -79,7 +79,7 @@
 
 <script>
 import { findLocalCopy } from '@/utils/localCopy'
-import { createDebouncer, isReplicaIncomplete } from '@/utils/catalogRefresh'
+import { createDebouncer } from '@/utils/catalogRefresh'
 
 /** Catalog topics after which an open search is run again (so it moves from the server to the replica). */
 const SEARCH_TOPICS = ['state', 'items', 'series', 'authors', 'episodes']
@@ -94,7 +94,7 @@ export default {
       // Only the answer of the latest request is shown and clears isFetching
       searchSeq: 0,
       catalogNotLoaded: false,
-      // Results of a library whose reconcile never finished (or was unstable)
+      // The answer came from a library whose reconcile never finished (or was unstable)
       replicaIncomplete: false,
       // The groups of the shown answer, before the downloaded copies are joined
       answerResults: {},
@@ -185,8 +185,8 @@ export default {
       this.answerResults = answer?.results || {}
       this.showResults()
       this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.totalResults
-      // Nothing found says "catalog not loaded" (or "no items") instead
-      this.replicaIncomplete = isReplicaIncomplete({ ...answer, total: this.totalResults })
+      // "Catalog not loaded" stands alone; "no items" from an unfinished copy still needs the note
+      this.replicaIncomplete = !!answer && !answer.fromServer && !this.catalogNotLoaded && (answer.replica?.reconciledAt == null || answer.replica?.complete === false)
     },
     async loadLocalItems() {
       if (this.localItems !== null) return this.localItems

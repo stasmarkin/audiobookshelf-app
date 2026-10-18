@@ -2,6 +2,7 @@ package app.absplus.android.sync
 
 import app.absplus.android.data.ServerConnectionConfig
 import app.absplus.android.db.inMemoryReplica
+import app.absplus.android.server.ApiHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -231,6 +232,50 @@ class SyncEngineCatalogTest {
     SyncEngine.syncNow(SyncReason.MANUAL)
     gate.release.countDown()
     awaitPasses(2)
+  }
+
+  @Test
+  fun passDroppedAsStaleIsRedoneOnce() = runBlocking {
+    server.book("li1")
+    val bumps = AtomicInteger(1)
+    // The page is in flight when JS sets the server config on a cold start, which bumps the auth generation
+    server.onItemsPage = { if (bumps.getAndDecrement() > 0) ApiHandler.invalidateAuthRequests() }
+    start()
+    setState(ServerState.ONLINE)
+
+    awaitPasses(2)
+    assertEquals("Title li1", title("li1"))
+  }
+
+  @Test
+  fun staleRedoIsNotRedoneAgain() = runBlocking {
+    server.book("li1")
+    server.onItemsPage = { ApiHandler.invalidateAuthRequests() }
+    start()
+    setState(ServerState.ONLINE)
+
+    awaitPasses(2)
+    assertNull(title("li1"))
+  }
+
+  @Test
+  fun stalePassInTheBackgroundWaitsForTheForeground() = runBlocking {
+    server.book("li1")
+    val bumps = AtomicInteger(1)
+    server.onItemsPage = {
+      if (bumps.getAndDecrement() > 0) {
+        foreground = false
+        ApiHandler.invalidateAuthRequests()
+      }
+    }
+    start()
+    setState(ServerState.ONLINE)
+    awaitPasses(1)
+
+    foreground = true
+    SyncEngine.syncNow(SyncReason.FOREGROUND)
+    awaitPasses(2)
+    assertEquals("Title li1", title("li1"))
   }
 
   @Test
