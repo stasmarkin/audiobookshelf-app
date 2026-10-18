@@ -10,6 +10,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -58,6 +63,7 @@ class CoverRouteTest {
       "/_absplus/cover/" + "a".repeat(257),
     )
     for (path in paths) {
+      assertNull(path, parseCoverRoute(Uri.parse("https://localhost$path")))
       val response = route(path)!!
       assertEquals(path, 404, response.statusCode)
     }
@@ -112,22 +118,62 @@ class CoverRouteTest {
   }
 
   @Test
-  fun failedLazyFetchGivesAnEmptyBody() {
+  fun failedRawFetchGivesAnEmptyBody() {
     fetchAnswer = { null }
 
-    val response = route("/_absplus/cover/li1?ts=5")!!
+    val response = route("/_absplus/cover/li1?ts=5&raw=1")!!
     assertEquals(200, response.statusCode)
     assertEquals(0, response.data.readBytes().size)
   }
 
-  @Test
-  fun lazyFetchStoresAndServesTheCover() {
-    val response = route("/_absplus/cover/li1?ts=5")!!
-    assertEquals(0, fetches.size)
+  private fun hangingFetches(): CountDownLatch {
+    // Class loading and the index scan happen here, not inside the timed answer
+    route("/_absplus/cover/")
+    cache.latestFile("warm-up")
+    val release = CountDownLatch(1)
+    fetchAnswer = { release.await(10, TimeUnit.SECONDS); FetchedCover("image/jpeg", "jpg", ByteArrayInputStream(JPEG), JPEG.size.toLong()) }
+    return release
+  }
 
-    assertArrayEquals(JPEG, response.data.readBytes())
+  @Test
+  fun aMissNeverBlocksTheResponse(): Unit = runBlocking {
+    val release = hangingFetches()
+    try {
+      val read = withTimeout(200) {
+        withContext(Dispatchers.IO) {
+          val response = route("/_absplus/cover/li1?ts=5")!!
+          response.statusCode to response.data.readBytes().size
+        }
+      }
+      assertEquals("a miss is a 404 at once: the card shows its title", 404 to 0, read)
+      waitUntil { fetches.toList() == listOf("li1" to false) }
+    } finally {
+      release.countDown()
+    }
+  }
+
+  @Test
+  fun aHitIsServedWhileFetchesHang(): Unit = runBlocking {
+    val release = hangingFetches()
+    seed("hit", 1)
+    try {
+      for (i in 1..COVER_FETCH_PARALLELISM) route("/_absplus/cover/miss$i?ts=1")
+      waitUntil { fetches.size == COVER_FETCH_PARALLELISM }
+
+      val body = withTimeout(200) { withContext(Dispatchers.IO) { route("/_absplus/cover/hit?ts=1")!!.data.readBytes() } }
+      assertArrayEquals(JPEG, body)
+    } finally {
+      release.countDown()
+    }
+  }
+
+  @Test
+  fun aFetchedCoverIsServedOnTheNextRequest() {
+    assertEquals(404, route("/_absplus/cover/li1?ts=5")!!.statusCode)
+    runBlocking { cache.awaitIdleForTest() }
+
+    assertArrayEquals(JPEG, route("/_absplus/cover/li1?ts=5")!!.data.readBytes())
     assertEquals(listOf("li1" to false), fetches.toList())
-    assertNotNull(store.find("li1", 5))
   }
 
   @Test
@@ -135,10 +181,18 @@ class CoverRouteTest {
     seed("A", 1)
     replica = mapOf("A" to 2L)
 
-    val response = route("/_absplus/cover/A")!!
-    assertArrayEquals(JPEG, response.data.readBytes())
+    assertArrayEquals("the cached version at once", JPEG, route("/_absplus/cover/A")!!.data.readBytes())
+    runBlocking { cache.awaitIdleForTest() }
     assertEquals(listOf("A" to false), fetches.toList())
     assertEquals(2L, store.newest("A")!!.updatedAt)
+  }
+
+  private fun waitUntil(condition: () -> Boolean) {
+    val deadline = System.currentTimeMillis() + 5000
+    while (!condition()) {
+      check(System.currentTimeMillis() < deadline) { "timed out" }
+      Thread.sleep(10)
+    }
   }
 
   @Test

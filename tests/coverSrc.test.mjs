@@ -14,7 +14,7 @@ const globalsSource = (await read('../store/globals.js')).replace(/^import .*$/g
 const gettersFor = (native, platform = native ? 'android' : 'web') => new Function('Capacitor', 'coverSrc', `${globalsSource}\nreturn getters`)({ getPlatform: () => platform }, coverSrc)
 
 const rootGetters = (serverAddress, tokenRequired = false) => ({ 'user/getServerAddress': serverAddress, 'user/getToken': 't', getDoesServerImagesRequireToken: tokenRequired })
-const coverOf = (native, item, serverAddress, raw = false) => gettersFor(native).getLibraryItemCoverSrc(null, null, {}, rootGetters(serverAddress))(item, '/book_placeholder.jpg', raw)
+const coverOf = (native, item, serverAddress, raw = false) => gettersFor(native).getLibraryItemCoverSrc({ coverEpochs: {} }, null, {}, rootGetters(serverAddress))(item, '/book_placeholder.jpg', raw)
 const book = (extra = {}) => ({ id: 'li1', updatedAt: 1700, media: { coverPath: '/metadata/items/li1/cover.jpg' }, ...extra })
 
 test('native builds the cover route', () => {
@@ -25,8 +25,8 @@ test('native builds the cover route', () => {
 
   assert.equal(coverOf(true, book(), null), '/_absplus/cover/li1?ts=1700', 'offline without a server address the getter still gives the route')
   assert.equal(coverOf(false, book(), null), '/book_placeholder.jpg', 'web mode without a server address: the placeholder, as before')
-  assert.equal(gettersFor(true).getLibraryItemCoverSrcById(null, null, {}, rootGetters(null))('li1'), '/_absplus/cover/li1')
-  assert.equal(gettersFor(true, 'ios').getLibraryItemCoverSrc(null, null, {}, rootGetters('https://srv'))(book(), '/p.jpg'), 'https://srv/api/items/li1/cover?ts=1700', 'iOS has no route handler: server URL')
+  assert.equal(gettersFor(true).getLibraryItemCoverSrcById({ coverEpochs: {} }, null, {}, rootGetters(null))('li1'), '/_absplus/cover/li1')
+  assert.equal(gettersFor(true, 'ios').getLibraryItemCoverSrc({ coverEpochs: {} }, null, {}, rootGetters('https://srv'))(book(), '/p.jpg'), 'https://srv/api/items/li1/cover?ts=1700', 'iOS has no route handler: server URL')
 })
 
 test('web keeps the server URL', () => {
@@ -82,4 +82,30 @@ test('a group whose only cover route failed shows its name', () => {
   assert.deepEqual(shownGroupCovers(covers, [true]), covers)
   const server = [{ id: 'li2', coverUrl: 'https://srv/api/items/li2/cover' }]
   assert.deepEqual(shownGroupCovers(server, [false]), server, 'a server URL is drawn as before')
+})
+
+test('a cover-ready notice makes the cover route ask again', async () => {
+  const mutations = new Function(`${globalsSource}\nreturn mutations`)()
+  const state = { coverEpochs: {} }
+  const getters = gettersFor(true)
+  const src = () => getters.getLibraryItemCoverSrc(state, null, {}, rootGetters(null))(book(), '/p.jpg')
+  const byId = () => getters.getLibraryItemCoverSrcById(state, null, {}, rootGetters(null))('li1')
+
+  assert.equal(src(), '/_absplus/cover/li1?ts=1700', 'no notice: no epoch')
+  mutations.bumpCoverEpoch(state, 'li1')
+  assert.equal(src(), '/_absplus/cover/li1?ts=1700&e=1')
+  assert.equal(byId(), '/_absplus/cover/li1?e=1')
+  mutations.bumpCoverEpoch(state, 'other')
+  assert.equal(src(), '/_absplus/cover/li1?ts=1700&e=1', 'another item does not change this cover')
+  assert.equal(coverSrc({ itemId: 'li1', updatedAt: 1700, native: false, serverAddress: 'https://srv', epoch: 3 }), 'https://srv/api/items/li1/cover?ts=1700', 'web mode ignores it')
+
+  const { createDataService } = await importSource('../utils/dataService.js')
+  const listeners = {}
+  const commits = []
+  createDataService({
+    plugin: new Proxy({ addListener: (name, cb) => (listeners[name] = cb) }, { get: (target, key) => target[key] ?? (async () => ({})) }),
+    store: { state: {}, commit: (type, payload) => commits.push([type, payload]) }
+  })
+  listeners.onCoverReady({ itemId: 'li1' })
+  assert.deepEqual(commits.filter(([type]) => type === 'globals/bumpCoverEpoch'), [['globals/bumpCoverEpoch', 'li1']])
 })

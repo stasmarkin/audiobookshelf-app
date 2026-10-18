@@ -20,7 +20,9 @@ export const state = () => ({
   localFolderSelectData: null,
   hapticFeedback: 'LIGHT',
   showRSSFeedOpenCloseModal: false,
-  rssFeedEntity: null
+  rssFeedEntity: null,
+  // itemId -> how many times native announced its cover as ready; part of the cover route so the <img> asks again
+  coverEpochs: {}
 })
 
 export const getters = {
@@ -51,7 +53,8 @@ export const getters = {
           native: isAndroid(),
           serverAddress: rootGetters['user/getServerAddress'],
           token: rootGetters['user/getToken'],
-          tokenRequired: rootGetters.getDoesServerImagesRequireToken
+          tokenRequired: rootGetters.getDoesServerImagesRequireToken,
+          epoch: state.coverEpochs[libraryItem.id] || 0
         }) || placeholder
       )
     },
@@ -67,7 +70,8 @@ export const getters = {
           serverAddress: rootGetters['user/getServerAddress'],
           token: rootGetters['user/getToken'],
           tokenRequired: rootGetters.getDoesServerImagesRequireToken,
-          versioned: false
+          versioned: false,
+          epoch: state.coverEpochs[libraryItemId] || 0
         }) || placeholder
       )
     },
@@ -97,6 +101,9 @@ export const actions = {
 }
 
 export const mutations = {
+  bumpCoverEpoch(state, itemId) {
+    state.coverEpochs = { ...state.coverEpochs, [itemId]: (state.coverEpochs[itemId] || 0) + 1 }
+  },
   setIsModalOpen(state, val) {
     state.isModalOpen = val
   },

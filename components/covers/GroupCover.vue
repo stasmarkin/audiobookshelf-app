@@ -46,6 +46,11 @@ export default {
           this.$nextTick(this.init)
         }
       }
+    },
+    // The DOM is built by hand: a cover native announced as ready needs a rebuild to be asked for again
+    coverEpochKey() {
+      this.isInit = false
+      this.$nextTick(this.init)
     }
   },
   computed: {
@@ -55,6 +60,10 @@ export default {
     },
     store() {
       return this.$store || this.$nuxt.$store
+    },
+    coverEpochKey() {
+      const epochs = this.store.state.globals.coverEpochs || {}
+      return this.bookItems.map((book) => epochs[book.id] || 0).join(',')
     },
     router() {
       return this.$router || this.$nuxt.$router

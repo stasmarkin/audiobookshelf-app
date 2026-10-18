@@ -9,45 +9,38 @@ import app.absplus.android.plugins.AbsLogger
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
 const val COVER_FETCH_PARALLELISM = 4
-const val COVER_CONNECT_TIMEOUT_MS = 10_000L
-const val COVER_READ_TIMEOUT_MS = 20_000L
-// The read timeout is per read: a server trickling bytes would otherwise hold a fetch slot without end
-const val COVER_CALL_TIMEOUT_MS = 30_000L
-// A queued fetch gives up after this long without any answer: a server hanging on /cover must not queue minutes
-const val COVER_SLOT_STALL_MS = 10_000L
-private const val SLOT_POLL_MS = 250L
-private const val SLOT_WAITING = 0
-private const val SLOT_TAKEN = 1
-private const val SLOT_ABANDONED = 2
+const val COVER_CONNECT_TIMEOUT_MS = 5_000L
+const val COVER_READ_TIMEOUT_MS = 10_000L
+// The read timeout is per read: a server trickling bytes would otherwise hold a fetch worker without end
+const val COVER_CALL_TIMEOUT_MS = 15_000L
+// The original (raw) streams without a call timeout, but its answer must start this soon or the standard cover is shown
+const val COVER_RAW_FIRST_BYTE_MS = 5_000L
+// A cover queued this long was asked for by a card long gone: fetching it would only delay the visible ones
+const val COVER_QUEUE_MAX_AGE_MS = 60_000L
 private const val REFUSAL_LOG_EVERY_MS = 5 * 60 * 1000L
 
-private val MIME_TO_EXT = mapOf("image/jpeg" to "jpg", "image/png" to "png", "image/webp" to "webp", "image/gif" to "gif")
+// image/jpg and image/pjpeg are what some servers send for JPEG
+private val MIME_TO_EXT = mapOf(
+  "image/jpeg" to "jpg", "image/jpg" to "jpg", "image/pjpeg" to "jpg", "image/png" to "png", "image/webp" to "webp", "image/gif" to "gif"
+)
 
 /** The image type of a cached cover file, from the extension it was stored under. */
 fun coverMimeOf(file: File): String = MIME_TO_EXT.entries.firstOrNull { it.value == file.extension }?.key ?: "image/jpeg"
@@ -73,8 +66,11 @@ class OkHttpCoverFetcher(
   private val clock: () -> Long = System::currentTimeMillis,
 ) : CoverFetcher {
   private val loggedAt = HashMap<String, Long>()
-  // The call timeout covers reading the body too: a multi-megabyte original streamed to the WebView must not be cut
-  private val rawClient by lazy { client.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).build() }
+  // The call timeout covers reading the body too: a multi-megabyte original streamed to the WebView must not be cut, but
+  // its answer has to start soon, since the WebView waits for it
+  private val rawClient by lazy {
+    client.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).readTimeout(COVER_RAW_FIRST_BYTE_MS, TimeUnit.MILLISECONDS).build()
+  }
 
   private fun refuse(reason: String): FetchedCover? {
     val now = clock()
@@ -116,8 +112,10 @@ sealed interface CoverAnswer {
 }
 
 /**
- * One cover cache for the WebView and the native UI: a hit is served from disk, a miss is downloaded once from the
- * active server and stored, and offline the cached version is served even when it is older than the one asked for.
+ * One cover cache for the WebView and the native UI. The standard cover is answered at once from disk, never waiting on
+ * the network (the WebView holds a few requests per host, so one blocked answer stalls every cover behind it); a miss
+ * or an older version is fetched in the background, newest request first, and [onCoverReady] then tells the app to ask
+ * again. Offline the cached version is served even when it is older than the one asked for.
  */
 class CoverCache(
   private val store: CoverStore,
@@ -127,22 +125,23 @@ class CoverCache(
   private val replicaUpdatedAt: suspend (serverConfigId: String, itemId: String) -> Long?,
   private val scope: CoroutineScope,
   private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
-  private val slotStallMs: Long = COVER_SLOT_STALL_MS,
-  private val slotPollMs: Long = SLOT_POLL_MS,
-  private val log: (String) -> Unit = { DLog.w("CoverCache", it) },
+  private val queueMaxAgeMs: Long = COVER_QUEUE_MAX_AGE_MS,
+  private val workers: Int = COVER_FETCH_PARALLELISM,
 ) {
-  // Monotonic clock values can be negative: "never" must be below any of them
-  @Volatile private var lastProgressAt = Long.MIN_VALUE
-  private var lastStallLogAt = Long.MIN_VALUE
+  /** Called on a worker thread when a cover the WebView was refused (or got older) is stored. */
+  @Volatile var onCoverReady: ((itemId: String) -> Unit)? = null
 
-  // A fetch gives a stored entry, or the bytes of an image type the store doesn't keep (each waiter gets its own stream)
-  private sealed interface Fetched {
-    data class Stored(val entry: CoverEntry) : Fetched
-    class Unstored(val mime: String, val bytes: ByteArray) : Fetched
-  }
+  private class Job(val itemId: String, val updatedAt: Long?, var queuedAt: Long)
 
-  private val inFlight = HashMap<String, Deferred<Fetched?>>()
-  private val permits = Semaphore(COVER_FETCH_PARALLELISM)
+  private val lock = Any()
+  // The tail is the newest request: workers take from it
+  private val queue = ArrayDeque<Job>()
+  private val queued = HashMap<String, Job>()
+  private val running = HashSet<String>()
+  // What the WebView was given per item while a fetch is pending (-1: nothing); announced only if something newer is stored
+  private val awaitingAnnounce = HashMap<String, Long>()
+  private val wakeups = Channel<Unit>(Channel.UNLIMITED)
+  private var started = false
 
   // UNKNOWN on a cold start may fetch: an <img> never asks again, so first cards would stay without covers
   fun mayFetch(): Boolean = activeServer() != null && serverState() != ServerState.OFFLINE
@@ -150,31 +149,29 @@ class CoverCache(
   /** The server is known to answer; UNKNOWN and UNAUTHORIZED are not enough to drop a cached cover for its URL. */
   fun isOnline(): Boolean = activeServer() != null && serverState() == ServerState.ONLINE
 
-  /** The exact cached version, marked as used; no network. */
-  fun cached(itemId: String, updatedAt: Long): CoverEntry? = store.find(itemId, updatedAt)?.also { store.touch(it) }
-
-  suspend fun standard(itemId: String, updatedAt: Long?): CoverAnswer {
-    if (!DownloadIdentifiers.isSafe(itemId)) return CoverAnswer.Miss
-    val version = updatedAt ?: activeServer()?.let { replicaUpdatedAt(it.id, itemId) }
-    if (version == null) return if (mayFetch()) streamOrNewest(itemId, raw = false) else newestOrMiss(itemId)
-    store.find(itemId, version)?.let { return hit(it) }
-    // A card with a stale updatedAt must not store today's server cover under its old key
-    store.newest(itemId)?.let { if (it.updatedAt > version) return hit(it) }
-    if (!mayFetch()) return newestOrMiss(itemId)
-    return when (val fetched = fetchOnce(itemId, version)) {
-      is Fetched.Stored -> cachedAnswer(fetched.entry)
-      is Fetched.Unstored -> CoverAnswer.Stream(fetched.mime, ByteArrayInputStream(fetched.bytes))
-      null -> newestOrMiss(itemId)
+  /**
+   * The cached cover to show now, marked as used; never waits. Online, a miss or an older version than [updatedAt]
+   * (or any version when [updatedAt] is unknown, to check it) is fetched in the background.
+   */
+  fun standard(itemId: String, updatedAt: Long?): CoverEntry? {
+    if (!DownloadIdentifiers.isSafe(itemId)) return null
+    val newest = store.newest(itemId)
+    // A card with a stale updatedAt must not fetch today's server cover under its old key
+    if (newest != null && updatedAt != null && newest.updatedAt >= updatedAt) {
+      store.touch(newest)
+      return newest
     }
+    if (mayFetch()) enqueue(itemId, updatedAt, served = newest?.updatedAt ?: -1)
+    return newest?.also { store.touch(it) }
   }
 
   /** The original image, proxied and never stored; it seeds the standard cover, which is what offline gets. */
   suspend fun raw(itemId: String, updatedAt: Long?): CoverAnswer {
     if (!DownloadIdentifiers.isSafe(itemId)) return CoverAnswer.Miss
-    if (!mayFetch()) return standard(itemId, updatedAt)
-    if (updatedAt == null || store.find(itemId, updatedAt) == null) scope.launch { standard(itemId, updatedAt) }
-    val config = activeServer() ?: return standard(itemId, updatedAt)
-    val fetched = withContext(Dispatchers.IO) { fetcher.fetch(config, itemId, raw = true) } ?: return standard(itemId, updatedAt)
+    val standard = standard(itemId, updatedAt)
+    val config = activeServer()
+    if (!mayFetch() || config == null) return cachedOrMiss(standard)
+    val fetched = withContext(Dispatchers.IO) { fetcher.fetch(config, itemId, raw = true) } ?: return cachedOrMiss(standard)
     return CoverAnswer.Stream(fetched.mime, fetched.body)
   }
 
@@ -186,98 +183,91 @@ class CoverCache(
 
   fun latestFile(itemId: String): File? = latestEntry(itemId)?.file
 
-  private fun hit(entry: CoverEntry): CoverAnswer {
-    store.touch(entry)
-    return cachedAnswer(entry)
+  /** For tests: suspends until nothing is queued or being fetched. */
+  internal suspend fun awaitIdleForTest() {
+    while (synchronized(lock) { queue.isNotEmpty() || running.isNotEmpty() }) delay(5)
   }
 
-  private fun cachedAnswer(entry: CoverEntry) = CoverAnswer.Cached(entry, coverMimeOf(entry.file))
+  private fun cachedOrMiss(entry: CoverEntry?): CoverAnswer = entry?.let { CoverAnswer.Cached(it, coverMimeOf(it.file)) } ?: CoverAnswer.Miss
 
-  private fun newestOrMiss(itemId: String): CoverAnswer = store.newest(itemId)?.let { hit(it) } ?: CoverAnswer.Miss
+  private fun keyOf(itemId: String, updatedAt: Long?) = "${itemId}_${updatedAt ?: "latest"}"
 
-  private suspend fun streamOrNewest(itemId: String, raw: Boolean): CoverAnswer {
-    val config = activeServer() ?: return newestOrMiss(itemId)
-    val fetched = withContext(Dispatchers.IO) { fetcher.fetch(config, itemId, raw) } ?: return newestOrMiss(itemId)
-    return CoverAnswer.Stream(fetched.mime, fetched.body)
-  }
-
-  private suspend fun fetchOnce(itemId: String, version: Long): Fetched? {
-    val key = "${itemId}_$version"
-    val job = synchronized(inFlight) {
-      inFlight[key] ?: scope.async(start = CoroutineStart.LAZY) { downloadInSlot(itemId, version) }.also { job ->
-        inFlight[key] = job
-        job.invokeOnCompletion { synchronized(inFlight) { if (inFlight[key] === job) inFlight.remove(key) } }
-      }
-    }
-    return job.await()
-  }
-
-  /**
-   * Downloads once a fetch slot is free, waiting in arrival order while the server keeps answering; null once no fetch
-   * finished for [slotStallMs]. The slot is taken and the wait abandoned through one CAS, so a permit is never lost.
-   */
-  private suspend fun downloadInSlot(itemId: String, version: Long): Fetched? = coroutineScope {
-    val waitStartedAt = clock()
-    val slot = AtomicInteger(SLOT_WAITING)
-    val result = AtomicReference<Fetched?>()
-    val work = launch {
-      permits.withPermit {
-        if (slot.compareAndSet(SLOT_WAITING, SLOT_TAKEN)) result.set(download(itemId, version))
-      }
-    }
-    val watchdog = launch {
-      while (slot.get() == SLOT_WAITING && clock() - maxOf(lastProgressAt, waitStartedAt) < slotStallMs) delay(slotPollMs)
-      if (slot.compareAndSet(SLOT_WAITING, SLOT_ABANDONED)) {
-        work.cancel()
-        logStall()
-      }
-    }
-    work.join()
-    watchdog.cancel()
-    result.get()
-  }
-
-  internal fun freeSlotsForTest(): Int = permits.availablePermits
-
-  private fun logStall() {
-    val now = clock()
-    synchronized(inFlight) {
-      if (lastStallLogAt != Long.MIN_VALUE && now - lastStallLogAt < REFUSAL_LOG_EVERY_MS) return
-      lastStallLogAt = now
-    }
-    log("Cover fetch gave up: slot wait stalled")
-  }
-
-  private fun download(itemId: String, version: Long): Fetched? {
-    // The server may have gone away while this request waited for a free slot
-    if (!mayFetch()) return null
-    val config = activeServer() ?: return null
-    val startedAt = clock()
-    val fetched = fetcher.fetch(config, itemId, raw = false)
-    // A cover (however slow) or a quick refusal shows the server answers; a request that hung until its timeout does not
-    clock().let { if (fetched != null || it - startedAt < slotStallMs) lastProgressAt = it }
-    if (fetched == null) return null
-    return fetched.body.use { body ->
-      val ext = fetched.ext
-      if (ext != null) {
-        store.put(itemId, version, ext) { body.copyTo(it) }?.let { Fetched.Stored(it) }
+  private fun enqueue(itemId: String, updatedAt: Long?, served: Long) {
+    val key = keyOf(itemId, updatedAt)
+    val wake = synchronized(lock) {
+      awaitingAnnounce[itemId] = minOf(awaitingAnnounce[itemId] ?: served, served)
+      startWorkers()
+      if (key in running) return
+      val job = queued[key]
+      if (job != null) {
+        // Asked again: the card is on screen now, so it moves to the front
+        queue.remove(job)
+        job.queuedAt = clock()
+        queue.addLast(job)
+        false
       } else {
-        readUpTo(body, MAX_COVER_FILE_BYTES)?.let { Fetched.Unstored(fetched.mime, it) }
+        Job(itemId, updatedAt, clock()).also { queue.addLast(it); queued[key] = it }
+        true
+      }
+    }
+    if (wake) wakeups.trySend(Unit)
+  }
+
+  private fun startWorkers() {
+    if (started) return
+    started = true
+    repeat(workers) {
+      scope.launch {
+        for (wakeup in wakeups) {
+          val job = take() ?: continue
+          try {
+            fetch(job)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            // A failed job must not take its worker down with it
+            AbsLogger.error("CoverCache", "Cover fetch failed: ${e.javaClass.simpleName}")
+          } finally {
+            synchronized(lock) { running -= keyOf(job.itemId, job.updatedAt) }
+          }
+        }
       }
     }
   }
 
-  private fun readUpTo(body: InputStream, limit: Long): ByteArray? = try {
-    val out = ByteArrayOutputStream()
-    val buffer = ByteArray(16 * 1024)
-    while (out.size() <= limit) {
-      val n = body.read(buffer)
-      if (n < 0) break
-      out.write(buffer, 0, n)
+  private fun take(): Job? = synchronized(lock) {
+    val now = clock()
+    while (queue.isNotEmpty()) {
+      val job = queue.removeLast()
+      val key = keyOf(job.itemId, job.updatedAt)
+      queued -= key
+      if (now - job.queuedAt > queueMaxAgeMs) continue
+      running += key
+      return job
     }
-    out.toByteArray().takeIf { it.isNotEmpty() && it.size <= limit }
-  } catch (e: IOException) {
     null
+  }
+
+  private suspend fun fetch(job: Job) {
+    // The server may have gone away while this request was queued
+    if (!mayFetch()) return
+    val config = activeServer() ?: return
+    // Unknown version and no replica row: kept as the lowest version, replaced by any versioned one
+    val version = job.updatedAt ?: replicaUpdatedAt(config.id, job.itemId) ?: 0L
+    val cached = store.newest(job.itemId)
+    if (cached == null || cached.updatedAt < version) {
+      val fetched = fetcher.fetch(config, job.itemId, raw = false) ?: return
+      // An image type the route can't serve back with its type (avif, bmp...) is not kept; the card shows its title
+      val ext = fetched.ext ?: return fetched.body.close()
+      fetched.body.use { body -> store.put(job.itemId, version, ext) { body.copyTo(it) } } ?: return
+    }
+    announce(job.itemId)
+  }
+
+  private fun announce(itemId: String) {
+    val served = synchronized(lock) { awaitingAnnounce.remove(itemId) } ?: return
+    val stored = store.peekNewest(itemId) ?: return
+    if (stored.updatedAt > served) onCoverReady?.invoke(itemId)
   }
 
   companion object {

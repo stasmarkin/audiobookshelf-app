@@ -40,12 +40,13 @@ fun interceptCoverRoute(uri: Uri, appOrigin: Uri, cache: CoverCache?): WebResour
 }
 
 fun coverResponse(cache: CoverCache, req: CoverRequest): WebResourceResponse {
-  if (req.updatedAt != null && !req.raw) cache.cached(req.itemId, req.updatedAt)?.let { fileResponse(it) }?.let { return it }
+  // Never waits on the network: a miss is a 404 now (the card shows its title) and the cover is fetched in the background
+  if (!req.raw) return cache.standard(req.itemId, req.updatedAt)?.let { fileResponse(it) } ?: notFound()
   // Offline answers come straight from the index: an older cached version beats no cover
   if (!cache.mayFetch()) return cache.newestCached(req.itemId)?.let { fileResponse(it) } ?: notFound()
-  // Chromium reads the body on its own thread, so the download happens there, not on the interception thread
+  // The original streams from the server; Chromium reads the body on its own thread, at most until the answer starts
   val body = LazyCoverStream {
-    when (val answer = runBlocking { if (req.raw) cache.raw(req.itemId, req.updatedAt) else cache.standard(req.itemId, req.updatedAt) }) {
+    when (val answer = runBlocking { cache.raw(req.itemId, req.updatedAt) }) {
       is CoverAnswer.Cached -> FileInputStream(answer.entry.file)
       is CoverAnswer.Stream -> answer.body
       CoverAnswer.Miss -> null

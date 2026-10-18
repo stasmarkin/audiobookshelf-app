@@ -253,6 +253,10 @@ export function createDataService({ plugin, store, platform = null, $axios = nul
   }
 
   plugin.addListener('onDataChanged', dataChanged)
+  // A cover the route refused is stored now: its <img>s ask again (the epoch is part of their src)
+  plugin.addListener('onCoverReady', (payload) => {
+    if (payload?.itemId) store.commit('globals/bumpCoverEpoch', payload.itemId)
+  })
   plugin.addListener('onSyncState', applySyncState)
 
   // In the browser the writes go to the server directly, and the store follows the server's list
