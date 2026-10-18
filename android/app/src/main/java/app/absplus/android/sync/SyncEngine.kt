@@ -77,7 +77,9 @@ class SyncDeps(
         val mirror: ProgressMirror = ProgressMirror.None,
         val paperImport: PaperProgressImport? = null,
         /** Every Paper `LocalMediaProgress`, read for [paperImport] on start. */
-        val paperProgress: () -> List<LocalMediaProgress> = { emptyList() }
+        val paperProgress: () -> List<LocalMediaProgress> = { emptyList() },
+        /** A live session (not a cold start before JS restores it, not after a logout); gates redoing a stale answer. */
+        val signedIn: () -> Boolean = { true }
 )
 
 /**
@@ -132,7 +134,8 @@ object SyncEngine {
             mirror = PaperProgressMirror,
             paperImport = PaperProgressImport(db,
                     context.applicationContext.getSharedPreferences(PaperProgressImport.PREFS, Context.MODE_PRIVATE)),
-            paperProgress = { DeviceManager.dbManager.getAllLocalMediaProgress() }))
+            paperProgress = { DeviceManager.dbManager.getAllLocalMediaProgress() },
+            signedIn = { DeviceManager.serverConnectionConfig != null }))
   }
 
   private fun start(deps: SyncDeps) {
@@ -396,7 +399,8 @@ object SyncEngine {
     private suspend fun runOnce(reconcile: Boolean) {
       val config = deps.activeServer() ?: return
       if (deps.serverState.value != ServerState.ONLINE) {
-        if (reconcile) synchronized(lock) { reconcileDeferred = true }
+        // A redo that did not run is spent: the deferred reconcile is a new one, with a redo of its own
+        if (reconcile) synchronized(lock) { reconcileDeferred = true; staleReconcileRedo = false }
         publishPending(config.id)
         return
       }
@@ -423,8 +427,9 @@ object SyncEngine {
             error = failure.message
             deps.logError("Reconcile ${config.id} failed: ${failure.message}")
             synchronized(lock) {
-              // A stale answer says nothing about the server: on a cold start it is the config JS sets meanwhile
-              if (failure is SyncFailure && failure.stale && !redo && deps.isForeground()) {
+              // A stale answer says nothing about the server: on a cold start it is the config JS sets meanwhile.
+              // After a logout the session is gone, and the pull waits for the next foreground as before.
+              if (failure is SyncFailure && failure.stale && !redo && deps.isForeground() && deps.signedIn()) {
                 staleReconcileRedo = true
                 wantReconcile = true
                 wantPush = true
