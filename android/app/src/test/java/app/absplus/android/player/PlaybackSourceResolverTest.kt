@@ -14,6 +14,7 @@ import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.data.PodcastMetadata
 import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.managers.LocalItemLocks
+import app.absplus.android.media.resolverDownloadMark
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -165,6 +166,23 @@ class PlaybackSourceResolverTest {
     assertEquals("42", request.ino)
     assertSame(copy, (planStart(request, "a", resolver(copy)) as PlaybackSource.Local).item)
     assertEquals("local_1", StartRequest.forWrapper(copy, null, playWhenReady = true, playbackRate = 1f).libraryItemId)
+  }
+
+  @Test fun androidAutoStartOfAPartialCopyStreamsAsItsMarkSays() {
+    val partial = bookWithTracks("local_1", "li1", tracks = 2)
+    fun serverBook(numTracks: Int) = LibraryItem("li1", "", "lib", "f", "", "", 0L, 0L, 0L, 0L, 0L, null, null, false, false, "book",
+      Book(BookMetadata("Book", null, null, null, mutableListOf(), null, null, null, null, null, null, null, false, null, null, null, null, null),
+        null, emptyList(), null, null, null, null, null, null, numTracks), null, null, null, null, null)
+    val mark = resolverDownloadMark { _, _ -> true }
+
+    val incomplete = serverBook(numTracks = 3)
+    assertNull("marked not downloaded", mark(listOf(partial), "a", incomplete, null))
+    assertEquals(PlaybackSource.Stream("li1", null),
+      planStart(StartRequest.forWrapper(incomplete, null, playWhenReady = true, playbackRate = 1f), "a", resolver(partial)))
+
+    val complete = serverBook(numTracks = 2)
+    assertEquals("local_1", mark(listOf(partial), "a", complete, null))
+    assertSame(partial, (planStart(StartRequest.forWrapper(complete, null, playWhenReady = true, playbackRate = 1f), "a", resolver(partial)) as PlaybackSource.Local).item)
   }
 
   @Test fun partialCopyStreams() {

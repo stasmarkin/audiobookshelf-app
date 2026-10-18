@@ -2,7 +2,6 @@ package app.absplus.android.media
 
 import android.content.Context
 import android.util.Log
-import app.absplus.android.data.Book
 import app.absplus.android.data.ItemInProgress
 import app.absplus.android.data.Library
 import app.absplus.android.data.LibraryAuthorItem
@@ -28,6 +27,7 @@ import app.absplus.android.device.AppStorage
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.player.PlaybackSource
 import app.absplus.android.player.PlaybackSourceResolver
+import app.absplus.android.player.serverTrackCount
 import app.absplus.android.sync.ActiveServer
 import app.absplus.android.sync.AuthorsRequest
 import app.absplus.android.sync.CatalogReader
@@ -349,8 +349,7 @@ internal fun resolverDownloadMark(
         hasTracks: (LocalLibraryItem, PodcastEpisode?) -> Boolean
 ): DownloadMark = { copies, sc, item, episodeId ->
   val resolver = PlaybackSourceResolver({ copies }, { id -> copies.find { it.id == id } }, storageAvailable, hasTracks)
-  val book = item.media as? Book
-  when (val source = resolver.resolve(sc, item.id, episodeId, item.ino, book?.let { it.numTracks ?: it.tracks?.size })) {
+  when (val source = resolver.resolve(sc, item.id, episodeId, item.ino, item.serverTrackCount())) {
     is PlaybackSource.Local -> if (episodeId == null) source.item.id else source.episode?.id
     else -> null
   }
