@@ -20,6 +20,7 @@ function layout({ serverState = 'offline', networkConnected = true, user = null,
   const timers = []
   const sandbox = {
     AbsLogger: { info: async () => {}, error: async () => {} },
+    AbsDownloader: { addListener: async () => ({ remove() {} }), checkAutoDownloads: async () => ({ status: 'skipped' }) },
     CapacitorHttp: {},
     console: { ...console, log: () => {}, warn: () => {} },
     setTimeout: (fn, ms) => timers.push({ fn, ms }),
