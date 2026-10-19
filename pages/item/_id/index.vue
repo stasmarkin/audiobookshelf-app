@@ -798,14 +798,21 @@ export default {
       }
     },
     async reloadLocalLibraryItem() {
+      // Only the latest read for this page lands: a late answer must not redirect another page or bring back a gone copy
+      const id = this.libraryItem.id
+      const generation = (this.localReloadGeneration = (this.localReloadGeneration || 0) + 1)
+      // A refresh may replace the object of the same item meanwhile; the answer still applies to it
+      const stale = () => this._isDestroyed || this.libraryItem?.id !== id || generation !== this.localReloadGeneration
       if (this.isLocal) {
         // The page shows the local item itself, so when it is gone there is nothing left to show
-        const stillThere = await this.$db.getLocalLibraryItem(this.libraryItem.id)
+        const stillThere = await this.$db.getLocalLibraryItem(id)
+        if (stale()) return
         if (!stillThere) this.$router.replace('/downloads')
         else this.libraryItem = stillThere
         return
       }
       const localItems = await this.$db.getLocalLibraryItems().catch(() => [])
+      if (stale()) return
       this.$set(this.libraryItem, 'localLibraryItem', findLocalCopy(localItems, this.libraryItem, this.$store.state.activeServerConfigId))
     },
     libraryChanged() {
