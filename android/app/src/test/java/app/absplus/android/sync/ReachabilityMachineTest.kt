@@ -17,6 +17,7 @@ import app.absplus.android.sync.ReachabilityInput.ServerConfigured
 import app.absplus.android.sync.ReachabilityInput.ServerError
 import app.absplus.android.sync.ReachabilityInput.SignedIn
 import app.absplus.android.sync.ReachabilityInput.SocketLost
+import app.absplus.android.sync.ReachabilityInput.Urgent
 import app.absplus.android.sync.ServerState.OFFLINE
 import app.absplus.android.sync.ServerState.ONLINE
 import app.absplus.android.sync.ServerState.UNAUTHORIZED
@@ -192,5 +193,26 @@ class ReachabilityMachineTest {
     assertEffects(setOf(Emit(OFFLINE), ScheduleProbe(5000)), down.on(RequestUnreachable))
     val lost = ReachabilityMachine(networkAvailable = true).apply { on(ServerConfigured("a")) }
     assertEffects(setOf(CancelProbe, Emit(OFFLINE)), lost.on(NetworkLost))
+  }
+
+  @Test fun anUrgentWaitProbesAtOnceAndNeverBacksOffPastTheShortInterval() {
+    val m = machineIn(OFFLINE)
+    repeat(4) { m.on(ProbeFailed) }
+    assertEffects(setOf(ScheduleProbe(0)), m.on(Urgent(true)), "a wait begins: probe now")
+    val delays = (1..6).map { (m.on(ProbeFailed).single { it is ScheduleProbe } as ScheduleProbe).delayMs }
+    assertTrue("capped at $URGENT_PROBE_MS: $delays", delays.all { it <= URGENT_PROBE_MS })
+    assertEffects(emptySet(), m.on(Urgent(true)), "already urgent: nothing new")
+
+    assertEffects(emptySet(), m.on(Urgent(false)))
+    repeat(4) { m.on(ProbeFailed) }
+    assertEquals("back to the normal backoff", ScheduleProbe(PROBE_BACKOFF_MS.last()), m.on(ProbeFailed).single { it is ScheduleProbe })
+  }
+
+  @Test fun urgencyDoesNotProbeWhatNeedsNoProbe() {
+    assertEffects(emptySet(), machineIn(ONLINE).on(Urgent(true)), "online")
+    assertEffects(emptySet(), machineIn(UNAUTHORIZED).on(Urgent(true)), "refused: waits for a sign-in")
+    assertEffects(emptySet(), ReachabilityMachine(networkAvailable = true).on(Urgent(true)), "no server")
+    val noNetwork = machineIn(OFFLINE).apply { on(NetworkLost) }
+    assertEffects(emptySet(), noNetwork.on(Urgent(true)), "no network: its return probes")
   }
 }

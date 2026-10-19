@@ -65,6 +65,17 @@ fun readyServerConfigId(reachableServerConfigId: String?, liveSessionServerConfi
         reachableServerConfigId?.takeIf { it == liveSessionServerConfigId }
 
 /**
+ * The saved server a wait may sign in with by itself once it answers: a cold start offline never signed in, and the app's
+ * own sign-in needs the WebView, which a phone with its screen off may not run. Only the server the wait is for, while
+ * it is the reachable one and the last the user signed in to (an explicit sign-out clears that), and no live session.
+ */
+fun savedServerForWait(waitServerConfigId: String?, liveSessionServerConfigId: String?, lastServerConfigId: String?,
+                       reachableServerConfigId: String?, state: ServerState): String? =
+        waitServerConfigId?.takeIf {
+          liveSessionServerConfigId == null && state == ServerState.ONLINE && it == lastServerConfigId && it == reachableServerConfigId
+        }
+
+/**
  * A start of the item the queue is at that could only stream while the server is away (or not signed in yet): the
  * queue waits on it, as when it reaches that item by itself, instead of failing the start and losing the queue. Null:
  * start as usual (a single Play outside the queue, a downloaded copy, a cast start, the server ready or refusing the
@@ -100,7 +111,7 @@ data class StreamPermission(val metered: Boolean, val cellular: StreamingUsingCe
  * server is away. Decides when to start again; never touches the player. Not thread-safe: the service calls it on the
  * main thread. An action is handed out once and ends the wait.
  */
-class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) {
+class AwaitingServer(private val onWaitChanged: () -> Unit = {}, private val clock: () -> Long = System::currentTimeMillis) {
   private sealed interface Wait {
     val serverConfigId: String
     val playWhenReady: Boolean
@@ -118,6 +129,11 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
   private data class Blocked(val item: PlaylistQueueItem, override val serverConfigId: String, override val playWhenReady: Boolean) : Wait
 
   private var wait: Wait? = null
+    set(value) {
+      val before = field?.playWhenReady == true
+      field = value
+      if (before != wantsToPlay) onWaitChanged()
+    }
   // When the wait began; a resume that failed continues the same wait
   private var waitingSince = 0L
   // A ResumeStream is out and the player has not been ready since
@@ -125,6 +141,15 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
   private var failedResumes = 0
 
   val isAwaiting: Boolean get() = wait != null
+
+  /** A wait that will play when the server is back (not one the user paused). */
+  val wantsToPlay: Boolean get() = wait?.playWhenReady == true
+
+  /** A ResumeStream is out and the player has not been ready since (nor has the resume failed). */
+  val isResuming: Boolean get() = resumeInFlight
+
+  /** How long until the wait is stale: a resume after that plays paused, unless the user asks. */
+  fun msUntilStale(): Long = if (wait == null) 0L else maxOf(0L, STALE_WAIT_MS - (clock() - waitingSince))
 
   /** A lost stream waits (the player holds a dead stream), rather than a queue stopped before its next item. */
   val isStreamLost: Boolean get() = wait is Lost
@@ -187,7 +212,10 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
 
   /** The user wants to play: now when the server is online, otherwise when it comes back (the service asks for a probe). */
   fun onUserPlay(state: ServerState, activeServerConfigId: String?, permission: StreamPermission = StreamPermission.UNMETERED): AwaitingAction? {
-    wait = when (val w = wait ?: return null) {
+    val current = wait ?: return null
+    // The user's Play is fresh intent: a long wait resumes playing again when the server comes back
+    waitingSince = clock()
+    wait = when (val w = current) {
       is Lost -> w.copy(playWhenReady = true)
       is Blocked -> w.copy(playWhenReady = true)
     }
@@ -207,8 +235,9 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
     val confirmed = byUser || !(permission.metered && permission.cellular == StreamingUsingCellularSetting.ASK)
     val fresh = byUser || clock() - waitingSince <= STALE_WAIT_MS
     val playWhenReady = w.playWhenReady && confirmed && fresh
-    wait = null
+    // Before the wait ends: who hears the end sees the resume
     resumeInFlight = true
+    wait = null
     return when (w) {
       is Lost -> AwaitingAction.ResumeStream(w.libraryItemId, w.episodeId, w.position, playWhenReady, w.serverConfigId, expectedTracks = w.expectedTracks)
       is Blocked -> AwaitingAction.ResumeStream(w.item.libraryItemId, w.item.episodeId, null, playWhenReady, w.serverConfigId, w.item, w.item.expectedTracks)
@@ -256,8 +285,8 @@ class AwaitingServer(private val clock: () -> Long = System::currentTimeMillis) 
     return true
   }
 
-  private companion object {
-    const val MAX_FAILED_RESUMES = 3
+  companion object {
+    private const val MAX_FAILED_RESUMES = 3
     const val STALE_WAIT_MS = 30 * 60_000L
   }
 }

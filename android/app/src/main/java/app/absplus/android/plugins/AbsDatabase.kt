@@ -312,11 +312,13 @@ class AbsDatabase : Plugin() {
 
   @PluginMethod
   fun logout(call:PluginCall) {
+    // Before the session ends: a waiting player signs in with the last server by itself (savedServerForWait), never
+    // after a sign-out
+    DeviceManager.deviceData.lastServerConnectionConfigId = null
     // Session first: an answer dropped as stale by the bump below must already see it ended (SyncDeps.signedIn)
     DeviceManager.serverConnectionConfig = null
     ApiHandler.invalidateAuthRequests()
     GlobalScope.launch(Dispatchers.IO) {
-      DeviceManager.deviceData.lastServerConnectionConfigId = null
       DeviceManager.dbManager.saveDeviceData(DeviceManager.deviceData)
       call.resolve()
     }
