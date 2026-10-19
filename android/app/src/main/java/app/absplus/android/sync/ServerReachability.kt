@@ -115,6 +115,8 @@ object ServerReachability : ReachabilitySink {
 
   fun retryNow() = dispatch { ReachabilityInput.ManualRetry }
 
+  fun setUrgent(on: Boolean) = dispatch { ReachabilityInput.Urgent(on) }
+
   internal fun onServerConfigured(serverConfigId: String) = dispatch { ReachabilityInput.ServerConfigured(serverConfigId) }
 
   internal fun onServerCleared() = dispatch { ReachabilityInput.ServerCleared }

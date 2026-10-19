@@ -17,6 +17,8 @@ sealed interface ReachabilityInput {
   object Foreground : ReachabilityInput
   object ManualRetry : ReachabilityInput
   object SocketLost : ReachabilityInput
+  /** Something waits on the server to play (on) or stopped waiting (off): probe it at least every [URGENT_PROBE_MS]. */
+  data class Urgent(val on: Boolean) : ReachabilityInput
 }
 
 sealed interface ReachabilityEffect {
@@ -27,6 +29,7 @@ sealed interface ReachabilityEffect {
 
 val PROBE_BACKOFF_MS = listOf(5_000L, 10_000L, 30_000L, 60_000L, 300_000L)
 const val PROBE_TIMEOUT_MS = 5_000L
+const val URGENT_PROBE_MS = 15_000L
 
 /**
  * Whether the active server answers. Pure state machine: no Android,
@@ -44,11 +47,20 @@ class ReachabilityMachine(networkAvailable: Boolean) {
     private set
 
   private var backoffIndex = 0
+  private var urgent = false
 
   fun on(input: ReachabilityInput): List<ReachabilityEffect> {
     when (input) {
       ReachabilityInput.NetworkAvailable -> networkAvailable = true
       ReachabilityInput.NetworkLost -> networkAvailable = false
+      is ReachabilityInput.Urgent -> {
+        val was = urgent
+        urgent = input.on
+        // A wait that begins while the backoff sleeps minutes probes at once, then keeps the short interval
+        val probe = input.on && !was && serverConfigId != null && networkAvailable &&
+                state != ServerState.ONLINE && state != ServerState.UNAUTHORIZED
+        return if (probe) probeNow() else emptyList()
+      }
       is ReachabilityInput.ServerConfigured -> return configure(input.serverConfigId)
       ReachabilityInput.ServerCleared -> {
         if (serverConfigId == null) return emptyList()
@@ -81,7 +93,7 @@ class ReachabilityMachine(networkAvailable: Boolean) {
       ReachabilityInput.SocketLost ->
         // A dropped socket on a live network is the only signal for a server that went away while nothing was requested
         if (state == ServerState.ONLINE && networkAvailable) listOf(ReachabilityEffect.ScheduleProbe(0)) else emptyList()
-      is ReachabilityInput.ServerConfigured, ReachabilityInput.ServerCleared -> emptyList()
+      is ReachabilityInput.ServerConfigured, ReachabilityInput.ServerCleared, is ReachabilityInput.Urgent -> emptyList()
     }
   }
 
@@ -108,7 +120,7 @@ class ReachabilityMachine(networkAvailable: Boolean) {
   private fun goOffline(): List<ReachabilityEffect> {
     val emit = moveTo(ServerState.OFFLINE)
     if (!networkAvailable) return emit
-    val delay = PROBE_BACKOFF_MS[backoffIndex]
+    val delay = PROBE_BACKOFF_MS[backoffIndex].let { if (urgent) minOf(it, URGENT_PROBE_MS) else it }
     backoffIndex = minOf(backoffIndex + 1, PROBE_BACKOFF_MS.lastIndex)
     return emit + ReachabilityEffect.ScheduleProbe(delay)
   }

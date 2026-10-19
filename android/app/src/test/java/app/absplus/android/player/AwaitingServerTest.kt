@@ -341,4 +341,59 @@ class AwaitingServerTest {
     assertEquals(queue[0], queueItemToAwait(request, PlaybackSource.Stream("li1", null), queue, 0, ServerState.ONLINE, serverReady = false))
     assertNull(queueItemToAwait(request, PlaybackSource.Stream("li1", null), queue, 0, ServerState.ONLINE, serverReady = true))
   }
+
+  @Test fun aWaitSignsInWithTheSavedServerOnlyWhenNobodyIsSignedIn() {
+    assertEquals("a", savedServerForWait("a", null, "a", "a", ServerState.ONLINE))
+    assertNull("signed in already", savedServerForWait("a", "a", "a", "a", ServerState.ONLINE))
+    assertNull("signed out by the user", savedServerForWait("a", null, null, "a", ServerState.ONLINE))
+    assertNull("the user's last server is another", savedServerForWait("a", null, "b", "a", ServerState.ONLINE))
+    assertNull("another server answers", savedServerForWait("a", null, "a", "b", ServerState.ONLINE))
+    assertNull("not answering", savedServerForWait("a", null, "a", "a", ServerState.OFFLINE))
+    assertNull("no wait", savedServerForWait(null, null, "a", "a", ServerState.ONLINE))
+  }
+
+  @Test fun theServiceHearsWhenAWaitStartsOrStopsWantingToPlay() {
+    var changes = 0
+    val waiting = AwaitingServer(onWaitChanged = { changes++ })
+    val item = PlaylistQueueItem("li1", null)
+    waiting.onQueueBlocked(item, "a")
+    assertTrue(waiting.wantsToPlay)
+    assertEquals(1, changes)
+    waiting.onUserSeek(3.0)
+    assertEquals("no change of intent", 1, changes)
+    waiting.onUserPause()
+    assertFalse(waiting.wantsToPlay)
+    assertEquals(2, changes)
+    waiting.onUserPlay(ServerState.OFFLINE, null)
+    assertEquals(3, changes)
+    assertTrue(waiting.onServerState(ServerState.ONLINE, "a") is ResumeStream)
+    assertFalse("the wait ended", waiting.wantsToPlay)
+    assertEquals(4, changes)
+  }
+
+  @Test fun theEndOfAWaitInAPlayRequestIsSeenAsResuming() {
+    var resumingWhenEnded: Boolean? = null
+    lateinit var waiting: AwaitingServer
+    waiting = AwaitingServer(onWaitChanged = { if (!waiting.wantsToPlay) resumingWhenEnded = waiting.isResuming })
+    waiting.onStreamLost("li1", null, 5.0, true, "a")
+    waiting.onServerState(ServerState.ONLINE, "a")
+    assertEquals(true, resumingWhenEnded)
+    waiting.onPlaybackReady()
+    assertFalse(waiting.isResuming)
+  }
+
+  @Test fun aWaitKnowsWhenItGoesStale() {
+    var now = 0L
+    val waiting = AwaitingServer { now }
+    assertEquals("no wait", 0L, waiting.msUntilStale())
+    waiting.onStreamLost("li1", null, 5.0, true, "a")
+    now = 10 * 60_000L
+    assertEquals(20 * 60_000L, waiting.msUntilStale())
+    now = 31 * 60_000L
+    assertEquals(0L, waiting.msUntilStale())
+    waiting.onUserPlay(ServerState.OFFLINE, null)
+    assertEquals("a Play renews the wait", 30 * 60_000L, waiting.msUntilStale())
+    now = 40 * 60_000L
+    assertEquals(true, (waiting.onServerState(ServerState.ONLINE, "a") as ResumeStream).playWhenReady)
+  }
 }
