@@ -108,6 +108,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 - `plugins/localStore.js` — `LocalStorage` class backed by Capacitor `Preferences`; injected as `$localStore`; persists user settings, theme, language, last library.
 - `plugins/theme.client.js` + `theme/` — semantic presentation-theme tokens, built-in themes as validated data, and the `$theme` service; see `docs/theme-architecture.md`. Themes are presentation-only.
 - `pages/bookshelf/index.vue`, `pages/search.vue` — Home and search read through `$absData.getPersonalized`/`search` (the replica; the server only while the library was never reconciled and the server is online); `utils/homeShelves.js` merges the shelves, `utils/localCopy.js` finds downloaded copies.
+- `mixins/requiresServer.js` — `isServerOnline`, `isServerAway`, `isNotAvailableOffline`, `serverOnlyItem`: the only place for the "Requires the server" and "Not available offline" rules.
 - `plugins/init.client.js` — Registers global Vue utilities (`$eventBus`, date/time helpers, `$bytesPretty`, `$elapsedPretty`, etc.); handles back-button behavior for Android and iOS swipe navigation.
 - `plugins/capacitor/AbsAudioPlayer.js` — Web fallback implementation of `AbsAudioPlayer` using the HTML5 `<audio>` element; used during browser-based development.
 
