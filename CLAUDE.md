@@ -81,7 +81,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 | `AbsUpdater` | Settings → Updates: GitHub release check, verified download, Android installer (`updater/`, docs/in-app-updates.md) |
 | `AbsAppearance` | RICE: device light/dark, Android 12+ system palette, contrast; app-owned background (`appearance/`, docs/rice-customization.md) |
 | `AbsThemeImport` | RICE: bounded GitHub palette-file import (`themeimport/`); start/readCandidate/cancel only |
-| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks, progress and the cached user object from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); catalog reads from `replica.db` (libraries, items, series, authors, collections; at most 100 items per call), reconciled by `sync/CatalogReconciler.kt` and kept current by socket events through `applyServerEvent`; used through `$absData` (`utils/dataService.js`) |
+| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks, progress and the cached user object from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); catalog reads from `replica.db` (libraries, items, series, authors, collections, playlists; at most 100 items per call), reconciled by `sync/CatalogReconciler.kt` and kept current by socket events through `applyServerEvent`; used through `$absData` (`utils/dataService.js`) |
 
 **JS → Native**: Call plugin methods directly, e.g. `AbsAudioPlayer.prepareLibraryItem({...})`.
 **Native → JS**: Use Capacitor's `notifyListeners()` on the native side and `addListener()` on the JS side.
@@ -114,7 +114,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 
 - `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`), reachability of the active server (`serverState`, `activeServerConfigId`), native sync state (`syncState`).
 - `store/user.js` — Live session (user, access token, server connection config); `mediaProgress`, `bookmarks` and `cachedUser` (rights and settings for offline) of the active server from native `userdata.db` via `$absData`; progress getters read `state.mediaProgress`, permission getters `user || cachedUser`; `revokeSession` ends only the live session (refused refresh), `logout` is the explicit sign-out; user settings.
-- `store/libraries.js` — Library list, current library ID, filter data; read through `$absData` while a server is active, so they work offline from the replica.
+- `store/libraries.js` — Library list, current library ID, filter data, playlist count (`numUserPlaylists`); read through `$absData` while a server is active, so they work offline from the replica.
 - `store/globals.js` — Modal open state and other UI globals.
 
 ### Playlist Queue
