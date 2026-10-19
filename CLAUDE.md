@@ -93,6 +93,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 - `player/CastManager.kt` / `CastPlayer.kt` — Google Cast support.
 - `media/MediaManager.kt` — Caches library items, authors, series, collections, and podcast data for Android Auto / media browser.
 - `media/MediaProgressSyncer.kt` — Syncs playback progress with the server.
+- `media/ListeningLedger.kt` — Streamed listening time `/sync` could not send goes to an offline session with its own id (Paper `playbackSession`); unsettled time survives process death (Paper `listeningLedger`).
 - `managers/DbManager.kt` — SQLite wrapper for local library items and progress.
 - `managers/SleepTimerManager.kt` — Sleep timer logic.
 - `server/ApiHandler.kt` — All REST API calls to the ABS server.
