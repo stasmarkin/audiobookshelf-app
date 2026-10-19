@@ -114,7 +114,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 
 - `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`), reachability of the active server (`serverState`, `activeServerConfigId`), native sync state (`syncState`).
 - `store/user.js` — Live session (user, access token, server connection config); `mediaProgress`, `bookmarks` and `cachedUser` (rights and settings for offline) of the active server from native `userdata.db` via `$absData`; progress getters read `state.mediaProgress`, permission getters `user || cachedUser`; `revokeSession` ends only the live session (refused refresh), `logout` is the explicit sign-out; user settings.
-- `store/libraries.js` — Library list, current library ID, filter data.
+- `store/libraries.js` — Library list, current library ID, filter data; read through `$absData` while a server is active, so they work offline from the replica.
 - `store/globals.js` — Modal open state and other UI globals.
 
 ### Playlist Queue
