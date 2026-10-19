@@ -81,7 +81,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 | `AbsUpdater` | Settings → Updates: GitHub release check, verified download, Android installer (`updater/`, docs/in-app-updates.md) |
 | `AbsAppearance` | RICE: device light/dark, Android 12+ system palette, contrast; app-owned background (`appearance/`, docs/rice-customization.md) |
 | `AbsThemeImport` | RICE: bounded GitHub palette-file import (`themeimport/`); start/readCandidate/cancel only |
-| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; used through `$absData` (`utils/dataService.js`) |
+| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks, progress and the cached user object from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); catalog reads from `replica.db` (libraries, items, series, authors, collections, playlists, home shelves (`getPersonalized`), search, item pages (`getLibraryItem`; `refresh` fetches the expanded item online once per version, `ExpandedItemCache`), recent episodes; at most 100 items per call, a podcast's item carries all its episodes), reconciled by `sync/CatalogReconciler.kt` and kept current by socket events through `applyServerEvent`; used through `$absData` (`utils/dataService.js`) |
 
 **JS → Native**: Call plugin methods directly, e.g. `AbsAudioPlayer.prepareLibraryItem({...})`.
 **Native → JS**: Use Capacitor's `notifyListeners()` on the native side and `addListener()` on the JS side.
@@ -90,9 +90,13 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 
 - `MainActivity.kt` — `BridgeActivity` subclass; registers all plugins; binds `PlayerNotificationService` on `onPostCreate` and wires it to `AbsAudioPlayer` via `pluginCallback`.
 - `player/PlayerNotificationService.kt` — `MediaBrowserServiceCompat` foreground service; owns ExoPlayer instance; implements `ClientEventEmitter` interface to push events back to `AbsAudioPlayer.kt`.
+- `player/PlaybackSourceResolver.kt` — Where a start plays from; every native start goes through `PlayerNotificationService.startItem`, and a downloaded copy of the same server and account always wins (a partial copy streams).
+- `player/AwaitingServer.kt` — A stream that loses its server pauses and waits (event `onAwaitingServer`) instead of closing, and resumes when the server is back.
 - `player/CastManager.kt` / `CastPlayer.kt` — Google Cast support.
 - `media/MediaManager.kt` — Caches library items, authors, series, collections, and podcast data for Android Auto / media browser.
 - `media/MediaProgressSyncer.kt` — Syncs playback progress with the server.
+- `media/ListeningLedger.kt` — Streamed listening time `/sync` could not send goes to an offline session with its own id (Paper `playbackSession`); unsettled time survives process death (Paper `listeningLedger`).
+- `db/replica/ReplicaDatabase.kt` — `replica.db`, the read-only copy of the active server's catalog; it can always be rebuilt from the server. Schema bumps are additive `AutoMigration`s; a downgrade empties it until the next sync.
 - `managers/DbManager.kt` — SQLite wrapper for local library items and progress.
 - `managers/SleepTimerManager.kt` — Sleep timer logic.
 - `server/ApiHandler.kt` — All REST API calls to the ABS server.
@@ -103,21 +107,25 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 - `plugins/db.js` — `DbService`; thin wrapper around `AbsDatabase`; injected as `$db`; also listens for `onTokenRefresh` / `onTokenRefreshFailure` events.
 - `plugins/localStore.js` — `LocalStorage` class backed by Capacitor `Preferences`; injected as `$localStore`; persists user settings, theme, language, last library.
 - `plugins/theme.client.js` + `theme/` — semantic presentation-theme tokens, built-in themes as validated data, and the `$theme` service; see `docs/theme-architecture.md`. Themes are presentation-only.
+- `pages/bookshelf/index.vue`, `pages/search.vue` — Home and search read through `$absData.getPersonalized`/`search` (the replica; the server only while the library was never reconciled and the server is online); `utils/homeShelves.js` merges the shelves, `utils/localCopy.js` finds downloaded copies.
+- `mixins/requiresServer.js` — `isServerOnline`, `isServerAway`, `isNotAvailableOffline`, `serverOnlyItem`: the only place for the "Requires the server" and "Not available offline" rules.
 - `plugins/init.client.js` — Registers global Vue utilities (`$eventBus`, date/time helpers, `$bytesPretty`, `$elapsedPretty`, etc.); handles back-button behavior for Android and iOS swipe navigation.
 - `plugins/capacitor/AbsAudioPlayer.js` — Web fallback implementation of `AbsAudioPlayer` using the HTML5 `<audio>` element; used during browser-based development.
 
 ### Vuex Store
 
-- `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`).
-- `store/user.js` — Auth token, server connection config, user object (permissions, media progress, bookmarks), user settings.
-- `store/libraries.js` — Library list, current library ID, filter data.
+- `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`), reachability of the active server (`serverState`, `activeServerConfigId`), native sync state (`syncState`).
+- `store/user.js` — Live session (user, access token, server connection config); `mediaProgress`, `bookmarks` and `cachedUser` (rights and settings for offline) of the active server from native `userdata.db` via `$absData`; progress getters read `state.mediaProgress`, permission getters `user || cachedUser`; `revokeSession` ends only the live session (refused refresh), `logout` is the explicit sign-out; user settings.
+- `store/libraries.js` — Library list, current library ID, filter data, playlist count (`numUserPlaylists`); read through `$absData` while a server is active, so they work offline from the replica.
 - `store/globals.js` — Modal open state and other UI globals.
 
 ### Playlist Queue
 
 Playlist playback uses a two-layer approach so advancement works even when the screen is off or Android's Doze mode throttles the WebView's JS engine:
 
-**Native layer** (`PlayerNotificationService.kt`): Holds `playlistQueue: List<PlaylistQueueItem>` and `playlistQueueIndex`. When ExoPlayer fires `STATE_ENDED`, `PlayerListener` calls `advancePlaylistQueue()` directly on the service. This calls `preparePlayer()` for the next item (local: from DB; server: via `apiHandler.playLibraryItem()`) without touching the JS layer at all.
+**Native layer** (`PlayerNotificationService.kt`): Holds `playlistQueue: List<PlaylistQueueItem>` and `playlistQueueIndex`. When ExoPlayer fires `STATE_ENDED`, `PlayerListener` calls `advancePlaylistQueue()` directly on the service. This calls `preparePlayer()` for the next item (source chosen by `PlaybackSourceResolver`, like every native start) without touching the JS layer at all.
+
+Native queue items carry server ids (plus `ino`, `serverConnectionConfigId` and the expected track count); identity is `PlaylistQueueItem.matches` (`QueueIdentity.kt`) and its JS twin `queueItemMatchesSession`. A queue that reaches an undownloaded item while the server is away waits on it instead of skipping. A series queue is built from `$absData.getLibraryItems` (the replica), so it works offline.
 
 **JS layer** (`AudioPlayerContainer.vue` + `utils/playbackQueue.js`): The queue is the central Vuex `playbackQueue` (`{ sourceType, sourceId, items, currentIndex }`). Pages do not set it up themselves (`pages/playlist/_id.vue` no longer calls `setPlaylistQueue`); they emit `play-item` with a queue source, and `AudioPlayerContainer` resolves the queue for playlists, collections and series (`resolvePlaybackQueue`), syncs it with `AbsAudioPlayer.setPlaylistQueue(items, currentIndex)`, then starts playback. A request without a source clears the queue (`clearPlaylistQueue()`). When `onPlaybackEnded` fires in JS, it reads the native queue (`AbsAudioPlayer.getPlaylistQueue()`) and re-syncs the Vuex `currentIndex` from it — it does NOT trigger playback. Up Next edits go through `mutateQueue`, which resyncs instead of writing if native already advanced. See `docs/continuous-playback.md`.
 
@@ -127,7 +135,7 @@ Playlist playback uses a two-layer approach so advancement works even when the s
 
 - **Server REST API**: `$axios` (configured in `plugins/axios.js`); base URL is the connected server address.
 - **Real-time updates**: socket.io via `$socket`; socket must be authenticated with `auth` event after connection.
-- **Expired access token (401)**: `$nativeHttp`, `$axios` and native `ApiHandler` share one renewal per saved server (`$authRenewal` → `AbsDatabase.refreshAccessToken` → `server/TokenRefresher.kt`); never refresh directly. See `docs/authentication.md`.
+- **Expired access token (401)**: `$nativeHttp`, `$axios` and native `ApiHandler` share one renewal per saved server (`$authRenewal` → `AbsDatabase.refreshAccessToken` → `server/TokenRefresher.kt`); never refresh directly. A refused refresh ends only the live session (`user/revokeSession`, `serverState` `unauthorized`); the app does not go to `/connect`. See `docs/authentication.md`.
 - **Playback events**: flow from `PlayerNotificationService` → `AbsAudioPlayer.kt` (via `ClientEventEmitter`) → `notifyListeners()` → JS `addListener()` handlers → Vuex mutations.
 
 ### i18n
