@@ -19,6 +19,8 @@ Merged into `plus`, not yet in a published release.
   downloaded cover if there is one, "Waiting for server"), instead of only a "Waiting for the server" toast, or of the
   previous book's title when a player was open. The notification, the lock screen and the widget show the same book.
   When the server is back it plays as before. A book that the catalog copy does not have yet still shows the toast.
+  Fixed: with the screen off, a waiting book could stay silent for minutes after the server came back, until the app
+  was opened; the wait now checks the server every 15 seconds and starts by itself, also before the app signed in.
 - **Book, podcast and episode pages offline:** every book, podcast and episode page opens from the catalog copy,
   online at once and offline too, also after a cold start in airplane mode. Online the page then fills in the
   chapters, tracks and files within a second; the full copy is fetched once per version of the book, so opening it

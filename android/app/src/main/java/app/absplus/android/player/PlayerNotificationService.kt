@@ -110,6 +110,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     var isUnmeteredNetwork = false
     var hasNetworkConnectivity = false // Not 100% reliable has internet
     var isSwitchingPlayer = false // Used when switching between cast player and exoplayer
+    private const val RESUME_WAKE_MS = 60_000L
   }
 
   private val tag = "PlayerNotificationServ"
@@ -173,7 +174,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private val startScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
   // A stream that lost its server, or a queue stopped at an item it can only stream, waits here instead of closing
-  val awaiting = AwaitingServer()
+  val awaiting = AwaitingServer(onWaitChanged = { keepAwakeForWait() })
+  private var waitWakeLock: PowerManager.WakeLock? = null
   internal val awaitingPresentation = AwaitingPresentation { shown, display -> onAwaitingPresentationChanged(shown, display) }
   /** The book a waiting queue is on, shown instead of the open session (or of nothing). */
   val awaitingDisplay: AwaitingDisplay? get() = awaitingPresentation.display
@@ -225,6 +227,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private var waitHoldsForeground = false
   // Android refused a start from the background: the wait's notification asks for a Play (see onBackgroundStartRefused)
   private var startRefusedNoticeShown = false
+    set(value) {
+      field = value
+      keepAwakeForWait()
+    }
   // That start was of a download: the user's Play starts it again, with or without the server
   private var refusedLocalStart = false
   // Tests replace it with a refusal
@@ -405,6 +411,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     DLog.marker("Playback service destroyed")
     DLog.i(RESTORE_TAG, "Player service destroyed | hadSession=${currentPlaybackSession != null} | resumable=${PlaybackRestoreStore.isResumable(this)} | queue=${playlistQueue.size}")
     isServiceDestroyed = true
+    keepAwakeForWait()
     mainHandler.removeCallbacks(missingKeyUpRelease)
     isStarted = false
     isClosed = true
@@ -1275,7 +1282,54 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   private fun resumeAwaitingIfReady() {
     // After a refused start a resume from here is refused again: it waits for the user's Play
     if (startRefusedNoticeShown) return
+    useSavedServerForWait()
     perform(awaiting.onServerState(ServerReachability.state.value, readyServer(), streamPermission()))
+  }
+
+  // The play request needs a live session: without one (a cold start offline) the wait signs in with the saved server,
+  // as a restore does, rather than waiting for the app's own sign-in, which needs a running WebView
+  private fun useSavedServerForWait() {
+    val id = savedServerForWait(awaiting.serverConfigId, DeviceManager.serverConnectionConfig?.id,
+            DeviceManager.deviceData.lastServerConnectionConfigId, ServerReachability.serverConfigId.value, ServerReachability.state.value) ?: return
+    val config = DeviceManager.getServerConnectionConfig(id) ?: return
+    DLog.i(tag, "Server is back before the app signed in - the wait uses the saved connection of $id")
+    DeviceManager.serverConnectionConfig = config
+    ActiveServer.remember(id)
+  }
+
+  // A wait that will play by itself keeps the CPU up and the server probed often, until it goes stale: with the screen off
+  // a sleeping CPU stretches the probe backoff to minutes, and no network change may come to wake it (a VPN keeps the
+  // default network up). A refused start waits for the user's Play and needs neither
+  private fun keepAwakeForWait() {
+    // Before onCreate (a service built by a test) there is nothing to keep awake
+    if (!::ctx.isInitialized) return
+    mainHandler.removeCallbacks(waitWentStale)
+    val untilStale = awaiting.msUntilStale()
+    val wants = awaiting.wantsToPlay && !startRefusedNoticeShown && untilStale > 0 && !isServiceDestroyed
+    ServerReachability.setUrgent(wants)
+    when {
+      wants -> {
+        holdWaitWakeLock(untilStale)
+        mainHandler.postDelayed(waitWentStale, untilStale)
+      }
+      // The wait ended in a play request: the CPU stays up until the player takes over (it holds its own lock)
+      awaiting.isResuming && !isServiceDestroyed -> holdWaitWakeLock(RESUME_WAKE_MS)
+      else -> {
+        waitWakeLock?.let { if (it.isHeld) it.release() }
+        waitWakeLock = null
+      }
+    }
+  }
+
+  private val waitWentStale = Runnable { keepAwakeForWait() }
+
+  private fun holdWaitWakeLock(timeoutMs: Long) {
+    val lock = waitWakeLock ?: getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "audiobookshelf:awaitingServer")?.apply { setReferenceCounted(false) }
+            ?: return
+    waitWakeLock = lock
+    // Not reference counted: acquiring again only moves the timeout
+    lock.acquire(timeoutMs)
   }
 
   private fun streamPermission(): StreamPermission {
@@ -2206,7 +2260,10 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       }
       // The player has nothing to play while waiting: start again now if the server is back, else probe it. Before the
       // restore below: a queue may wait with no session, and the last session is not what it waits on
+      useSavedServerForWait()
       val action = awaiting.onUserPlay(ServerReachability.state.value, readyServer(), streamPermission())
+      // A Play renews a stale wait without changing its intent: it is kept awake again
+      keepAwakeForWait()
       if (action == null) ServerReachability.retryNow() else perform(action)
       return
     }
