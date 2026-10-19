@@ -81,7 +81,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 | `AbsUpdater` | Settings → Updates: GitHub release check, verified download, Android installer (`updater/`, docs/in-app-updates.md) |
 | `AbsAppearance` | RICE: device light/dark, Android 12+ system palette, contrast; app-owned background (`appearance/`, docs/rice-customization.md) |
 | `AbsThemeImport` | RICE: bounded GitHub palette-file import (`themeimport/`); start/readCandidate/cancel only |
-| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks, progress and the cached user object from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); used through `$absData` (`utils/dataService.js`) |
+| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks, progress and the cached user object from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); catalog reads from `replica.db` (libraries and items; at most 100 items per call), reconciled by `sync/CatalogReconciler.kt` and kept current by socket events through `applyServerEvent`; used through `$absData` (`utils/dataService.js`) |
 
 **JS → Native**: Call plugin methods directly, e.g. `AbsAudioPlayer.prepareLibraryItem({...})`.
 **Native → JS**: Use Capacitor's `notifyListeners()` on the native side and `addListener()` on the JS side.
@@ -96,6 +96,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 - `media/MediaManager.kt` — Caches library items, authors, series, collections, and podcast data for Android Auto / media browser.
 - `media/MediaProgressSyncer.kt` — Syncs playback progress with the server.
 - `media/ListeningLedger.kt` — Streamed listening time `/sync` could not send goes to an offline session with its own id (Paper `playbackSession`); unsettled time survives process death (Paper `listeningLedger`).
+- `db/replica/ReplicaDatabase.kt` — `replica.db`, the read-only copy of the active server's catalog; it can always be rebuilt from the server (destructive migration).
 - `managers/DbManager.kt` — SQLite wrapper for local library items and progress.
 - `managers/SleepTimerManager.kt` — Sleep timer logic.
 - `server/ApiHandler.kt` — All REST API calls to the ABS server.
