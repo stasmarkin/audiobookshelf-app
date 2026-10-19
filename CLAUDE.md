@@ -108,7 +108,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 
 ### Vuex Store
 
-- `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`).
+- `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`), reachability of the active server (`serverState`, `activeServerConfigId`).
 - `store/user.js` — Auth token, server connection config, user object (permissions, media progress, bookmarks), user settings.
 - `store/libraries.js` — Library list, current library ID, filter data.
 - `store/globals.js` — Modal open state and other UI globals.
