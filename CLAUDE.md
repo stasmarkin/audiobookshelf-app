@@ -81,7 +81,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 | `AbsUpdater` | Settings → Updates: GitHub release check, verified download, Android installer (`updater/`, docs/in-app-updates.md) |
 | `AbsAppearance` | RICE: device light/dark, Android 12+ system palette, contrast; app-owned background (`appearance/`, docs/rice-customization.md) |
 | `AbsThemeImport` | RICE: bounded GitHub palette-file import (`themeimport/`); start/readCandidate/cancel only |
-| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; used through `$absData` (`utils/dataService.js`) |
+| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); used through `$absData` (`utils/dataService.js`) |
 
 **JS → Native**: Call plugin methods directly, e.g. `AbsAudioPlayer.prepareLibraryItem({...})`.
 **Native → JS**: Use Capacitor's `notifyListeners()` on the native side and `addListener()` on the JS side.
@@ -108,8 +108,8 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 
 ### Vuex Store
 
-- `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`).
-- `store/user.js` — Auth token, server connection config, user object (permissions, media progress, bookmarks), user settings.
+- `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`), reachability of the active server (`serverState`, `activeServerConfigId`), native sync state (`syncState`).
+- `store/user.js` — Auth token, server connection config, user object (permissions, media progress), bookmarks (`state.bookmarks` from native `userdata.db` via `$absData`, kept without a user), user settings.
 - `store/libraries.js` — Library list, current library ID, filter data.
 - `store/globals.js` — Modal open state and other UI globals.
 
