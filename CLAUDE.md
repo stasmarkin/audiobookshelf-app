@@ -81,7 +81,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 | `AbsUpdater` | Settings → Updates: GitHub release check, verified download, Android installer (`updater/`, docs/in-app-updates.md) |
 | `AbsAppearance` | RICE: device light/dark, Android 12+ system palette, contrast; app-owned background (`appearance/`, docs/rice-customization.md) |
 | `AbsThemeImport` | RICE: bounded GitHub palette-file import (`themeimport/`); start/readCandidate/cancel only |
-| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); used through `$absData` (`utils/dataService.js`) |
+| `AbsData` | Offline-first data: active server reachability (`unknown`/`online`/`offline`/`unauthorized`, `sync/ServerReachability.kt`), request/socket reports from JS, manual retry; bookmarks, progress and the cached user object from `userdata.db`, written offline and queued for the server by the sync engine (`sync/SyncEngine.kt`: `syncNow`, `getSyncState`, `applyServerEvent`; events `onDataChanged`/`onSyncState`); used through `$absData` (`utils/dataService.js`) |
 
 **JS → Native**: Call plugin methods directly, e.g. `AbsAudioPlayer.prepareLibraryItem({...})`.
 **Native → JS**: Use Capacitor's `notifyListeners()` on the native side and `addListener()` on the JS side.
@@ -109,7 +109,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 ### Vuex Store
 
 - `store/index.js` — Global state: network status, current playback session, player playing/fullscreen state, cast availability, playback queue (`playbackQueue`), reachability of the active server (`serverState`, `activeServerConfigId`), native sync state (`syncState`).
-- `store/user.js` — Auth token, server connection config, user object (permissions, media progress), bookmarks (`state.bookmarks` from native `userdata.db` via `$absData`, kept without a user), user settings.
+- `store/user.js` — Live session (user, access token, server connection config); `mediaProgress`, `bookmarks` and `cachedUser` (rights and settings for offline) of the active server from native `userdata.db` via `$absData`; progress getters read `state.mediaProgress`, permission getters `user || cachedUser`; `revokeSession` ends only the live session (refused refresh), `logout` is the explicit sign-out; user settings.
 - `store/libraries.js` — Library list, current library ID, filter data.
 - `store/globals.js` — Modal open state and other UI globals.
 
@@ -127,7 +127,7 @@ Playlist playback uses a two-layer approach so advancement works even when the s
 
 - **Server REST API**: `$axios` (configured in `plugins/axios.js`); base URL is the connected server address.
 - **Real-time updates**: socket.io via `$socket`; socket must be authenticated with `auth` event after connection.
-- **Expired access token (401)**: `$nativeHttp`, `$axios` and native `ApiHandler` share one renewal per saved server (`$authRenewal` → `AbsDatabase.refreshAccessToken` → `server/TokenRefresher.kt`); never refresh directly. See `docs/authentication.md`.
+- **Expired access token (401)**: `$nativeHttp`, `$axios` and native `ApiHandler` share one renewal per saved server (`$authRenewal` → `AbsDatabase.refreshAccessToken` → `server/TokenRefresher.kt`); never refresh directly. A refused refresh ends only the live session (`user/revokeSession`, `serverState` `unauthorized`); the app does not go to `/connect`. See `docs/authentication.md`.
 - **Playback events**: flow from `PlayerNotificationService` → `AbsAudioPlayer.kt` (via `ClientEventEmitter`) → `notifyListeners()` → JS `addListener()` handlers → Vuex mutations.
 
 ### i18n
