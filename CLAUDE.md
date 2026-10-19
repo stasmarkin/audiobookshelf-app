@@ -93,7 +93,7 @@ The bridge between JS and native is custom Capacitor plugins. Each has a JS coun
 - `player/PlaybackSourceResolver.kt` — Where a start plays from; every native start goes through `PlayerNotificationService.startItem`, and a downloaded copy of the same server and account always wins (a partial copy streams).
 - `player/AwaitingServer.kt` — A stream that loses its server pauses and waits (event `onAwaitingServer`) instead of closing, and resumes when the server is back.
 - `player/CastManager.kt` / `CastPlayer.kt` — Google Cast support.
-- `media/MediaManager.kt` — Caches library items, authors, series, collections, and podcast data for Android Auto / media browser.
+- `media/MediaManager.kt` — Android Auto browse tree from `replica.db` through `AutoCatalog` (`CatalogReader`); the server only for a library never reconciled while online; progress from `userdata.db`.
 - `media/MediaProgressSyncer.kt` — Syncs playback progress with the server.
 - `media/ListeningLedger.kt` — Streamed listening time `/sync` could not send goes to an offline session with its own id (Paper `playbackSession`); unsettled time survives process death (Paper `listeningLedger`).
 - `db/replica/ReplicaDatabase.kt` — `replica.db`, the read-only copy of the active server's catalog; it can always be rebuilt from the server. Schema bumps are additive `AutoMigration`s; a downgrade empties it until the next sync.
