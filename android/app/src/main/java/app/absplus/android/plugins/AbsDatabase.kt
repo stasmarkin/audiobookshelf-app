@@ -21,6 +21,7 @@ import app.absplus.android.sync.ServerReachability
 import app.absplus.android.server.RefreshResult
 import app.absplus.android.managers.ItemUpdate
 import app.absplus.android.managers.SecureStorage
+import app.absplus.android.managers.LocalItemLocks
 import app.absplus.android.widget.WidgetRenderer
 import app.absplus.android.managers.AutoDeleteManager
 import app.absplus.android.managers.AutoDeleteScheduler
@@ -613,7 +614,11 @@ class AbsDatabase : Plugin() {
  * server: a server item's "finished" goes through userdata.db and its outbox (`AbsData.markFinished`), so nothing is
  * sent from here.
  */
-internal fun finishLocalProgress(localLibraryItemId: String, localEpisodeId: String?, isFinished: Boolean): JSObject {
+// Under the item's lock, like every background writer of a copy's progress: auto delete re-checks "finished" under it
+internal fun finishLocalProgress(localLibraryItemId: String, localEpisodeId: String?, isFinished: Boolean): JSObject =
+        LocalItemLocks.withItem(localLibraryItemId) { finishLocalProgressUnderLock(localLibraryItemId, localEpisodeId, isFinished) }
+
+private fun finishLocalProgressUnderLock(localLibraryItemId: String, localEpisodeId: String?, isFinished: Boolean): JSObject {
   val localMediaProgressId = if (localEpisodeId.isNullOrEmpty()) localLibraryItemId else "$localLibraryItemId-$localEpisodeId"
   var localMediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId)
 
