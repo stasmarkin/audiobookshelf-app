@@ -19,9 +19,10 @@
             <th v-if="userCanUpdate && !libraryIsAudiobooksOnly" class="text-center w-16"></th>
           </tr>
           <template v-for="file in ebookFiles">
-            <tables-ebook-files-table-row :key="file.path" :libraryItemId="libraryItemId" :file="file" @read="readEbook" @more="showMore" />
+            <tables-ebook-files-table-row :key="file.path" :libraryItemId="libraryItemId" :file="file" :read-disabled="!isServerOnline" @read="readEbook" @more="showMore" />
           </template>
         </table>
+        <p v-if="isServerAway" class="requires-server-label text-xs text-fg-muted px-4 py-1">{{ requiresServerLabel() }}</p>
       </div>
     </transition>
 
@@ -30,7 +31,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     libraryItem: {
       type: Object,
@@ -70,15 +74,18 @@ export default {
     showMore({ file, items }) {
       this.showMoreMenu = true
       this.selectedFile = file
-      this.moreMenuItems = items
+      this.moreMenuItems = items.map((item) => (item.value === 'updateStatus' ? { ...item, ...this.serverOnlyItem } : item))
     },
+    /** Opens the server's file; a downloaded copy is read with Read on the item page. */
     readEbook(fileIno) {
+      if (!this.isServerOnline) return
       this.$store.commit('showReader', { libraryItem: this.libraryItem, keepProgress: false, fileId: fileIno })
     },
     clickBar() {
       this.showFiles = !this.showFiles
     },
     updateEbookStatus() {
+      if (!this.isServerOnline) return
       this.processing = true
       this.$nativeHttp
         .patch(`/api/items/${this.libraryItemId}/ebook/${this.selectedFile.ino}/status`)

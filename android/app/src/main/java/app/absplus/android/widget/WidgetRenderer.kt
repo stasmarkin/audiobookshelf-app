@@ -25,7 +25,10 @@ import app.absplus.android.data.PlaybackSession
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.diagnostics.DLog
 import app.absplus.android.managers.DbManager
+import app.absplus.android.media.CoverCache
 import app.absplus.android.managers.PlaybackRestoreStore
+import app.absplus.android.player.AwaitingDisplay
+import app.absplus.android.player.CoverArt
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import java.util.concurrent.Executors
@@ -45,14 +48,22 @@ object WidgetRenderer {
   internal const val ARTWORK_INTRINSIC_DP = 1200
   internal const val ARTWORK_DENSITY = ARTWORK_PX * DisplayMetrics.DENSITY_MEDIUM / ARTWORK_INTRINSIC_DP
 
-  /** What the widget shows; positions are milliseconds from the start of the item. */
+  /**
+   * What the widget shows; positions are milliseconds from the start of the item. [awaiting]: the item a waiting queue
+   * is on, shown over [session], with its cover resolved beforehand ([awaitingCoverUri]; null: the app icon).
+   */
   data class State(
     val session: PlaybackSession?,
     val isPlaying: Boolean,
     val showControls: Boolean,
     val positionMs: Long?,
-    val durationMs: Long?
-  )
+    val durationMs: Long?,
+    val awaiting: AwaitingDisplay? = null,
+    val awaitingCoverUri: Uri? = null
+  ) {
+    val title: String? get() = awaiting?.title ?: session?.displayTitle
+    val author: String? get() = if (awaiting != null) awaiting.author else session?.displayAuthor
+  }
 
   private val mainHandler = Handler(Looper.getMainLooper())
   private val artworkExecutor = Executors.newSingleThreadExecutor()
@@ -91,6 +102,8 @@ object WidgetRenderer {
 
   private fun fallbackState(context: Context): State {
     DbManager.initialize(context)
+    // A launcher-started process has no sync runtime; the cover cache is what shows a streamed book's cover offline
+    CoverCache.init(context)
     val session = DeviceManager.deviceData.lastPlaybackSession
     return State(
       session = session,
@@ -102,7 +115,7 @@ object WidgetRenderer {
   }
 
   private fun render(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, state: State) {
-    val key = artworkUri(context, state.session).toString()
+    val key = artworkUri(context, state).toString()
     val bitmap = if (key == artworkKey) artworkBitmap else null
     val actions = Actions.create(context)
     val look = WidgetTheme.look(context)
@@ -182,8 +195,8 @@ object WidgetRenderer {
     views.setOnClickPendingIntent(R.id.widgetBackground, actions.open)
     views.setViewVisibility(R.id.widgetButtonContainer, if (state.showControls) View.VISIBLE else View.GONE)
 
-    views.setTextViewText(R.id.widgetArtistText, state.session?.displayAuthor ?: "Unknown")
-    views.setTextViewText(R.id.widgetMediaTitle, state.session?.displayTitle ?: "Unknown")
+    views.setTextViewText(R.id.widgetArtistText, state.author ?: "Unknown")
+    views.setTextViewText(R.id.widgetMediaTitle, state.title ?: "Unknown")
 
     if (bitmap != null) views.setImageViewBitmap(R.id.widgetAlbumArt, bitmap) else views.setImageViewResource(R.id.widgetAlbumArt, R.drawable.icon)
     val playPauseResource = if (state.isPlaying) androidx.mediarouter.R.drawable.ic_media_pause_dark else androidx.mediarouter.R.drawable.ic_media_play_dark
@@ -225,8 +238,10 @@ object WidgetRenderer {
     views.setViewVisibility(viewId, View.VISIBLE)
   }
 
-  private fun artworkUri(context: Context, session: PlaybackSession?): Uri =
-    session?.getCoverUri(context) ?: Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
+  private fun artworkUri(context: Context, state: State): Uri {
+    if (state.awaiting == null) return state.session?.getCoverUri(context) ?: CoverArt.defaultUri()
+    return state.awaitingCoverUri ?: CoverArt.defaultUri()
+  }
 
   // Loads the cover off the main thread (same Glide source as before), then redraws with it. A responsive
   // RemoteViews can't be patched after the fact, so the whole widget is redrawn once the bitmap is ready.
@@ -254,7 +269,7 @@ object WidgetRenderer {
           failedArtworkKey = key
         }
         val current = lastState ?: fallbackState(appContext)
-        if (artworkUri(appContext, current.session).toString() == key) renderAll(appContext)
+        if (artworkUri(appContext, current).toString() == key) renderAll(appContext)
       }
     }
   }

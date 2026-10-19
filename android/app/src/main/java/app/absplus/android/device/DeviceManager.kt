@@ -13,6 +13,12 @@ import app.absplus.android.managers.DbManager
 import app.absplus.android.managers.PlaybackRestoreStore
 import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.updateAppWidget
+import app.absplus.android.widget.WidgetRenderer
+import app.absplus.android.widgetStateOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /** Interface for widget event handling. */
 interface WidgetEventEmitter {
@@ -39,7 +45,14 @@ object DeviceManager {
 
   val dbManager: DbManager = DbManager()
   var deviceData: DeviceData = dbManager.getDeviceData()
+  private val _liveSessionChanges = MutableStateFlow(0L)
+  /** Counts writes of [serverConnectionConfig]: the app's sign-in and the native code that sets it on its own. */
+  val liveSessionChanges: StateFlow<Long> = _liveSessionChanges.asStateFlow()
   var serverConnectionConfig: ServerConnectionConfig? = null
+    set(value) {
+      field = value
+      _liveSessionChanges.update { it + 1 }
+    }
 
   val serverConnectionConfigId get() = serverConnectionConfig?.id ?: ""
   val serverConnectionConfigName get() = serverConnectionConfig?.name ?: ""
@@ -174,7 +187,10 @@ object DeviceManager {
    * serverVersion=2.26.1
    * isServerVersionGreaterThanOrEqualTo("2.26.0") = true
    */
-  fun isServerVersionGreaterThanOrEqualTo(compareVersion:String):Boolean {
+  fun isServerVersionGreaterThanOrEqualTo(compareVersion:String):Boolean = isVersionAtLeast(serverVersion, compareVersion)
+
+  /** [isServerVersionGreaterThanOrEqualTo] for a saved server that may not be the live session's. */
+  fun isVersionAtLeast(serverVersion: String, compareVersion: String): Boolean {
     if (serverVersion == "") return false
     if (compareVersion == "") return true
 
@@ -243,6 +259,28 @@ object DeviceManager {
   }
 
   /**
+   * What the widget shows for [pns]: the item a waiting queue is on (paused, at its saved position), else the live or
+   * last session. The awaited item is display only and never becomes the last session.
+   * @param sampledPositionMs a position the player already sampled; null reads the live position
+   */
+  internal fun widgetState(context: Context, pns: PlayerNotificationService, sampledPositionMs: Long?): WidgetRenderer.State {
+    val playbackSession = pns.getCurrentPlaybackSessionCopy() ?: deviceData.lastPlaybackSession
+    pns.awaitingDisplay?.let { awaiting ->
+      return WidgetRenderer.State(playbackSession, false, true, (awaiting.currentTime * 1000).toLong(),
+              (awaiting.duration * 1000).toLong().takeIf { it > 0 }, awaiting, pns.awaitingCover?.uri)
+    }
+    // A position-only redraw keeps the play state the player intends: a seek briefly buffers
+    // (isPlaying=false), which the play-state events also ignore
+    val isPlaying = if (sampledPositionMs != null) pns.currentPlayer.playWhenReady else pns.currentPlayer.isPlaying
+    val hasLiveSession = pns.currentPlaybackSession != null && !PlayerNotificationService.isClosed
+    val showControls = hasLiveSession || (deviceData.lastPlaybackSession != null && PlaybackRestoreStore.isResumable(context))
+    // Progress snapshot for the widget (read only; never throws into the player)
+    val positionMs = if (hasLiveSession) sampledPositionMs ?: runCatching { pns.getCurrentTime() }.getOrNull() else null
+    val durationMs = if (hasLiveSession) runCatching { pns.getDuration() }.getOrNull()?.takeIf { it > 0 } else null
+    return widgetStateOf(playbackSession, isPlaying, showControls, positionMs, durationMs)
+  }
+
+  /**
    * Initializes the widget updater.
    * @param context The context to use for initializing the widget updater.
    */
@@ -260,29 +298,8 @@ object DeviceManager {
                 val componentName = ComponentName(context, MediaPlayerWidget::class.java)
                 val ids = appWidgetManager.getAppWidgetIds(componentName)
                 if (sampledPositionMs != null && ids.isEmpty()) return
-
-                // A position-only redraw keeps the play state the player intends: a seek briefly buffers
-                // (isPlaying=false), which the play-state events also ignore
-                val isPlaying = if (sampledPositionMs != null) pns.currentPlayer.playWhenReady else pns.currentPlayer.isPlaying
-                val playbackSession = pns.getCurrentPlaybackSessionCopy() ?: deviceData.lastPlaybackSession
-                val hasLiveSession = pns.currentPlaybackSession != null && !PlayerNotificationService.isClosed
-                val showControls = hasLiveSession || (deviceData.lastPlaybackSession != null && PlaybackRestoreStore.isResumable(context))
-                // Progress snapshot for the widget (read only; never throws into the player)
-                val positionMs = if (hasLiveSession) sampledPositionMs ?: runCatching { pns.getCurrentTime() }.getOrNull() else null
-                val durationMs = if (hasLiveSession) runCatching { pns.getDuration() }.getOrNull()?.takeIf { it > 0 } else null
-
-                for (widgetId in ids) {
-                  updateAppWidget(
-                          context,
-                          appWidgetManager,
-                          widgetId,
-                          playbackSession,
-                          isPlaying,
-                          showControls,
-                          positionMs,
-                          durationMs
-                  )
-                }
+                val state = widgetState(context, pns, sampledPositionMs)
+                for (widgetId in ids) updateAppWidget(context, appWidgetManager, widgetId, state)
               }
 
               override fun onPlayerClosed() {

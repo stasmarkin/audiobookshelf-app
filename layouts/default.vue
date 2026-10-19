@@ -26,7 +26,9 @@ export default {
       lastAutoDownloadCheckAt: 0,
       lastCleanupAt: 0,
       inittingLibraries: false,
+      initLibrariesRun: null,
       hasMounted: false,
+      initialSessionsSynced: false,
       disconnectTime: 0,
       socketDisconnectedTime: 0,
       timeLostFocus: 0,
@@ -35,29 +37,26 @@ export default {
   },
   watch: {
     networkConnected: {
+      handler(newVal) {
+        // Reconnecting follows the server (serverState), not the network: a live network says nothing about the server
+        if (!newVal) {
+          console.log(`[default] lost network connection`)
+          this.disconnectTime = Date.now()
+          return
+        }
+        // Native can report the server online before Android reports the network, and attemptConnection needs both
+        if (this.hasMounted && this.serverState === 'online' && !this.user) this.connectWhenReachable()
+      }
+    },
+    serverState: {
       handler(newVal, oldVal) {
         if (!this.hasMounted) {
           // watcher runs before mount, handling libraries/connection should be handled in mount
           return
         }
-        if (newVal) {
-          console.log(`[default] network connected changed ${oldVal} -> ${newVal}`)
-          if (!this.user) {
-            this.attemptConnection()
-          } else if (!this.currentLibraryId) {
-            this.initLibraries()
-          } else {
-            var timeSinceDisconnect = Date.now() - this.disconnectTime
-            if (timeSinceDisconnect > 5000) {
-              console.log('[default] Time since disconnect was', timeSinceDisconnect, 'sync with server')
-              setTimeout(() => {
-                this.syncLocalSessions(false)
-              }, 4000)
-            }
-          }
-        } else {
-          console.log(`[default] lost network connection`)
-          this.disconnectTime = Date.now()
+        if (newVal === 'online' && oldVal !== 'online') {
+          console.log(`[default] server reachable again (${oldVal} -> ${newVal})`)
+          this.serverCameOnline()
         }
       }
     },
@@ -93,6 +92,9 @@ export default {
     },
     networkConnected() {
       return this.$store.state.networkConnected
+    },
+    serverState() {
+      return this.$store.state.serverState
     },
     socketConnected() {
       return this.$store.state.socketConnected
@@ -140,6 +142,8 @@ export default {
         return
       }
       this.attemptingConnection = true
+      // Tabs that need the signed-in user (series, collections, playlists, authors) are empty until it is there
+      const wasSignedIn = !!this.user
 
       const deviceData = await this.$db.getDeviceData()
       let serverConfig = null
@@ -168,7 +172,7 @@ export default {
         serverConnectionConfig: serverConfig
       }
       const authRes = await this.$nativeHttp.post(`${serverConfig.address}/api/authorize`, null, nativeHttpOptions).catch((error) => {
-        AbsLogger.error({ tag: 'default', message: `attemptConnection: Server auth failed (${serverConfig.name})` })
+        AbsLogger.error({ tag: 'default', message: `attemptConnection: Server auth failed (${serverConfig.name}): ${error?.code || error?.status || error?.message}` })
         return false
       })
 
@@ -198,6 +202,7 @@ export default {
       }
 
       // Set library - Use last library if set and available fallback to default user library
+      const libraryBefore = this.currentLibraryId
       const lastLibraryId = await this.$localStore.getLastLibraryId()
       if (lastLibraryId && (!user.librariesAccessible.length || user.librariesAccessible.includes(lastLibraryId))) {
         this.$store.commit('libraries/setCurrentLibrary', lastLibraryId)
@@ -210,12 +215,38 @@ export default {
       this.$store.commit('user/setUser', user)
       this.$store.commit('user/setAccessToken', serverConnectionConfig.token)
       this.$store.commit('user/setServerConnectionConfig', serverConnectionConfig)
+      this.forwardUserToNative(user, serverConnectionConfig.id)
 
       this.$socket.connect(serverConnectionConfig.address, serverConnectionConfig.token)
 
       AbsLogger.info({ tag: 'default', message: `attemptConnection: Successful connection to last saved server config (${serverConnectionConfig.name})` })
-      await this.initLibraries()
+      // The replica may have been read before the sign-in (or be empty): read again, now able to fall back to the server
+      await this.initLibraries({ force: true, notify: !wasSignedIn || this.currentLibraryId !== libraryBefore })
       this.attemptingConnection = false
+    },
+    serverCameOnline() {
+      if (!this.user) {
+        this.connectWhenReachable()
+        return
+      }
+      if (!this.currentLibraryId) {
+        this.initLibraries()
+      } else {
+        // Libraries come from the replica; the reconcile this return starts updates them (catalog notice)
+        this.$eventBus.$emit('server-reachable')
+      }
+      setTimeout(() => {
+        this.syncLocalSessions(false)
+      }, 4000)
+    },
+    async connectWhenReachable() {
+      if (this.attemptingConnection) return
+      await this.attemptConnection()
+      if (!this.user) return
+      // An offline cold start skipped the startup sync (no user then), so this one is the first
+      const isFirstSync = !this.initialSessionsSynced
+      this.initialSessionsSynced = true
+      await this.syncLocalSessions(isFirstSync)
     },
     itemRemoved(libraryItem) {
       if (this.$route.name.startsWith('item')) {
@@ -227,17 +258,30 @@ export default {
     socketConnectionFailed(err) {
       this.$toast.error('Socket connection error: ' + err.message)
     },
-    async initLibraries() {
+    /** force: read the libraries again (skip the 5-minute cache), also after a read that is still running. */
+    async initLibraries({ notify = true, force = false } = {}) {
       if (this.inittingLibraries) {
-        return
+        if (!force) return
+        await this.initLibrariesRun
+        return this.initLibraries({ notify, force })
       }
       this.inittingLibraries = true
-      await this.$store.dispatch('libraries/load')
+      const run = (async () => {
+        const libraryBefore = this.currentLibraryId
+        await this.$store.dispatch('libraries/load', { force })
 
-      AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
-      await this.$store.dispatch('libraries/fetch', this.currentLibraryId)
-      this.$eventBus.$emit('library-changed')
-      this.inittingLibraries = false
+        AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
+        // An empty replica before the first sign-in has no library to read yet
+        if (this.currentLibraryId) await this.$store.dispatch('libraries/fetch', notify ? this.currentLibraryId : { libraryId: this.currentLibraryId, onlyIfCurrent: true })
+        // load switches away from a library that was removed or became inaccessible; pages must follow it
+        if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
+      })()
+      this.initLibrariesRun = run
+      try {
+        await run
+      } finally {
+        this.inittingLibraries = false
+      }
     },
     async syncLocalSessions(isFirstSync) {
       if (!this.user) {
@@ -258,73 +302,43 @@ export default {
     userUpdated(user) {
       if (this.user?.id == user.id) {
         this.$store.commit('user/setUser', user)
+        this.queueUserForNative(user)
       }
     },
+    /** The user object carries the server's progress and bookmarks; native merges them into userdata.db. */
+    forwardUserToNative(user, serverConfigId) {
+      this.$absData.applyServerEvent({ event: 'user_updated', payload: user, serverConfigId }).catch((error) => console.error('[default] Could not hand the user to native', error))
+    },
+    /**
+     * Socket user_updated arrives in bursts (one per change on the server) and each carries the whole user, so only the
+     * last one within 500 ms crosses the bridge. The server is captured on arrival: native drops it if another one is
+     * active by then, and a switch sends what was waiting for the previous server right away.
+     */
+    queueUserForNative(user) {
+      const serverConfigId = this.$store.state.activeServerConfigId
+      if (this.pendingNativeUser && this.pendingNativeUser.serverConfigId !== serverConfigId) this.flushUserForNative()
+      this.pendingNativeUser = { user, serverConfigId }
+      clearTimeout(this.nativeUserTimer)
+      this.nativeUserTimer = setTimeout(this.flushUserForNative, 500)
+    },
+    flushUserForNative() {
+      clearTimeout(this.nativeUserTimer)
+      const pending = this.pendingNativeUser
+      this.pendingNativeUser = null
+      if (pending) this.forwardUserToNative(pending.user, pending.serverConfigId)
+    },
+    /**
+     * A socket progress event, already merged natively by $socket (`applied`: the server value won over the device's).
+     * A paused player of that item follows it only then: a value that lost to an unsent local change must not move it.
+     */
     async userMediaProgressUpdated(payload) {
       const prog = payload.data // MediaProgress
-      await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Received updated media progress for current user from socket event. Media item id ${payload.id}` })
-      const mediaProgressId = payload.id
+      if (!prog || payload.applied !== true) return
       const itemLabel = `${prog.libraryItemId}${prog.episodeId ? ` episodeId: ${prog.episodeId}` : ''}`
-
-      // Check if this media item is currently open in the player, paused, and this progress update is coming from a different session
       const isMediaOpenInPlayer = this.$store.getters['getIsMediaStreaming'](prog.libraryItemId, prog.episodeId)
       if (isMediaOpenInPlayer && this.$store.getters['getCurrentPlaybackSessionId'] !== payload.sessionId && !this.$store.state.playerIsPlaying) {
-        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Updating paused player playback time to ${payload.data.currentTime} (${itemLabel}, mediaProgressId: ${mediaProgressId})` })
-        this.$eventBus.$emit('playback-time-update', payload.data.currentTime)
-      }
-
-      // Get local media progress if exists
-      const localProg = await this.$db.getLocalMediaProgressForServerItem({ libraryItemId: prog.libraryItemId, episodeId: prog.episodeId })
-
-      let newLocalMediaProgress = null
-      // Progress update is more recent then local progress
-      if (localProg && localProg.lastUpdate < prog.lastUpdate) {
-        if (localProg.currentTime == prog.currentTime && localProg.isFinished == prog.isFinished) {
-          await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: server lastUpdate is more recent but progress is up-to-date (${itemLabel}, mediaProgressId: ${mediaProgressId}, server lastUpdate=${prog.lastUpdate} > local lastUpdate=${localProg.lastUpdate})` })
-          return
-        }
-
-        // Server progress is more up-to-date
-        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Syncing server progress to local (${itemLabel}, mediaProgressId: ${mediaProgressId}, server lastUpdate=${prog.lastUpdate} > local lastUpdate=${localProg.lastUpdate})` })
-        const syncPayload = {
-          localMediaProgressId: localProg.id,
-          mediaProgress: prog
-        }
-        newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress(syncPayload)
-      } else if (!localProg) {
-        // Check if local library item exists
-        //   local media progress may not exist yet if it hasn't been played
-        const localLibraryItem = await this.$db.getLocalLibraryItemByLId(prog.libraryItemId)
-        if (localLibraryItem) {
-          if (prog.episodeId) {
-            // If episode check if local episode exists
-            const lliEpisodes = localLibraryItem.media.episodes || []
-            const localEpisode = lliEpisodes.find((ep) => ep.serverEpisodeId === prog.episodeId)
-            if (localEpisode) {
-              // Add new local media progress
-              const syncPayload = {
-                localLibraryItemId: localLibraryItem.id,
-                localEpisodeId: localEpisode.id,
-                mediaProgress: prog
-              }
-              newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress(syncPayload)
-            }
-          } else {
-            // Add new local media progress
-            const syncPayload = {
-              localLibraryItemId: localLibraryItem.id,
-              mediaProgress: prog
-            }
-            newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress(syncPayload)
-          }
-        } else {
-          console.log(`[default] userMediaProgressUpdate no local media progress or lli found for this server item ${prog.id}`)
-        }
-      }
-
-      if (newLocalMediaProgress?.id) {
-        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Local media progress updated (${itemLabel}, localId: ${newLocalMediaProgress.id})` })
-        this.$store.commit('globals/updateLocalMediaProgress', newLocalMediaProgress)
+        await AbsLogger.info({ tag: 'default', message: `userMediaProgressUpdate: Updating paused player playback time to ${prog.currentTime} (${itemLabel}, mediaProgressId: ${payload.id})` })
+        this.$eventBus.$emit('playback-time-update', prog.currentTime)
       }
     },
     async visibilityChanged() {
@@ -395,25 +409,42 @@ export default {
 
       await this.$store.dispatch('setupNetworkListener')
 
+      // Native may already know the server is down; then the serverState watcher connects once it answers again
+      await this.$absData.getServerState().catch((error) => console.error('[default] Could not read the server state', error))
+      // Progress, bookmarks and the last known user (rights) are kept on the device, so they show before (and without)
+      // a connection; the live user still comes from authorize
+      await this.$absData.reloadUserData().catch((error) => console.error('[default] Could not read the user data', error))
+
+      // The catalog of the saved server is on the device: the tabs show it before (and without) a connection
+      const hasActiveServer = !!this.$store.getters.getHasActiveServer
+      if (hasActiveServer) {
+        AbsLogger.info({ tag: 'default', message: 'mounted: init libraries from the replica' })
+        await this.initLibraries()
+      }
+
       if (this.$store.state.user.serverConnectionConfig) {
         AbsLogger.info({ tag: 'default', message: `mounted: Server connected, init libraries (${this.$store.getters['user/getServerConfigName']})` })
-        await this.initLibraries()
+        if (!hasActiveServer) await this.initLibraries()
+      } else if (this.serverState === 'offline') {
+        AbsLogger.info({ tag: 'default', message: 'mounted: Server unreachable, waiting for it before connecting' })
       } else {
         AbsLogger.info({ tag: 'default', message: `mounted: Server not connected, attempt connection` })
         await this.attemptConnection()
       }
 
       await this.syncLocalSessions(true)
+      this.initialSessionsSynced = !!this.user
 
       this.checkAutoDownloads('app-open')
-
-      this.hasMounted = true
 
       AbsLogger.info({ tag: 'default', message: 'mounted: fully initialized' })
       this.$eventBus.$emit('abs-ui-ready')
     }
+    // Also on a remount (back from /connect), or the watchers above never react again
+    this.hasMounted = true
   },
   beforeDestroy() {
+    this.flushUserForNative()
     this.$eventBus.$off('change-lang', this.changeLanguage)
     document.removeEventListener('visibilitychange', this.visibilityChanged)
     this.localItemsListener?.remove()

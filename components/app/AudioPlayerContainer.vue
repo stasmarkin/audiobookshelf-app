@@ -1,10 +1,10 @@
 <template>
   <div>
-    <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" @showQueue="showQueueModal = true" />
+    <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" :bookmarkable="!!bookmarkLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" @showQueue="showQueueModal = true" />
 
     <modals-playback-speed-modal v-model="showPlaybackSpeedModal" :playback-rate.sync="playbackSpeed" @update:playbackRate="updatePlaybackSpeed" @change="changePlaybackSpeed" />
     <modals-sleep-timer-modal v-model="showSleepTimerModal" :current-time="sleepTimeRemaining" :sleep-timer-running="isSleepTimerRunning" :current-end-of-chapter-time="currentEndOfChapterTime" :is-auto="isAutoSleepTimer" @change="selectSleepTimeout" @cancel="cancelSleepTimer" @increase="increaseSleepTimer" @decrease="decreaseSleepTimer" />
-    <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="serverLibraryItemId" :playback-rate="playbackSpeed" @select="selectBookmark" />
+    <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime" :library-item-id="bookmarkLibraryItemId" :server-config-id="bookmarkServerConfigId" :playback-rate="playbackSpeed" @select="selectBookmark" />
     <modals-queue-modal v-model="showQueueModal" :queue="playbackQueue" @reorder="reorderQueue" @remove="removeFromQueue" />
   </div>
 </template>
@@ -13,7 +13,7 @@
 import { AbsAudioPlayer, AbsLogger } from '@/plugins/capacitor'
 import { Dialog } from '@capacitor/dialog'
 import CellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
-import { nativeQueueItems, queueDisplayFromNative, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } from '@/utils/playbackQueue'
+import { nativeQueueItems, nativeQueueMatches, queueDisplayFromNative, queueItemKeyOf, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } from '@/utils/playbackQueue'
 import { refocusDisplayTime, refocusServerAction, readRefocusHandled, writeRefocusHandled } from '@/utils/livePosition'
 
 export default {
@@ -39,6 +39,7 @@ export default {
       onSleepTimerEndedListener: null,
       onSleepTimerSetListener: null,
       onMediaPlayerChangedListener: null,
+      onAwaitingServerListener: null,
       sleepInterval: null,
       currentEndOfChapterTime: 0,
       serverLibraryItemId: null,
@@ -49,9 +50,26 @@ export default {
   },
   mixins: [CellularPermissionHelpers],
   computed: {
+    /**
+     * The server item the bookmarks belong to. Unlike serverLibraryItemId (cast, opening the item: the active server
+     * only), a downloaded copy of another saved server has its bookmarks too, kept for that server.
+     */
+    bookmarkLibraryItemId() {
+      if (this.serverLibraryItemId) return this.serverLibraryItemId
+      const session = this.currentPlaybackSession
+      if (!session?.localLibraryItem?.serverConnectionConfigId) return null
+      return session.libraryItemId || session.localLibraryItem.libraryItemId || null
+    },
     bookmarks() {
-      if (!this.serverLibraryItemId) return []
-      return this.$store.getters['user/getUserBookmarksForItem'](this.serverLibraryItemId)
+      if (!this.bookmarkLibraryItemId) return []
+      // The store holds the active server's bookmarks; the modal reads another server's copy bookmarks itself
+      const server = this.bookmarkServerConfigId
+      if (server && server !== this.$store.state.activeServerConfigId) return []
+      return this.$store.getters['user/getUserBookmarksForItem'](this.bookmarkLibraryItemId)
+    },
+    bookmarkServerConfigId() {
+      // A downloaded copy keeps its own server: its bookmarks are queued for that server, not the active one
+      return this.currentPlaybackSession?.localLibraryItem?.serverConnectionConfigId || null
     },
     isIos() {
       return this.$platform === 'ios'
@@ -67,11 +85,43 @@ export default {
     currentPlaybackSession() {
       // Sessions arrive on native advancement, including after background playback.
       this.onPlaybackEnded()
-      this.serverLibraryItemId = this.currentPlaybackSession?.libraryItemId || null
-      this.serverEpisodeId = this.currentPlaybackSession?.episodeId || null
+      this.setSessionServerIds()
+    },
+    '$store.state.activeServerConfigId'() {
+      // Known late on a cold start (or switched): a downloaded copy playing may now be, or no longer be, the active
+      // server's. A stream keeps the ids it started with
+      if (this.currentPlaybackSession?.localLibraryItem) this.setSessionServerIds()
     }
   },
   methods: {
+    /** The playing session's server ids; none for a copy of another saved server, which mean nothing to the active one. */
+    setSessionServerIds() {
+      const session = this.currentPlaybackSession
+      const copyServer = session?.localLibraryItem?.serverConnectionConfigId
+      const foreignCopy = !!session?.localLibraryItem && copyServer !== this.$store.state.activeServerConfigId
+      this.serverLibraryItemId = foreignCopy ? null : session?.libraryItemId || null
+      this.serverEpisodeId = foreignCopy ? null : session?.episodeId || null
+    },
+    /**
+     * The server ids of what started playing, both from one source. A downloaded copy of the active server knows its
+     * own (the session's ids, from LocalLibraryItem.libraryItemId) when the page could not tell them, e.g. offline on
+     * a cold start. A copy of another saved server gets none: its ids mean nothing to the active server.
+     */
+    setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId) {
+      let ids = [null, null]
+      if (!libraryItemId.startsWith('local')) {
+        ids = [libraryItemId, episodeId && !episodeId.startsWith('local') ? episodeId : serverEpisodeId]
+      } else if (serverLibraryItemId) {
+        ids = [serverLibraryItemId, serverEpisodeId]
+      } else {
+        const session = this.currentPlaybackSession
+        const copy = session?.localLibraryItem
+        const ownCopy = copy?.id === libraryItemId && !!copy.serverConnectionConfigId && copy.serverConnectionConfigId === this.$store.state.activeServerConfigId
+        if (ownCopy) ids = [session.libraryItemId || null, session.episodeId || null]
+      }
+      this.serverLibraryItemId = ids[0]
+      this.serverEpisodeId = ids[1] || null
+    },
     showBookmarks() {
       this.showBookmarksModal = true
     },
@@ -197,7 +247,8 @@ export default {
       if (this.$refs.audioPlayer) {
         playbackRate = this.$refs.audioPlayer.currentPlaybackRate || 1
       }
-      AbsAudioPlayer.prepareLibraryItem({ libraryItemId, episodeId, playWhenReady: false, playbackRate })
+      // A cast device cannot play a file on the phone: stream even when the book is downloaded
+      AbsAudioPlayer.prepareLibraryItem({ libraryItemId, episodeId, playWhenReady: false, playbackRate, forceStream: true })
         .then((data) => {
           if (data.error) {
             const errorMsg = data.error || 'Failed to play'
@@ -259,7 +310,7 @@ export default {
         // A newer play request must not be overwritten by an old bridge response.
         if (this.$store.state.playbackQueue !== queue) return
         if (!native.items.length) this.$store.commit('clearPlaybackQueue')
-        else if (native.items.length === queue.items.length && nativeQueueItems(queue.items).every((item, index) => item.libraryItemId === native.items[index].libraryItemId && item.episodeId === (native.items[index].episodeId || null))) {
+        else if (nativeQueueMatches(native.items, queue.items)) {
           this.$store.commit('setPlaybackQueue', { ...queue, currentIndex: native.currentIndex })
         }
       } catch (error) {
@@ -278,7 +329,7 @@ export default {
           this.$toast.error('Queue changed, try again')
           return
         }
-        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newItems), currentIndex: queue.currentIndex })
+        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newItems, this.nativeQueueServerConfigId()), currentIndex: queue.currentIndex })
         this.$store.commit('setPlaybackQueue', { ...queue, items: newItems })
       } catch (error) {
         console.error('[AudioPlayerContainer] Failed to mutate playback queue', error)
@@ -293,20 +344,13 @@ export default {
     removeFromQueue(item) {
       const queue = this.$store.state.playbackQueue
       if (!queue) return
-      const key = nativeQueueItems([item])[0]
-      const newItems = queue.items.filter((queueItem, index) => {
-        if (index <= queue.currentIndex) return true
-        const queueItemKey = nativeQueueItems([queueItem])[0]
-        return queueItemKey.libraryItemId !== key.libraryItemId || queueItemKey.episodeId !== key.episodeId
-      })
+      const key = queueItemKeyOf(item)
+      const newItems = queue.items.filter((queueItem, index) => index <= queue.currentIndex || queueItemKeyOf(queueItem) !== key)
       this.mutateQueue(newItems)
     },
     isAlreadyQueued(items, item) {
-      const key = nativeQueueItems([item])[0]
-      return items.some((queueItem) => {
-        const queueItemKey = nativeQueueItems([queueItem])[0]
-        return queueItemKey.libraryItemId === key.libraryItemId && queueItemKey.episodeId === key.episodeId
-      })
+      const key = queueItemKeyOf(item)
+      return items.some((queueItem) => queueItemKeyOf(queueItem) === key)
     },
     async addSingleItemToQueue(item) {
       if (!this.currentPlaybackSession) {
@@ -317,7 +361,7 @@ export default {
       const queue = this.$store.state.playbackQueue
       if (!queue) {
         const newQueue = { sourceType: 'adhoc', sourceId: null, items: [sessionToQueueItem(this.currentPlaybackSession), item], currentIndex: 0 }
-        if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items), currentIndex: 0 })
+        if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items, this.nativeQueueServerConfigId()), currentIndex: 0 })
         this.$store.commit('setPlaybackQueue', newQueue)
         return
       }
@@ -342,7 +386,7 @@ export default {
         }
         if (!queue) {
           const newQueue = { sourceType: 'adhoc', sourceId: null, items: [...existingItems, ...appendItems], currentIndex: 0 }
-          if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items), currentIndex: 0 })
+          if (this.$platform === 'android') await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(newQueue.items, this.nativeQueueServerConfigId()), currentIndex: 0 })
           this.$store.commit('setPlaybackQueue', newQueue)
           return
         }
@@ -377,8 +421,9 @@ export default {
       const startTime = payload.startTime
       const startWhenReady = !payload.paused
 
-      const isLocal = libraryItemId.startsWith('local')
-      if (!isLocal) {
+      // Native plays a downloaded copy of a server id too; only a stream needs the cellular permission
+      const source = await this.resolvePlaybackSource(libraryItemId, episodeId, payload.ino, payload.expectedTracks)
+      if (source === 'stream') {
         const hasPermission = await this.checkCellularPermission('streaming')
         if (!hasPermission) {
           this.$store.commit('setPlayerDoneStartingPlayback')
@@ -391,7 +436,7 @@ export default {
       const serverLibraryItemId = payload.serverLibraryItemId || null
       const serverEpisodeId = payload.serverEpisodeId || null
 
-      if (isLocal && this.$store.state.isCasting) {
+      if (source === 'local' && this.$store.state.isCasting) {
         const { value } = await Dialog.confirm({
           title: 'Warning',
           message: `Cannot cast downloaded media items. Confirm to close cast and play on your device.`
@@ -403,7 +448,7 @@ export default {
       }
 
       if (queue) {
-        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(queue.items), currentIndex: queue.currentIndex })
+        await AbsAudioPlayer.setPlaylistQueue({ items: nativeQueueItems(queue.items, this.nativeQueueServerConfigId()), currentIndex: queue.currentIndex })
         this.$store.commit('setPlaybackQueue', queue)
       }
 
@@ -430,6 +475,8 @@ export default {
 
       console.log('Called playLibraryItem', libraryItemId)
       const preparePayload = { libraryItemId, episodeId, playWhenReady: startWhenReady, playbackRate }
+      if (payload.ino) preparePayload.ino = payload.ino
+      if (payload.expectedTracks) preparePayload.expectedTracks = payload.expectedTracks
       if (startTime !== undefined && startTime !== null) preparePayload.startTime = startTime
       return AbsAudioPlayer.prepareLibraryItem(preparePayload)
         .then((data) => {
@@ -438,18 +485,18 @@ export default {
             if (this.$platform === 'android') AbsAudioPlayer.clearPlaylistQueue()
             const errorMsg = data.error || 'Failed to play'
             this.$toast.error(errorMsg)
+          } else if (data.awaitingServer) {
+            // The queue waits on this item; what is open (paused) keeps its ids, so its bookmarks stay its own
+            this.setSessionServerIds()
+            if (data.display) {
+              this.$store.commit('setPlayerAwaitingServer', true)
+              this.$store.commit('setPlayerAwaitingDisplay', data.display)
+            } else if (!this.currentPlaybackSession) {
+              this.$toast.info(this.$strings.ToastWaitingForServer)
+            }
           } else {
             console.log('Library item play response', JSON.stringify(data))
-            if (!libraryItemId.startsWith('local')) {
-              this.serverLibraryItemId = libraryItemId
-            } else {
-              this.serverLibraryItemId = serverLibraryItemId
-            }
-            if (episodeId && !episodeId.startsWith('local')) {
-              this.serverEpisodeId = episodeId
-            } else {
-              this.serverEpisodeId = serverEpisodeId
-            }
+            this.setServerIds(libraryItemId, episodeId, serverLibraryItemId, serverEpisodeId)
           }
         })
         .catch((error) => {
@@ -462,6 +509,22 @@ export default {
           this.$store.commit('setPlayerDoneStartingPlayback')
         })
     },
+    // The server a queue item streams from when it names none (no downloaded copy)
+    nativeQueueServerConfigId() {
+      return this.$store.state.activeServerConfigId || this.$store.getters['user/getServerConnectionConfigId'] || null
+    },
+    /** 'local', 'stream' or 'broken' as native would play it; without an answer the id decides, as before. */
+    async resolvePlaybackSource(libraryItemId, episodeId, ino, expectedTracks) {
+      try {
+        const request = { libraryItemId, episodeId: episodeId || null, ino: ino || null }
+        if (expectedTracks) request.expectedTracks = expectedTracks
+        const { source } = await AbsAudioPlayer.resolvePlaybackSource(request)
+        if (source) return source
+      } catch (error) {
+        console.error('[AudioPlayerContainer] Failed to resolve the playback source', error)
+      }
+      return libraryItemId.startsWith('local') ? 'local' : 'stream'
+    },
     pauseItem() {
       if (this.$refs.audioPlayer && this.$refs.audioPlayer.isPlaying) {
         this.$refs.audioPlayer.pause()
@@ -470,6 +533,12 @@ export default {
     onLocalMediaProgressUpdate(localMediaProgress) {
       console.log('Got local media progress update', localMediaProgress.progress, JSON.stringify(localMediaProgress))
       this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
+    },
+    // Native paused a stream whose server went away and resumes it itself: a label, not an error, and the player stays.
+    // A queue that waits on a book sends it as the display; native keeps it while it starts that book
+    onAwaitingServer(data) {
+      this.$store.commit('setPlayerAwaitingServer', !!data?.awaiting)
+      this.$store.commit('setPlayerAwaitingDisplay', data?.display || null)
     },
     onMediaPlayerChanged(data) {
       this.$store.commit('setMediaPlayer', data.value)
@@ -541,37 +610,32 @@ export default {
       return this.$store.getters['globals/getLocalMediaProgressById'](this.currentPlaybackSession.localLibraryItem?.id, this.currentPlaybackSession.localEpisodeId)
     },
     /**
-     * Sync the server media progress with the local media progress
-     */
-    async syncServerMediaProgressWithLocalMediaProgress(localMediaProgressId, serverMediaProgress) {
-      try {
-        const newLocalMediaProgress = await this.$db.syncServerMediaProgressWithLocalMediaProgress({
-          localMediaProgressId,
-          mediaProgress: serverMediaProgress
-        })
-        if (newLocalMediaProgress?.id) {
-          this.$store.commit('globals/updateLocalMediaProgress', newLocalMediaProgress)
-        }
-      } catch (error) {
-        console.error('[AudioPlayerContainer] Failed to sync server progress with local media progress', error)
-      }
-    },
-    /**
-     * Check if the server media progress is more recent than the local media progress and sync if so
+     * The server's progress of the downloaded item open in the player, merged natively by the one rule (its Paper copy
+     * follows). The paused player moves to the position native holds afterwards, which may come from an earlier sync,
+     * unless the device keeps its own (an unsent change or listening session).
      */
     async checkSyncServerProgressWithLocalProgress(localMediaProgress) {
       if (!localMediaProgress) return
       console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: checking server media progress for local media item open in player')
       const serverMediaProgress = await this.getServerMediaProgressForCurrentSession()
-      if (!serverMediaProgress?.lastUpdate || serverMediaProgress.lastUpdate <= localMediaProgress.lastUpdate) return
+      if (!serverMediaProgress?.lastUpdate) return
 
-      console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: server progress is more recent than local progress. Server current time:', serverMediaProgress.currentTime, 'vs local', localMediaProgress.currentTime, `(server lastUpdate=${serverMediaProgress.lastUpdate} > local lastUpdate=${localMediaProgress.lastUpdate})`)
-      if (!this.$refs.audioPlayer?.isPlaying && serverMediaProgress.currentTime !== localMediaProgress.currentTime) {
-        // Use seek() so the native audio player's current session is updated
-        this.$refs.audioPlayer.seek(serverMediaProgress.currentTime)
+      let result = null
+      try {
+        result = await this.$absData.applyServerProgress({ progress: serverMediaProgress })
+      } catch (error) {
+        console.error('[AudioPlayerContainer] Failed to apply the server progress', error)
       }
-
-      await this.syncServerMediaProgressWithLocalMediaProgress(localMediaProgress.id, serverMediaProgress)
+      if (!result || result.protected) return
+      const target = result.applied ? serverMediaProgress.currentTime : result.currentTime
+      if (typeof target !== 'number') return
+      const shown = this.$refs.audioPlayer?.currentTime ?? localMediaProgress.currentTime
+      console.log('[AudioPlayerContainer] checkSyncServerProgressWithLocalProgress: position after the merge', target, 'vs shown', shown, `(applied=${result.applied})`)
+      // Under a second apart is the same place (the last tick and the paused player's own position)
+      if (!this.$refs.audioPlayer?.isPlaying && Math.abs(target - shown) >= 1) {
+        // Use seek() so the native audio player's current session is updated
+        this.$refs.audioPlayer.seek(target)
+      }
     },
     /**
      * When socket is reconnected after a delay, if a local media item is open in the player (paused)
@@ -653,6 +717,7 @@ export default {
     this.onSleepTimerEndedListener = await AbsAudioPlayer.addListener('onSleepTimerEnded', this.onSleepTimerEnded)
     this.onSleepTimerSetListener = await AbsAudioPlayer.addListener('onSleepTimerSet', this.onSleepTimerSet)
     this.onMediaPlayerChangedListener = await AbsAudioPlayer.addListener('onMediaPlayerChanged', this.onMediaPlayerChanged)
+    this.onAwaitingServerListener = await AbsAudioPlayer.addListener('onAwaitingServer', this.onAwaitingServer)
 
     this.playbackSpeed = this.$store.getters['user/getUserSetting']('playbackRate')
     console.log(`[AudioPlayerContainer] Init Playback Speed: ${this.playbackSpeed}`)
@@ -675,6 +740,7 @@ export default {
     this.onSleepTimerEndedListener?.remove()
     this.onSleepTimerSetListener?.remove()
     this.onMediaPlayerChangedListener?.remove()
+    this.onAwaitingServerListener?.remove()
 
     this.$eventBus.$off('abs-ui-ready', this.onReady)
     this.$eventBus.$off('play-item', this.playLibraryItem)

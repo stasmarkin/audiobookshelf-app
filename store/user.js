@@ -5,6 +5,12 @@ export const state = () => ({
   user: null,
   accessToken: null,
   serverConnectionConfig: null,
+  // Visible bookmarks of the active server from native userdata.db ($absData), also without a signed-in user
+  bookmarks: [],
+  // Progress of the active server from native userdata.db ($absData), in the server's MediaProgress shape
+  mediaProgress: [],
+  // The last known user object of the active server (permissions, settings) for offline use; never a live session
+  cachedUser: null,
   settings: {
     mobileOrderBy: 'addedAt',
     mobileOrderDesc: true,
@@ -20,8 +26,14 @@ export const state = () => ({
 })
 
 export const getters = {
-  getIsRoot: (state) => state.user && state.user.type === 'root',
-  getIsAdminOrUp: (state) => state.user && (state.user.type === 'admin' || state.user.type === 'root'),
+  getIsRoot: (state) => {
+    const user = state.user || state.cachedUser
+    return !!user && user.type === 'root'
+  },
+  getIsAdminOrUp: (state) => {
+    const user = state.user || state.cachedUser
+    return !!user && (user.type === 'admin' || user.type === 'root')
+  },
   getToken: (state) => {
     return state.accessToken || null
   },
@@ -37,30 +49,28 @@ export const getters = {
   getUserMediaProgress:
     (state) =>
     (libraryItemId, episodeId = null) => {
-      if (!state.user?.mediaProgress) return null
-      return state.user.mediaProgress.find((li) => {
+      return (state.mediaProgress || []).find((li) => {
         if (episodeId && li.episodeId !== episodeId) return false
         return li.libraryItemId == libraryItemId
       })
     },
   getUserBookmarksForItem: (state) => (libraryItemId) => {
-    if (!state?.user?.bookmarks) return []
-    return state.user.bookmarks.filter((bm) => bm.libraryItemId === libraryItemId)
+    return (state.bookmarks || []).filter((bm) => bm.libraryItemId === libraryItemId)
   },
   getUserSetting: (state) => (key) => {
     return state.settings?.[key] ?? null
   },
   getUserCanUpdate: (state) => {
-    return !!state.user?.permissions?.update
+    return !!(state.user || state.cachedUser)?.permissions?.update
   },
   getUserCanDelete: (state) => {
-    return !!state.user?.permissions?.delete
+    return !!(state.user || state.cachedUser)?.permissions?.delete
   },
   getUserCanDownload: (state) => {
-    return !!state.user?.permissions?.download
+    return !!(state.user || state.cachedUser)?.permissions?.download
   },
   getUserCanAccessExplicitContent: (state) => {
-    return !!state.user?.permissions?.accessExplicitContent
+    return !!(state.user || state.cachedUser)?.permissions?.accessExplicitContent
   }
 }
 
@@ -170,6 +180,18 @@ export const actions = {
     await AbsLogger.info({ tag: 'user', message: `Logged out from server ${state.serverConnectionConfig?.name || 'Not connected'}` })
   },
   /**
+   * The server refused the session (its refresh token): only the live session ends. The server, the selected library,
+   * cached user, progress, bookmarks and the outbox stay, so the app keeps working until the user signs in again.
+   * An explicit sign-out is `logout`.
+   */
+  async revokeSession({ state, commit }) {
+    this.$authRenewal.invalidate()
+    this.$socket.logout()
+    commit('setUser', null)
+    commit('setAccessToken', null)
+    await AbsLogger.info({ tag: 'user', message: `Session revoked by server ${state.serverConnectionConfig?.name || 'Not connected'}` })
+  },
+  /**
    * Renews the access token after a 401, sharing one renewal per server with every other request ($authRenewal).
    * Resolves with the new access token, or null when it could not be renewed (a refused refresh token signs out).
    * @param {string} [failedToken] the token the failed request was sent with (defaults to the current one)
@@ -194,40 +216,43 @@ export const mutations = {
   setAccessToken(state, accessToken) {
     state.accessToken = accessToken
   },
-  removeMediaProgress(state, id) {
-    if (!state.user) return
-    state.user.mediaProgress = state.user.mediaProgress.filter((mp) => mp.id != id)
+  /** Progress and bookmarks of the active server as native holds them. */
+  setUserData(state, { mediaProgress, bookmarks } = {}) {
+    state.mediaProgress = Array.isArray(mediaProgress) ? mediaProgress : []
+    state.bookmarks = Array.isArray(bookmarks) ? bookmarks : []
   },
-  updateUserMediaProgress(state, data) {
-    if (!data || !state.user) return
-    const mediaProgressIndex = state.user.mediaProgress.findIndex((mp) => mp.id === data.id)
-    if (mediaProgressIndex >= 0) {
-      state.user.mediaProgress.splice(mediaProgressIndex, 1, data)
-    } else {
-      state.user.mediaProgress.push(data)
-    }
+  setMediaProgress(state, mediaProgress) {
+    state.mediaProgress = Array.isArray(mediaProgress) ? mediaProgress : []
+  },
+  /** Replaces the progress of just these items (every episode of a podcast) with what native holds now. */
+  setMediaProgressForItems(state, { libraryItemIds, mediaProgress }) {
+    const ids = new Set(libraryItemIds || [])
+    state.mediaProgress = (state.mediaProgress || []).filter((mp) => !ids.has(mp.libraryItemId)).concat(Array.isArray(mediaProgress) ? mediaProgress : [])
+  },
+  upsertMediaProgress(state, row) {
+    if (!row?.libraryItemId) return
+    const same = (mp) => mp.libraryItemId === row.libraryItemId && (mp.episodeId || null) === (row.episodeId || null)
+    const index = (state.mediaProgress || []).findIndex(same)
+    if (index >= 0) state.mediaProgress.splice(index, 1, row)
+    else state.mediaProgress.push(row)
+  },
+  setCachedUser(state, user) {
+    state.cachedUser = user || null
+  },
+  /** Another saved server became active: nothing of the previous one may show. */
+  clearUserData(state) {
+    state.mediaProgress = []
+    state.bookmarks = []
+    state.cachedUser = null
   },
   setServerConnectionConfig(state, serverConnectionConfig) {
     state.serverConnectionConfig = serverConnectionConfig
   },
+  setBookmarks(state, bookmarks) {
+    state.bookmarks = Array.isArray(bookmarks) ? bookmarks : []
+  },
   setSettings(state, settings) {
     if (!settings) return
     state.settings = settings
-  },
-  updateBookmark(state, bookmark) {
-    if (!state.user?.bookmarks) return
-    state.user.bookmarks = state.user.bookmarks.map((bm) => {
-      if (bm.libraryItemId === bookmark.libraryItemId && bm.time === bookmark.time) {
-        return bookmark
-      }
-      return bm
-    })
-  },
-  deleteBookmark(state, { libraryItemId, time }) {
-    if (!state.user?.bookmarks) return
-    state.user.bookmarks = state.user.bookmarks.filter((bm) => {
-      if (bm.libraryItemId === libraryItemId && bm.time === time) return false
-      return true
-    })
   }
 }

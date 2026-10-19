@@ -32,8 +32,9 @@
         </div>
 
         <div v-if="actionsOf(item).length" class="flex flex-wrap gap-2 mt-3">
-          <ui-btn v-for="action in actionsOf(item)" :key="action" small :padding-y="2" class="min-w-16" :color="action === 'retry' || action === 'chooseFolder' ? 'success' : 'primary'" :loading="busyId === item.id" @click="runAction(item, action)">{{ actionLabel(action) }}</ui-btn>
+          <ui-btn v-for="action in actionsOf(item)" :key="action" small :padding-y="2" class="min-w-16" :color="action === 'retry' || action === 'chooseFolder' ? 'success' : 'primary'" :loading="busyId === item.id" :disabled="!isServerOnline && action === 'retry'" @click="runAction(item, action)">{{ actionLabel(action) }}</ui-btn>
         </div>
+        <p v-if="isServerAway && actionsOf(item).includes('retry')" class="requires-server-label text-xs text-fg-muted mt-1">{{ requiresServerLabel() }}</p>
 
         <div v-if="num + 1 < downloadItems.length" class="flex border-t border-border my-4" />
       </div>
@@ -48,8 +49,10 @@ import { downloadState, downloadActions, downloadProgress, lostFolder, isWaiting
 // Why a download waits can change without a queue event (Wi-Fi joins, the charger is plugged in)
 const REFRESH_MS = 10000
 import { isAppStorageFolderId } from '@/utils/appStorage'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   data() {
     return {
       busyId: null,
@@ -151,6 +154,7 @@ export default {
       this.$store.commit('globals/removeItemDownload', item.id)
     },
     async retry(item) {
+      if (!this.isServerOnline) return
       const result = await AbsDownloader.retryDownload({ downloadItemId: item.id })
       if (result?.errorCode === 'folderAccess') return this.$toast.error(this.$getString('MessageDownloadChooseFolder', [this.lostFolderName(item)]))
       if (result?.errorCode === 'notFound') return this.$store.commit('globals/removeItemDownload', item.id)
