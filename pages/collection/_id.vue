@@ -54,6 +54,7 @@ async function readCollection({ $absData, $db }, id, activeServerConfigId) {
   books.forEach((book) => {
     const copy = localLibraryItems.find((lli) => {
       if (activeServerConfigId && lli.serverConnectionConfigId !== activeServerConfigId) return false
+      if (lli.isInvalid) return false
       return lli.libraryItemId === book.id || (book.ino && lli.ino && lli.ino === book.ino)
     })
     if (copy) book.localLibraryItem = copy

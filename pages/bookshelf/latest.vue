@@ -42,6 +42,7 @@ export default {
       this.localLibraryItems.forEach((li) => {
         // Replicas of two accounts on one server share episode ids: only the active server's copies count
         if (activeServerConfigId && li.serverConnectionConfigId !== activeServerConfigId) return
+        if (li.isInvalid) return
         if (li.media.episodes?.length) {
           li.media.episodes.map((ep) => {
             ep.localLibraryItemId = li.id

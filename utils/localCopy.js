@@ -8,6 +8,8 @@ export function findLocalCopy(localItems, entity, activeServerConfigId) {
   return (
     localItems.find((lli) => {
       if (activeServerConfigId && lli.serverConnectionConfigId !== activeServerConfigId) return false
+      // Auto delete evicts the files but keeps the record and its history: not a downloaded copy
+      if (lli.isInvalid) return false
       return lli.libraryItemId == entity.id || (entity.ino && lli.ino && lli.ino == entity.ino)
     }) || null
   )

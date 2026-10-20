@@ -497,7 +497,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
       val snap = snapshot ?: refreshSnapshot()
       val replicaItems = snap?.continueItems.orEmpty()
       val serverItems = continueItems(snap).filter { it !in replicaItems }
-      val first = firstPlayableOf(replicaItems, serverItems, DeviceManager.dbManager.getLocalLibraryItems("book"), online())
+      val first = firstPlayableOf(replicaItems, serverItems, DeviceManager.dbManager.getLocalLibraryItems("book").filter { !it.isInvalid }, online())
       postIfLatest(request) { cb(first?.first, first?.second) }
     }
   }
