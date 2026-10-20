@@ -24,7 +24,7 @@ object LocalItemDeleter {
   /**
    * Deletes the whole item: files first, then the record once the files are gone. Paths come from the database
    * under the item lock, because what a page sent may predate a move to another storage. In a device folder only
-   * the registered files go, then the book's folder and its parent subfolder if they are left empty. With [auto] a
+   * the registered regular files go; folders are never deleted. With [auto] a
    * saved link that does not open, or a registered entry that is not a regular file, skips the delete; the manual
    * delete tries the link itself. [stillAllowed] is asked under the item's lock right before any file goes (auto delete
    * uses it to see that the listening progress it decided on has not changed since).
@@ -82,34 +82,22 @@ object LocalItemDeleter {
       }
     }
 
-    // DocumentFile.delete() is recursive and the device folder holds the user's own files: only the registered ones go
-    val folder = DeviceManager.dbManager.getLocalFolder(item.folderId)
-    val subfolderPath =
-            folder?.absolutePath?.let { folderPath ->
-              val others = DeviceManager.dbManager.getLocalLibraryItems().filter { it.id != item.id }.map { it.absolutePath }
-              FolderItemDeleter.parentSubfolderToDelete(item.absolutePath, folderPath, others)
-            }
-    val bookDir = DocumentFileCompat.fromUri(ctx, Uri.parse(item.contentUrl))
-    val docs = item.localFiles.map { DocumentFileCompat.fromUri(ctx, Uri.parse(it.contentUrl)) }
-    // A link that does not resolve says nothing about the file: auto delete leaves the item for the next check
-    if (auto && (bookDir == null || docs.any { it == null })) {
+    // Only the registered files, each only while it is a regular file; folders are never deleted, and nothing is matched
+    // by name: a provider's directory delete is recursive and no listing proves a folder empty (R32-C01, C02, C03)
+    if (auto && (DocumentFileCompat.fromUri(ctx, Uri.parse(item.contentUrl)) == null ||
+                    item.localFiles.any { DocumentFileCompat.fromUri(ctx, Uri.parse(it.contentUrl)) == null })) {
+      // A link that does not resolve says nothing about the file: auto delete leaves the item for the next check
       AbsLogger.info(TAG, "Auto delete skipped \"${item.title}\": a saved link to its folder or files does not open")
       return Outcome.SKIPPED
     }
-    if (auto && FolderItemDeleter.hasNonFile(docs.map { FolderItemDeleter.Target(it) { false } })) {
-      AbsLogger.info(TAG, "Auto delete skipped \"${item.title}\": a registered file is not a regular file")
-      return Outcome.SKIPPED
+    val docs = FolderFileDeletion.AndroidDocs(ctx, DeviceManager.dbManager.getLocalFolder(item.folderId))
+    return when (FolderFileDeletion.deleteFiles(item.localFiles.map { it.contentUrl }, docs)) {
+      FolderFileDeletion.Result.DELETED -> Outcome.DELETED
+      // The folder cannot be reached (access lost, or the card it is on is out): nothing deleted, records kept
+      FolderFileDeletion.Result.UNAVAILABLE -> Outcome.STORAGE_UNAVAILABLE
+      // A registered entry that is a folder or of unknown type, or a file that stayed: auto leaves it for later
+      FolderFileDeletion.Result.FAILED -> if (auto) Outcome.SKIPPED else Outcome.FAILED
     }
-    val targets = item.localFiles.mapIndexed { i, lf -> FolderItemDeleter.Target(docs[i]) { FolderItemDeleter.deleteByUri(ctx, lf.contentUrl) } }
-    val deleted =
-            FolderItemDeleter.deleteRegistered(
-                    bookDir,
-                    targets,
-                    item.localFiles.mapNotNull { it.filename },
-                    { subfolderPath?.let { DocumentFileCompat.fromFullPath(ctx, it) } },
-                    FolderItemDeleter.DeviceLister(ctx)
-            )
-    return if (deleted) Outcome.DELETED else Outcome.FAILED
   }
 
   /** What deleting one downloaded track did. */
@@ -147,7 +135,9 @@ object LocalItemDeleter {
           val file = java.io.File(localFile.absolutePath)
           AppStorage.isVerified(localLibraryItem.folderId, probe) && io.kind(file) == NodeKind.FILE && io.delete(file)
         } else {
-          DocumentFileCompat.fromUri(ctx, Uri.parse(localFile.contentUrl))?.delete() == true
+          // Only while it is a regular file: a folder in its place is never deleted with its contents (R32-C02)
+          val docs = FolderFileDeletion.AndroidDocs(ctx, DeviceManager.dbManager.getLocalFolder(localLibraryItem.folderId))
+          FolderFileDeletion.deleteFiles(listOf(localFile.contentUrl), docs) == FolderFileDeletion.Result.DELETED
         }
       }
       when (outcome) {

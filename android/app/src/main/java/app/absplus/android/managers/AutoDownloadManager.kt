@@ -258,8 +258,10 @@ object AutoDownloadManager {
     fun expectedSize(downloadId: String, episode: app.absplus.android.data.PodcastEpisode): Long {
       if (!limitOn()) return 0L
       val size = episode.audioFile?.metadata?.size
-      if (size == null) AbsLogger.info(TAG, "No size known for $downloadId, counting it as 0 for the downloads limit")
-      return size ?: 0L
+      // Explicit policy (R32-M01): the budget is best-effort. An episode whose size the server does not report (or
+      // reports as negative) is admitted and counted as 0 until it is downloaded; it is then counted with its real size.
+      if (size == null || size < 0) AbsLogger.info(TAG, "No size known for $downloadId, counting it as 0 for the downloads limit")
+      return (size ?: 0L).coerceAtLeast(0L)
     }
 
     for (id in targets) {

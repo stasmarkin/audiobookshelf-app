@@ -149,6 +149,69 @@ class AutoDeleteManagerTest {
     assertNotNull(db.getLocalLibraryItem("race1"))
   }
 
+  // --- R32-H02: an update racing a delete either stops it or is refused, never saved as a silent orphan ---
+
+  @Test
+  fun `an update that waited for the delete of its item is refused and leaves no orphan`() {
+    val dir = book("h2a")
+    localProgress("h2a", true, longAgo)
+    val held = CountDownLatch(1)
+    val writerStarted = CountDownLatch(1)
+    var saved: Boolean? = null
+    val writer = Thread {
+      held.await(5, TimeUnit.SECONDS)
+      // The real read-modify-write of an offline "mark as not finished": read before the delete, saved after it
+      val p = db.getLocalMediaProgress("h2a")!!.also { it.isFinished = false; it.lastUpdate = longAgo + 50 }
+      writerStarted.countDown()
+      saved = db.saveLocalMediaProgressIfItemExists(p)
+    }
+    writer.start()
+    val outcome = app.absplus.android.device.LocalItemDeleter.deleteItem(ctx, "h2a", true) {
+      held.countDown()
+      writerStarted.await(5, TimeUnit.SECONDS)
+      Thread.sleep(300)
+      true
+    }
+    writer.join(5000)
+
+    assertEquals(app.absplus.android.device.LocalItemDeleter.Outcome.DELETED, outcome)
+    assertFalse(dir.exists())
+    assertEquals("the update is refused, so the caller reports it", false, saved)
+    assertNull("no orphan progress was written", db.getLocalMediaProgress("h2a"))
+    // A restart's cleanup has nothing to silently drop
+    db.cleanLocalMediaProgress()
+    assertNull(db.getLocalMediaProgress("h2a"))
+  }
+
+  @Test
+  fun `an update that gets the item lock first stops the delete and is kept`() {
+    val dir = book("h2b")
+    localProgress("h2b", true, longAgo)
+    val writing = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val writer = Thread {
+      LocalItemLocks.withItem("h2b") {
+        val p = db.getLocalMediaProgress("h2b")!!.also { it.isFinished = false; it.lastUpdate = longAgo + 50 }
+        writing.countDown()
+        release.await(5, TimeUnit.SECONDS)
+        assertTrue(db.saveLocalMediaProgressIfItemExists(p))
+      }
+    }
+    writer.start()
+    writing.await(5, TimeUnit.SECONDS)
+    var deleted = -1
+    val cleanup = Thread { deleted = AutoDeleteManager.runCleanup(ctx, user(serverProgress("h2b", true, longAgo))) }
+    cleanup.start()
+    Thread.sleep(300) // the pass has collected the book as due and now waits for the item lock
+    release.countDown()
+    writer.join(5000)
+    cleanup.join(10000)
+
+    assertEquals(0, deleted)
+    assertTrue(dir.exists())
+    assertEquals(false, db.getLocalMediaProgress("h2b")!!.isFinished)
+  }
+
   @Test
   fun `a background progress write waits for a delete that holds the item lock`() {
     val dir = book("cw1")
@@ -176,6 +239,11 @@ class AutoDeleteManagerTest {
     assertEquals(app.absplus.android.device.LocalItemDeleter.Outcome.DELETED, outcome)
     assertFalse(dir.exists())
     assertEquals("the write landed only after the delete finished", true, itemGoneWhenWriteLanded)
+    // Characterization (R32-H02): with the plain locked save that late write is an orphan, and the next start's
+    // cleanup drops it silently. That is why the update paths use saveLocalMediaProgressIfItemExists instead.
+    assertNotNull("orphan written by the plain locked save", db.getLocalMediaProgress("cw1"))
+    db.cleanLocalMediaProgress()
+    assertNull("and silently removed at the next start", db.getLocalMediaProgress("cw1"))
   }
 
   @Test
@@ -206,6 +274,74 @@ class AutoDeleteManagerTest {
     assertEquals(1, AutoDeleteManager.runCleanup(ctx, null))
     assertFalse(dir.exists())
     assertNull("the confirmation goes with the book", db.getAutoDeleteConfirmed("b4"))
+  }
+
+  // --- R32-H01: a confirmation recorded for one account never authorizes a delete for another ---
+
+  /** Alice ("u") finishes b-id; an online pass confirms it before the delay; then the book becomes due. */
+  private fun confirmedForAlice(id: String): File {
+    val dir = book(id)
+    settings()
+    localProgress(id, true, System.currentTimeMillis())
+    assertEquals(0, AutoDeleteManager.runCleanup(ctx, user(serverProgress(id, true, System.currentTimeMillis()))))
+    assertNotNull("a real confirmation exists", db.getAutoDeleteConfirmed(id))
+    localProgress(id, true, longAgo)
+    db.saveAutoDeleteConfirmed(id, AutoDeletePolicy.Confirmation(AutoDeletePolicy.Identity("cfg", "u", "srv-$id"), longAgo, true))
+    return dir
+  }
+
+  private val bob = ServerConnectionConfig("cfgB", 1, "srv", "https://s", null, "bob", "bob", "token", null)
+
+  @Test
+  fun `an account switch on the same server keeps a book confirmed for the previous account`() {
+    val dir = confirmedForAlice("h1a")
+    DeviceManager.deviceData.serverConnectionConfigs.add(bob)
+    DeviceManager.serverConnectionConfig = bob
+
+    assertEquals(0, AutoDeleteManager.runCleanup(ctx, null))
+    assertTrue(dir.exists())
+    assertNotNull(db.getLocalLibraryItem("h1a"))
+    assertNotNull(db.getLocalMediaProgress("h1a"))
+  }
+
+  @Test
+  fun `a removed server connection keeps its downloads while another connection is active`() {
+    val dir = confirmedForAlice("h1b")
+    DeviceManager.deviceData.serverConnectionConfigs.removeIf { it.id == "cfg" }
+    DeviceManager.deviceData.serverConnectionConfigs.add(bob)
+    DeviceManager.serverConnectionConfig = bob
+
+    assertEquals(0, AutoDeleteManager.runCleanup(ctx, null))
+    assertTrue(dir.exists())
+    assertNotNull(db.getLocalMediaProgress("h1b"))
+  }
+
+  @Test
+  fun `a removed server connection keeps its downloads with no connection active`() {
+    val dir = confirmedForAlice("h1c")
+    DeviceManager.deviceData.serverConnectionConfigs.removeIf { it.id == "cfg" }
+    DeviceManager.serverConnectionConfig = null
+
+    assertEquals(0, AutoDeleteManager.runCleanup(ctx, null))
+    assertTrue(dir.exists())
+  }
+
+  @Test
+  fun `the owner's own confirmation still works offline`() {
+    val dir = confirmedForAlice("h1d")
+    DeviceManager.serverConnectionConfig = null // offline, nobody else active
+
+    assertEquals(1, AutoDeleteManager.runCleanup(ctx, null))
+    assertFalse(dir.exists())
+  }
+
+  @Test
+  fun `inconsistent owners on the item and its progress keep the book`() {
+    val dir = confirmedForAlice("h1e")
+    localProgress("h1e", true, longAgo, owner = "bob")
+
+    assertEquals(0, AutoDeleteManager.runCleanup(ctx, null))
+    assertTrue(dir.exists())
   }
 
   @Test

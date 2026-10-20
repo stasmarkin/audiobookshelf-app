@@ -252,7 +252,24 @@ object AutoDeleteManager {
     if (target.candidate.serverKnown && !ownerIsConnected(fresh, progress?.serverUserId)) return Recheck.SKIP
     // A relink or an account switch since the pass collected it changes what the server progress and confirmations mean
     if (identityOf(fresh, progress?.serverUserId) != target.candidate.identity) return Recheck.SKIP
+    // Online or offline, a cached confirmation never stands in for the owner's current authorization (R32-H01)
+    if (!authorizedOwner(fresh, progress?.serverUserId)) return Recheck.SKIP
     return Recheck.OK
+  }
+
+  /**
+   * The download may be deleted on its owner's behalf right now: the saved connection it came from still exists and
+   * belongs to the account that the item and its progress name, and no other account is the active one. Checked at
+   * the destructive step whether the pass is online or offline, so a confirmation recorded for one account cannot
+   * authorize a delete after an account switch, a removed server or a relink (R32-H01).
+   */
+  internal fun authorizedOwner(lli: LocalLibraryItem, progressUserId: String?): Boolean {
+    val saved = DeviceManager.deviceData.serverConnectionConfigs.find { it.id == lli.serverConnectionConfigId } ?: return false
+    val owner = lli.serverUserId ?: progressUserId ?: return false
+    if (saved.userId != owner) return false
+    if (progressUserId != null && progressUserId != owner) return false
+    val active = DeviceManager.serverConnectionConfig
+    return active == null || (active.id == saved.id && active.userId == owner)
   }
 
   /** The connected account is the one the download and its progress belong to. */

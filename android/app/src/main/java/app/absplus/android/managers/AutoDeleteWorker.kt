@@ -42,14 +42,16 @@ class AutoDeleteWorker(context: Context, params: WorkerParameters) : CoroutineWo
   private val tag = "AutoDeleteWorker"
 
   override suspend fun doWork(): Result {
-    try {
-      val status = AutoDownloadManager.check(applicationContext, AutoDownloadManager.Trigger.CLEANUP)
-      AbsLogger.info(tag, "Auto delete check finished with status ${status.jsValue}")
+    val status = try {
+      AutoDownloadManager.check(applicationContext, AutoDownloadManager.Trigger.CLEANUP).also {
+        AbsLogger.info(tag, "Auto delete check finished with status ${it.jsValue}")
+      }
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
       AbsLogger.error(tag, "Auto delete check failed: ${e.message}")
+      null
     }
-    return Result.success()
+    return periodicCheckResult(status, runAttemptCount)
   }
 }

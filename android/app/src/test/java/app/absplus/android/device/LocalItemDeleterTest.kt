@@ -193,7 +193,9 @@ class LocalItemDeleterTest {
     assertEquals(1, DeviceManager.dbManager.getLocalLibraryItem("local_gt")!!.localFiles.size)
   }
 
-  private fun folderItem(id: String, dir: File, fileUrl: File): LocalLibraryItem {
+  private fun folderItem(id: String, dir: File, fileUrl: File, folderRoot: File = dir): LocalLibraryItem {
+    // The picked device folder the item lives in (file:// here: reachable while it exists and is writable)
+    DeviceManager.dbManager.saveLocalFolder(app.absplus.android.data.LocalFolder("saf-folder", "SAF", "file://${folderRoot.absolutePath}", "", folderRoot.absolutePath, "external", "book"))
     val item = savedItem(id, "saf-folder", dir)
     item.localFiles[0].contentUrl = "file://${fileUrl.absolutePath}"
     DeviceManager.dbManager.saveLocalLibraryItem(item)
@@ -288,5 +290,74 @@ class LocalItemDeleterTest {
     assertEquals(LocalItemDeleter.Outcome.SKIPPED, LocalItemDeleter.deleteItem(ctx, "local_guard", true, probe) { false })
     assertTrue(File(dir, "a.mp3").exists())
     assertNotNull(DeviceManager.dbManager.getLocalLibraryItem("local_guard"))
+  }
+
+  // --- R32-C01/C02/C03 (review corrections) ---
+
+  @Test
+  fun `a device-folder delete never removes folders, unregistered files or partial-looking files`() {
+    val root = Files.createTempDirectory("picked").toFile()
+    val author = File(root, "Author").apply { mkdirs() }
+    val book = File(author, "Book").apply { mkdirs() }
+    File(book, "a.mp3").writeText("abc")
+    File(book, "notes.txt").writeText("mine")
+    File(book, ".a.mp3.123456789.part").writeText("not proven ours")
+    folderItem("local_c13", book, File(book, "a.mp3"), folderRoot = root)
+
+    assertEquals(LocalItemDeleter.Outcome.DELETED, delete("local_c13", auto = false))
+
+    assertFalse(File(book, "a.mp3").exists())
+    assertEquals("mine", File(book, "notes.txt").readText())
+    assertEquals("not proven ours", File(book, ".a.mp3.123456789.part").readText())
+    assertTrue("book folder kept", book.isDirectory)
+    assertTrue("author folder kept", author.isDirectory)
+    assertNull(DeviceManager.dbManager.getLocalLibraryItem("local_c13"))
+  }
+
+  @Test
+  fun `an emptied book folder stays, also for auto delete`() {
+    val root = Files.createTempDirectory("picked").toFile()
+    val book = File(root, "Book").apply { mkdirs() }
+    File(book, "a.mp3").writeText("abc")
+    folderItem("local_c1e", book, File(book, "a.mp3"), folderRoot = root)
+
+    assertEquals(LocalItemDeleter.Outcome.DELETED, delete("local_c1e", auto = true))
+    assertTrue(book.isDirectory)
+  }
+
+  @Test
+  fun `a device folder that cannot be reached deletes nothing and keeps the record`() {
+    val root = Files.createTempDirectory("picked").toFile()
+    val book = File(root, "Book").apply { mkdirs() }
+    File(book, "a.mp3").writeText("abc")
+    folderItem("local_unr", book, File(book, "a.mp3"), folderRoot = File(root, "gone"))
+
+    assertEquals(LocalItemDeleter.Outcome.STORAGE_UNAVAILABLE, delete("local_unr", auto = false))
+    assertEquals("abc", File(book, "a.mp3").readText())
+    assertNotNull(DeviceManager.dbManager.getLocalLibraryItem("local_unr"))
+  }
+
+  @Test
+  fun `deleting a device-folder track whose path became a folder keeps the files inside and the record`() {
+    val root = Files.createTempDirectory("picked").toFile()
+    val replaced = File(root, "a.mp3").apply { mkdirs() }
+    File(replaced, "inside.txt").writeText("mine")
+    folderItem("local_trk", root, replaced)
+
+    assertTrue(LocalItemDeleter.deleteTrack(ctx, "local_trk", "f1", null, probe) === LocalItemDeleter.TrackResult.Failed)
+    assertEquals("mine", File(replaced, "inside.txt").readText())
+    assertEquals(1, DeviceManager.dbManager.getLocalLibraryItem("local_trk")!!.localFiles.size)
+  }
+
+  @Test
+  fun `deleting a device-folder track removes only that regular file`() {
+    val root = Files.createTempDirectory("picked").toFile()
+    File(root, "a.mp3").writeText("abc")
+    File(root, "notes.txt").writeText("mine")
+    folderItem("local_trk2", root, File(root, "a.mp3"))
+
+    assertTrue(LocalItemDeleter.deleteTrack(ctx, "local_trk2", "f1", null, probe) is LocalItemDeleter.TrackResult.Deleted)
+    assertFalse(File(root, "a.mp3").exists())
+    assertEquals("mine", File(root, "notes.txt").readText())
   }
 }

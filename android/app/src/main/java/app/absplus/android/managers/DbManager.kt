@@ -255,6 +255,21 @@ class DbManager {
   fun saveLocalMediaProgressLocked(mediaProgress: LocalMediaProgress) {
     LocalItemLocks.withItem(mediaProgress.localLibraryItemId) { saveLocalMediaProgress(mediaProgress) }
   }
+  /**
+   * For an update of an existing download's progress: saves it under the item's lock only while the item still exists,
+   * and answers whether it did. An update that waited for a delete of its item is refused rather than saved as an orphan
+   * that the next start would silently remove (R32-H02); callers report it like an item that is already gone. Together
+   * with auto delete's last progress check under the same lock, an update either lands first and stops the delete,
+   * or comes after it and is refused, never lost silently.
+   */
+  fun saveLocalMediaProgressIfItemExists(mediaProgress: LocalMediaProgress): Boolean =
+    LocalItemLocks.withItem(mediaProgress.localLibraryItemId) {
+      if (getLocalLibraryItem(mediaProgress.localLibraryItemId) == null) false
+      else {
+        saveLocalMediaProgress(mediaProgress)
+        true
+      }
+    }
   fun removeLocalMediaProgressLocked(localMediaProgressId: String) {
     val itemId = getLocalMediaProgress(localMediaProgressId)?.localLibraryItemId
     if (itemId == null) removeLocalMediaProgress(localMediaProgressId)

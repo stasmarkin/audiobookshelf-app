@@ -17,6 +17,8 @@ import app.absplus.android.data.PodcastAutoDownloadEntry
 import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.data.PodcastMetadata
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.device.NodeKind
+import app.absplus.android.device.StorageIo
 import app.absplus.android.device.AndroidStorageIo
 import app.absplus.android.device.AppStorage
 import app.absplus.android.device.AppVolume
@@ -290,6 +292,53 @@ class RemovableStorageSafetyTest {
   }
 
   // ---- Explicit deletion (L01)
+
+  /** The real file operations, except that the card goes away at a chosen moment of the delete (R32-H03). */
+  private inner class CardPulledIo(private val probe: Probe, private val pullOnFirstDelete: Boolean) : StorageIo by AndroidStorageIo {
+    var pulled = false
+    override fun kind(file: File): NodeKind {
+      // Unmounted at the first look (pullOnFirstDelete=false): the filesystem then reports the folder as missing
+      if (!pullOnFirstDelete && !pulled) { pulled = true; probe.mounted = false }
+      return if (pulled) NodeKind.MISSING else AndroidStorageIo.kind(file)
+    }
+    override fun list(dir: File): List<String>? = if (pulled) null else AndroidStorageIo.list(dir)
+    override fun delete(file: File): Boolean {
+      if (pulled) return false
+      val ok = AndroidStorageIo.delete(file)
+      if (pullOnFirstDelete) { pulled = true; probe.mounted = false }
+      return ok
+    }
+  }
+
+  @Test
+  fun aCardPulledRightAfterVerificationIsNotADeleteAndKeepsTheItem() {
+    val dir = File(sdDownloads, pod)
+    val file = media(dir, "e1.mp3")
+    val item = podcastLocal(sdFolderId, dir, "e1" to file)
+    val probe = Probe()
+    // Verified, then the folder reads as missing because the card is out: must not be reported as deleted
+    assertEquals(AppStorageItemDeletion.Outcome.STORAGE_UNAVAILABLE, AppStorageItemDeletion.delete(item, probe, CardPulledIo(probe, pullOnFirstDelete = false)))
+    assertTrue("the media stays on the card", file.isFile)
+    // Card back: the delete finishes
+    probe.mounted = true
+    assertEquals(AppStorageItemDeletion.Outcome.DELETED, AppStorageItemDeletion.delete(item, probe, AndroidStorageIo))
+    assertFalse(dir.exists())
+  }
+
+  @Test
+  fun aCardPulledDuringTheDeleteIsNotADeleteAndCanBeFinishedLater() {
+    val dir = File(sdDownloads, pod)
+    media(dir, "e1.mp3")
+    media(dir, "e2.mp3")
+    val item = podcastLocal(sdFolderId, dir, "e1" to File(dir, "e1.mp3"), "e2" to File(dir, "e2.mp3"))
+    val probe = Probe()
+    val outcome = AppStorageItemDeletion.delete(item, probe, CardPulledIo(probe, pullOnFirstDelete = true))
+    assertTrue("partial or interrupted delete is not DELETED: $outcome", outcome != AppStorageItemDeletion.Outcome.DELETED)
+    assertTrue("what was not reached stays", File(dir, "e1.mp3").exists() || File(dir, "e2.mp3").exists())
+    probe.mounted = true
+    assertEquals(AppStorageItemDeletion.Outcome.DELETED, AppStorageItemDeletion.delete(item, probe, AndroidStorageIo))
+    assertFalse(dir.exists())
+  }
 
   @Test
   fun deletingAnSdItemNeedsItsCardAndStaysInsideItsDownloadFolder() {

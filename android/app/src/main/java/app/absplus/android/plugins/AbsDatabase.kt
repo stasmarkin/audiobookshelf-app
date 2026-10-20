@@ -432,7 +432,8 @@ class AbsDatabase : Plugin() {
     }
 
     // Save local media progress locally
-    DeviceManager.dbManager.saveLocalMediaProgressLocked(localMediaProgress)
+    // Refused when the download was deleted meanwhile (R32-H02): reported like an item that is already gone
+    if (!DeviceManager.dbManager.saveLocalMediaProgressIfItemExists(localMediaProgress)) return call.resolve(JSObject("{\"error\":\"Library Item not found\"}"))
 
     val lmpstring = jacksonMapper.writeValueAsString(localMediaProgress)
     Log.d(tag, "updateLocalEbookProgress: Local Media Progress String $lmpstring")
