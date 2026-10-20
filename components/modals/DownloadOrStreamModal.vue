@@ -3,7 +3,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     value: Boolean,
     anyLocal: Boolean
@@ -20,7 +23,7 @@ export default {
     items() {
       return [
         { text: this.anyLocal ? 'Play Now' : 'Stream Now', value: 'play', icon: 'play_arrow' },
-        { text: 'Download & Play', value: 'downloadAndPlay', icon: 'download' }
+        { text: 'Download & Play', value: 'downloadAndPlay', icon: 'download', ...this.serverOnlyItem }
       ]
     }
   },

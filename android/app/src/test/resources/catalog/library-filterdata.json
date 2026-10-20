@@ -1,0 +1,103 @@
+{
+ "filterdata": {
+  "authors": [
+   {
+    "id": "9355a315-9e8c-4905-9c83-d872cdeee1c1",
+    "name": "John Smithson"
+   },
+   {
+    "id": "3a4c7ac0-2817-4a28-937b-3c33365a0098",
+    "name": "Ann Lee"
+   },
+   {
+    "id": "f60ea66b-f000-4850-9c4d-9f27a2947fe0",
+    "name": "John Smith"
+   },
+   {
+    "id": "dfc30133-696d-43d0-93ae-5cb1e03645fe",
+    "name": "Анна Иванова"
+   },
+   {
+    "id": "d64c7f7e-5492-417e-ab8f-5a8e0b630d10",
+    "name": "Zed Alpha"
+   },
+   {
+    "id": "9d147308-8e4b-4494-8ba5-e669b998dbc7",
+    "name": "bob lowercase"
+   }
+  ],
+  "genres": [],
+  "tags": [],
+  "series": [
+   {
+    "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
+    "name": "Мир"
+   },
+   {
+    "id": "7aedacc5-33da-4205-a9d5-a9472d433f2d",
+    "name": "Трилогия"
+   },
+   {
+    "id": "2a6c7f1a-04a3-4593-951d-023aaf871f9f",
+    "name": "The Saga"
+   },
+   {
+    "id": "e533af1f-dbeb-4ab9-af4d-f5ac928cfa65",
+    "name": "Повесть"
+   }
+  ],
+  "narrators": [],
+  "languages": [],
+  "publishers": [],
+  "publishedDecades": [],
+  "bookCount": 0,
+  "authorCount": 0,
+  "seriesCount": 0,
+  "podcastCount": 0,
+  "numIssues": 0,
+  "loadedAt": 1792076681374
+ },
+ "issues": 0,
+ "numUserPlaylists": 0,
+ "library": {
+  "id": "7f998760-f97e-4a66-ae59-625e3335596e",
+  "name": "Parity Books",
+  "folders": [
+   {
+    "id": "5adcf238-0af9-4498-955a-39dddac6315a",
+    "fullPath": "/audiobooks",
+    "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
+    "addedAt": 1792076681347
+   }
+  ],
+  "displayOrder": 1,
+  "icon": "database",
+  "mediaType": "book",
+  "provider": "google",
+  "settings": {
+   "coverAspectRatio": 1,
+   "disableWatcher": false,
+   "autoScanCronExpression": null,
+   "skipMatchingMediaWithAsin": false,
+   "skipMatchingMediaWithIsbn": false,
+   "audiobooksOnly": false,
+   "epubsAllowScriptedContent": false,
+   "hideSingleBookSeries": false,
+   "onlyShowLaterBooksInContinueSeries": false,
+   "metadataPrecedence": [
+    "folderStructure",
+    "audioMetatags",
+    "nfoFile",
+    "txtFiles",
+    "opfFile",
+    "absMetadata"
+   ],
+   "markAsFinishedPercentComplete": null,
+   "markAsFinishedTimeRemaining": 10
+  },
+  "lastScan": 1792076683283,
+  "lastScanVersion": "2.37.1",
+  "createdAt": 1792076681344,
+  "lastUpdate": 1792076683284
+ }
+}

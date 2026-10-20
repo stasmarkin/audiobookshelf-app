@@ -1,0 +1,760 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "f8db142ce529394fe32880ce9743e0a9",
+    "entities": [
+      {
+        "tableName": "libraries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `id` TEXT NOT NULL, `position` INTEGER NOT NULL, `mediaType` TEXT NOT NULL, `json` TEXT NOT NULL, `filterDataJson` TEXT, `issues` INTEGER NOT NULL, `numUserPlaylists` INTEGER NOT NULL, PRIMARY KEY(`serverConfigId`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mediaType",
+            "columnName": "mediaType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filterDataJson",
+            "columnName": "filterDataJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "issues",
+            "columnName": "issues",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numUserPlaylists",
+            "columnName": "numUserPlaylists",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "library_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `itemsReconciledAt` INTEGER, `itemsComplete` INTEGER NOT NULL, `seriesReconciledAt` INTEGER, `authorsReconciledAt` INTEGER, `collectionsReconciledAt` INTEGER, `playlistsReconciledAt` INTEGER, `lastError` TEXT, `pendingSeriesQueries` TEXT NOT NULL, PRIMARY KEY(`serverConfigId`, `libraryId`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemsReconciledAt",
+            "columnName": "itemsReconciledAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "itemsComplete",
+            "columnName": "itemsComplete",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seriesReconciledAt",
+            "columnName": "seriesReconciledAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "authorsReconciledAt",
+            "columnName": "authorsReconciledAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "collectionsReconciledAt",
+            "columnName": "collectionsReconciledAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "playlistsReconciledAt",
+            "columnName": "playlistsReconciledAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingSeriesQueries",
+            "columnName": "pendingSeriesQueries",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "libraryId"
+          ]
+        }
+      },
+      {
+        "tableName": "library_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `id` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `mediaType` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, `contentHash` TEXT NOT NULL, `title` TEXT NOT NULL, `titleIgnorePrefix` TEXT NOT NULL, `authorName` TEXT NOT NULL, `authorNameLF` TEXT NOT NULL, `narratorName` TEXT NOT NULL, `seriesName` TEXT NOT NULL, `publisher` TEXT, `language` TEXT, `publishedYear` TEXT, `explicit` INTEGER NOT NULL, `abridged` INTEGER NOT NULL, `genres` TEXT NOT NULL, `tags` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, `size` INTEGER NOT NULL, `duration` REAL NOT NULL, `birthtimeMs` INTEGER NOT NULL, `mtimeMs` INTEGER NOT NULL, `numTracks` INTEGER NOT NULL, `numEpisodes` INTEGER NOT NULL, `ebookFormat` TEXT, `isMissing` INTEGER NOT NULL, `isInvalid` INTEGER NOT NULL, `rssFeedJson` TEXT, `json` TEXT NOT NULL, `searchKey` TEXT NOT NULL, `detailLevel` TEXT NOT NULL, `expandedJson` TEXT, PRIMARY KEY(`serverConfigId`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mediaType",
+            "columnName": "mediaType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "contentHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "titleIgnorePrefix",
+            "columnName": "titleIgnorePrefix",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authorName",
+            "columnName": "authorName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authorNameLF",
+            "columnName": "authorNameLF",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "narratorName",
+            "columnName": "narratorName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seriesName",
+            "columnName": "seriesName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "publisher",
+            "columnName": "publisher",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "language",
+            "columnName": "language",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "publishedYear",
+            "columnName": "publishedYear",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explicit",
+            "columnName": "explicit",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "abridged",
+            "columnName": "abridged",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "genres",
+            "columnName": "genres",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tags",
+            "columnName": "tags",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "size",
+            "columnName": "size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "duration",
+            "columnName": "duration",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "birthtimeMs",
+            "columnName": "birthtimeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mtimeMs",
+            "columnName": "mtimeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numTracks",
+            "columnName": "numTracks",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numEpisodes",
+            "columnName": "numEpisodes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ebookFormat",
+            "columnName": "ebookFormat",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isMissing",
+            "columnName": "isMissing",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isInvalid",
+            "columnName": "isInvalid",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rssFeedJson",
+            "columnName": "rssFeedJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "searchKey",
+            "columnName": "searchKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detailLevel",
+            "columnName": "detailLevel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expandedJson",
+            "columnName": "expandedJson",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_library_items_serverConfigId_libraryId",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "libraryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_library_items_serverConfigId_libraryId` ON `${TABLE_NAME}` (`serverConfigId`, `libraryId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "series",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `id` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `name` TEXT NOT NULL, `nameIgnorePrefix` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `json` TEXT NOT NULL, PRIMARY KEY(`serverConfigId`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameIgnorePrefix",
+            "columnName": "nameIgnorePrefix",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_series_serverConfigId_libraryId",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "libraryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_series_serverConfigId_libraryId` ON `${TABLE_NAME}` (`serverConfigId`, `libraryId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "series_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `seriesId` TEXT NOT NULL, `libraryItemId` TEXT NOT NULL, `sequence` TEXT, PRIMARY KEY(`serverConfigId`, `seriesId`, `libraryItemId`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seriesId",
+            "columnName": "seriesId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryItemId",
+            "columnName": "libraryItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequence",
+            "columnName": "sequence",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "seriesId",
+            "libraryItemId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_series_items_serverConfigId_libraryItemId",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "libraryItemId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_series_items_serverConfigId_libraryItemId` ON `${TABLE_NAME}` (`serverConfigId`, `libraryItemId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "authors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `id` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `name` TEXT NOT NULL, `lastFirst` TEXT, `addedAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `numBooks` INTEGER NOT NULL, `json` TEXT NOT NULL, PRIMARY KEY(`serverConfigId`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastFirst",
+            "columnName": "lastFirst",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numBooks",
+            "columnName": "numBooks",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_authors_serverConfigId_libraryId",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "libraryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_authors_serverConfigId_libraryId` ON `${TABLE_NAME}` (`serverConfigId`, `libraryId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "collections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `id` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `position` INTEGER NOT NULL, `json` TEXT NOT NULL, PRIMARY KEY(`serverConfigId`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_collections_serverConfigId_libraryId",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "libraryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_collections_serverConfigId_libraryId` ON `${TABLE_NAME}` (`serverConfigId`, `libraryId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "collection_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `collectionId` TEXT NOT NULL, `position` INTEGER NOT NULL, `libraryItemId` TEXT NOT NULL, PRIMARY KEY(`serverConfigId`, `collectionId`, `position`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "collectionId",
+            "columnName": "collectionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryItemId",
+            "columnName": "libraryItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "collectionId",
+            "position"
+          ]
+        }
+      },
+      {
+        "tableName": "playlists",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `id` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `position` INTEGER NOT NULL, `json` TEXT NOT NULL, PRIMARY KEY(`serverConfigId`, `id`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_playlists_serverConfigId_libraryId",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "libraryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlists_serverConfigId_libraryId` ON `${TABLE_NAME}` (`serverConfigId`, `libraryId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "playlist_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `playlistId` TEXT NOT NULL, `position` INTEGER NOT NULL, `libraryItemId` TEXT NOT NULL, `episodeId` TEXT NOT NULL, `episodeJson` TEXT, PRIMARY KEY(`serverConfigId`, `playlistId`, `position`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playlistId",
+            "columnName": "playlistId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryItemId",
+            "columnName": "libraryItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "episodeJson",
+            "columnName": "episodeJson",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "playlistId",
+            "position"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f8db142ce529394fe32880ce9743e0a9')"
+    ]
+  }
+}

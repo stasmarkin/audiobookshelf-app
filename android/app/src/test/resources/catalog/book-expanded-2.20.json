@@ -1,0 +1,176 @@
+{
+ "id": "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+ "ino": "92257",
+ "oldLibraryItemId": null,
+ "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
+ "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
+ "path": "/audiobooks/Book 07",
+ "relPath": "Book 07",
+ "isFile": false,
+ "mtimeMs": 1792076588780,
+ "ctimeMs": 1792076588780,
+ "birthtimeMs": 1792076588741,
+ "addedAt": 1792076683024,
+ "updatedAt": 1792076690402,
+ "isMissing": false,
+ "isInvalid": false,
+ "mediaType": "book",
+ "media": {
+  "id": "4de90c47-31f4-4fa8-8ba5-4d1416554196",
+  "metadata": {
+   "title": "Мир: начало",
+   "subtitle": null,
+   "authors": [
+    {
+     "id": "f60ea66b-f000-4850-9c4d-9f27a2947fe0",
+     "name": "John Smith"
+    }
+   ],
+   "narrators": [],
+   "series": [
+    {
+     "id": "a1d73131-ab6b-46c1-91d5-87223de69f7a",
+     "name": "Мир",
+     "sequence": "1"
+    },
+    {
+     "id": "7aedacc5-33da-4205-a9d5-a9472d433f2d",
+     "name": "Трилогия",
+     "sequence": "3"
+    }
+   ],
+   "genres": [
+    "Фэнтези",
+    "Fantasy"
+   ],
+   "publishedYear": "2001",
+   "publishedDate": null,
+   "publisher": "Pub B",
+   "description": null,
+   "isbn": null,
+   "asin": null,
+   "language": null,
+   "explicit": false,
+   "abridged": false,
+   "titleIgnorePrefix": "Мир: начало",
+   "authorName": "John Smith",
+   "authorNameLF": "Smith, John",
+   "narratorName": "",
+   "seriesName": "Мир #1, Трилогия #3",
+   "descriptionPlain": null
+  },
+  "coverPath": null,
+  "tags": [
+   "fav",
+   "?ü"
+  ],
+  "duration": 7,
+  "size": 7461,
+  "libraryItemId": "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+  "audioFiles": [
+   {
+    "index": 1,
+    "ino": "92258",
+    "metadata": {
+     "filename": "book07.mp3",
+     "ext": ".mp3",
+     "path": "/audiobooks/Book 07/book07.mp3",
+     "relPath": "book07.mp3",
+     "size": 7461,
+     "mtimeMs": 1792076588777,
+     "ctimeMs": 1792076588780,
+     "birthtimeMs": 1792076588773
+    },
+    "addedAt": 1792076683023,
+    "updatedAt": 1792076683023,
+    "trackNumFromMeta": null,
+    "discNumFromMeta": null,
+    "trackNumFromFilename": 7,
+    "discNumFromFilename": null,
+    "manuallyVerified": false,
+    "exclude": false,
+    "error": null,
+    "format": "MP2/3 (MPEG audio layer 2/3)",
+    "duration": 7,
+    "bitRate": 8000,
+    "language": null,
+    "codec": "mp3",
+    "timeBase": "1/14112000",
+    "channels": 1,
+    "channelLayout": "mono",
+    "chapters": [],
+    "embeddedCoverArt": null,
+    "metaTags": {
+     "tagEncoder": "Lavf62.12.102"
+    },
+    "mimeType": "audio/mpeg"
+   }
+  ],
+  "chapters": [],
+  "ebookFile": null,
+  "tracks": [
+   {
+    "index": 1,
+    "ino": "92258",
+    "metadata": {
+     "filename": "book07.mp3",
+     "ext": ".mp3",
+     "path": "/audiobooks/Book 07/book07.mp3",
+     "relPath": "book07.mp3",
+     "size": 7461,
+     "mtimeMs": 1792076588777,
+     "ctimeMs": 1792076588780,
+     "birthtimeMs": 1792076588773
+    },
+    "addedAt": 1792076683023,
+    "updatedAt": 1792076683023,
+    "trackNumFromMeta": null,
+    "discNumFromMeta": null,
+    "trackNumFromFilename": 7,
+    "discNumFromFilename": null,
+    "manuallyVerified": false,
+    "exclude": false,
+    "error": null,
+    "format": "MP2/3 (MPEG audio layer 2/3)",
+    "duration": 7,
+    "bitRate": 8000,
+    "language": null,
+    "codec": "mp3",
+    "timeBase": "1/14112000",
+    "channels": 1,
+    "channelLayout": "mono",
+    "chapters": [],
+    "embeddedCoverArt": null,
+    "metaTags": {
+     "tagEncoder": "Lavf62.12.102"
+    },
+    "mimeType": "audio/mpeg",
+    "title": "book07.mp3",
+    "startOffset": 0,
+    "contentUrl": "/api/items/ccbae3d4-63eb-4eff-85b2-911093527fa5/file/92258"
+   }
+  ]
+ },
+ "size": 7461,
+ "lastScan": 1792076683023,
+ "scanVersion": "2.37.1",
+ "libraryFiles": [
+  {
+   "ino": "92258",
+   "metadata": {
+    "filename": "book07.mp3",
+    "ext": ".mp3",
+    "path": "/audiobooks/Book 07/book07.mp3",
+    "relPath": "book07.mp3",
+    "size": 7461,
+    "mtimeMs": 1792076588777,
+    "ctimeMs": 1792076588780,
+    "birthtimeMs": 1792076588773
+   },
+   "isSupplementary": null,
+   "addedAt": 1792076681405,
+   "updatedAt": 1792076681405,
+   "fileType": "audio"
+  }
+ ]
+}

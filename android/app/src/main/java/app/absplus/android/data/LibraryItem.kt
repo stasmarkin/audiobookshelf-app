@@ -8,6 +8,11 @@ import androidx.media.utils.MediaConstants
 import app.absplus.android.BuildConfig
 import app.absplus.android.R
 import app.absplus.android.device.DeviceManager
+import app.absplus.android.player.CoverArt
+import app.absplus.android.player.autoCoverUri
+import app.absplus.android.player.serverAway
+import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.ServerReachability
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
@@ -47,18 +52,31 @@ class LibraryItem(
   @get:JsonIgnore
   val authorName get() = media.metadata.getAuthorDisplayName()
 
+  /**
+   * With [ctx] (Android Auto): the cover cache's file first, the active server's URL unless it is away, else the app
+   * icon rather than a URL the host cannot fetch ([autoCoverUri]). Without it: the live session's URL.
+   */
   @JsonIgnore
-  fun getCoverUri(): Uri {
+  fun getCoverUri(ctx: Context? = null): Uri {
+    val icon = Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
     if (media.coverPath == null) {
-      return Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
+      return icon
     }
+    if (ctx != null) {
+      // The saved active server: a process Auto started has no live session until its root load
+      val serverUri = ActiveServer.current()?.let { coverUrl(it.address, it.version.orEmpty(), it.token) }
+      return autoCoverUri(CoverArt.cachedCoverUri(ctx, id, updatedAt), serverUri, !serverAway(ServerReachability.state.value), icon)
+    }
+    return coverUrl(DeviceManager.serverAddress, DeviceManager.serverVersion, DeviceManager.token)
+  }
 
+  private fun coverUrl(address: String, version: String, token: String): Uri {
     // As of v2.17.0 token is not needed with cover image requests
-    if (DeviceManager.isServerVersionGreaterThanOrEqualTo("2.17.0")) {
-      return Uri.parse("${DeviceManager.serverAddress}/api/items/$id/cover")
+    if (DeviceManager.isVersionAtLeast(version, "2.17.0")) {
+      return Uri.parse("$address/api/items/$id/cover")
     }
 
-    return Uri.parse("${DeviceManager.serverAddress}/api/items/$id/cover?token=${DeviceManager.token}")
+    return Uri.parse("$address/api/items/$id/cover?token=$token")
   }
 
   @JsonIgnore
@@ -152,7 +170,7 @@ class LibraryItem(
     return MediaDescriptionCompat.Builder()
       .setMediaId(mediaId)
       .setTitle(itemTitle)
-      .setIconUri(getCoverUri())
+      .setIconUri(getCoverUri(ctx))
       .setSubtitle(subtitle)
       .setExtras(extras)
       .build()

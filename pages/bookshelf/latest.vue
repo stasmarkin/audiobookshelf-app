@@ -2,6 +2,7 @@
   <div class="w-full p-4">
     <h1 class="text-xl mb-2 font-semibold">{{ $strings.HeaderLatestEpisodes }}</h1>
 
+    <p v-if="catalogNotLoaded" class="text-fg-muted text-center py-6">{{ $strings.MessageCatalogNotLoaded }}</p>
     <template v-for="episode in recentEpisodes">
       <tables-podcast-latest-episode-row :episode="episode" :local-episode="localEpisodeMap[episode.id]" :library-item-id="episode.libraryItemId" :local-library-item-id="localEpisodeMap[episode.id]?.localLibraryItemId" :key="episode.id" @addToPlaylist="addEpisodeToPlaylist" />
     </template>
@@ -9,15 +10,25 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+import { createDebouncer } from '@/utils/catalogRefresh'
+
+const PAGE_SIZE = 50
+
 export default {
+  mixins: [requiresServer],
   data() {
     return {
       processing: false,
       recentEpisodes: [],
-      totalEpisodes: 0,
+      // null: the server's list does not say how many there are
+      totalEpisodes: null,
       currentPage: 0,
+      catalogNotLoaded: false,
       localLibraryItems: [],
-      loadedLibraryId: null
+      loadedLibraryId: null,
+      stopDataChanged: null,
+      refreshDebouncer: null
     }
   },
   watch: {},
@@ -27,7 +38,10 @@ export default {
     },
     localEpisodes() {
       const episodes = []
+      const activeServerConfigId = this.$store.state.activeServerConfigId
       this.localLibraryItems.forEach((li) => {
+        // Replicas of two accounts on one server share episode ids: only the active server's copies count
+        if (activeServerConfigId && li.serverConnectionConfigId !== activeServerConfigId) return
         if (li.media.episodes?.length) {
           li.media.episodes.map((ep) => {
             ep.localLibraryItemId = li.id
@@ -49,29 +63,44 @@ export default {
   },
   methods: {
     async addEpisodeToPlaylist(episode) {
-      const libraryItem = await this.$nativeHttp.get(`/api/items/${episode.libraryItemId}`).catch((error) => {
+      if (!this.isServerOnline) return
+      const answer = await this.$absData.getLibraryItem({ id: episode.libraryItemId }).catch((error) => {
         console.error('Failed to get library item', error)
-        this.$toast.error('Failed to get library item')
         return null
       })
-      if (!libraryItem) return
+      const libraryItem = answer?.libraryItem
+      if (!libraryItem) {
+        this.$toast.error('Failed to get library item')
+        return
+      }
 
       this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem, episode }])
       this.$store.commit('globals/setShowPlaylistsAddCreateModal', true)
     },
     async loadRecentEpisodes(page = 0) {
-      this.loadedLibraryId = this.currentLibraryId
+      const libraryId = this.currentLibraryId
+      this.loadedLibraryId = libraryId
       this.processing = true
-      const episodePayload = await this.$nativeHttp.get(`/api/libraries/${this.currentLibraryId}/recent-episodes?limit=50&page=${page}`).catch((error) => {
+      const answer = await this.$absData.getRecentEpisodes({ libraryId, limit: PAGE_SIZE, page }).catch((error) => {
         console.error('Failed to get recent episodes', error)
         this.$toast.error('Failed to get recent episodes')
         return null
       })
       this.processing = false
-      console.log('Episodes', episodePayload)
-      this.recentEpisodes = episodePayload.episodes || []
-      this.totalEpisodes = episodePayload.total
+      // Another library was chosen while this one was read
+      if (libraryId !== this.currentLibraryId) return
+      this.recentEpisodes = answer?.episodes || []
+      this.totalEpisodes = answer?.total ?? null
       this.currentPage = page
+      this.catalogNotLoaded = !!answer && answer.replica?.reconciledAt == null && !answer.fromServer && !this.recentEpisodes.length
+    },
+    /** Native changed this library's episodes or podcasts: read the shown page again, a second after the last notice. */
+    dataChanged(change) {
+      const libraryId = this.loadedLibraryId
+      if (change?.scope !== 'catalog' || !libraryId) return
+      if (![`episodes:${libraryId}`, `items:${libraryId}`].some((topic) => (change.ids || []).includes(topic))) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(() => this.loadRecentEpisodes(this.currentPage))
     },
     libraryChanged(libraryId) {
       if (libraryId !== this.loadedLibraryId) {
@@ -98,6 +127,7 @@ export default {
     }
   },
   mounted() {
+    this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
     this.loadRecentEpisodes()
     this.loadLocalPodcastLibraryItems()
     this.$eventBus.$on('library-changed', this.libraryChanged)
@@ -108,6 +138,9 @@ export default {
     this.$eventBus.$off('library-changed', this.libraryChanged)
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
     this.$eventBus.$off('local-library-items-changed', this.loadLocalPodcastLibraryItems)
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
   }
 }
 </script>

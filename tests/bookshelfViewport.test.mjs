@@ -8,6 +8,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createPageRetry } from '../utils/pageRetry.js'
+import { isReplicaIncomplete } from '../utils/catalogRefresh.js'
+import { findLocalCopy as localCopyOf } from '../utils/localCopy.js'
 
 const require = createRequire(import.meta.url)
 // Vue installs its DOM patcher only when it loads in a browser-like global
@@ -132,7 +134,7 @@ const makeWorld = ({ wrapped }) => {
 const loadBookshelf = async () => {
   const sfc = parseComponent(await read('../components/bookshelf/LazyBookshelf.vue'))
   const mixin = loadDefault(await read('../mixins/bookshelfCardsHelpers.js'), ['Vue'])(Vue)
-  const component = loadDefault(sfc.script.content, ['bookshelfCardsHelpers', 'createPageRetry', 'textScale'])(mixin, createPageRetry, () => 1)
+  const component = loadDefault(sfc.script.content, ['bookshelfCardsHelpers', 'createPageRetry', 'textScale', 'isReplicaIncomplete', 'localCopyOf'])(mixin, createPageRetry, () => 1, isReplicaIncomplete, localCopyOf)
   return { component, mixin }
 }
 
@@ -164,6 +166,7 @@ const setup = async ({ wrapped, total = 13, listView = true, delay = () => 5, ht
     state: { user: { user: { id: 'u1' } }, globals: { bookshelfListView: listView, series: { libraryId: 'lib' } }, libraries: { currentLibraryId: 'lib' }, lastBookshelfScrollData: {} },
     getters: {
       getServerSetting: () => false,
+      getHasActiveServer: true,
       'user/getUserSetting': (k) => ({ mobileOrderBy: 'media.metadata.title', mobileOrderDesc: false, mobileFilterBy: 'all', collapseSeries: false, collapseBookSeries: false }[k]),
       'libraries/getBookCoverAspectRatio': 1.6,
       'libraries/getCurrentLibraryMediaType': 'book',
@@ -187,7 +190,9 @@ const setup = async ({ wrapped, total = 13, listView = true, delay = () => 5, ht
       )
     }
   }
-  Object.assign(Vue.prototype, { $store: store, $nativeHttp: http, $db: { getLocalLibraryItems: async () => [] }, $eventBus: emitter(), $socket: emitter(), $encode: (s) => s, $platform: 'android', $strings: {} })
+  // A series page reads its books from the catalog replica (offline-first 4b), page by page as the server did
+  const absData = { getLibraryItems: ({ page, limit }) => http.get(`?page=${page}&limit=${limit}`), onDataChanged: () => () => {} }
+  Object.assign(Vue.prototype, { $store: store, $absData: absData, $db: { getLocalLibraryItems: async () => [] }, $eventBus: emitter(), $socket: emitter(), $encode: (s) => s, $platform: 'android', $strings: {} })
   const origError = console.error
   console.error = (...a) => errors.push(a.join(' '))
   console.log = () => {}

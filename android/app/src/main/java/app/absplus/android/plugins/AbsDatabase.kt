@@ -15,6 +15,9 @@ import app.absplus.android.device.DownloadStorageSpace
 import app.absplus.android.device.StorageTarget
 import app.absplus.android.media.MediaEventManager
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.LocalSessionsCleanup
+import app.absplus.android.sync.ServerReachability
 import app.absplus.android.server.RefreshResult
 import app.absplus.android.managers.ItemUpdate
 import app.absplus.android.managers.SecureStorage
@@ -220,6 +223,10 @@ class AbsDatabase : Plugin() {
       // Requests sent for another server must not be retried with renewed credentials after the switch.
       if (DeviceManager.serverConnectionConfig?.id != serverConnectionConfig?.id) ApiHandler.invalidateAuthRequests()
       DeviceManager.serverConnectionConfig = serverConnectionConfig
+      serverConnectionConfig?.id?.let { id ->
+        ActiveServer.remember(id)
+        ServerReachability.reportSignedIn(id)
+      }
       call.resolve(JSObject(jacksonMapper.writeValueAsString(DeviceManager.serverConnectionConfig)))
       }
     }
@@ -243,6 +250,7 @@ class AbsDatabase : Plugin() {
         DeviceManager.serverConnectionConfig = null
         ApiHandler.invalidateAuthRequests()
       }
+      ActiveServer.forget(serverConnectionConfigId)
       call.resolve()
       }
     }
@@ -310,10 +318,13 @@ class AbsDatabase : Plugin() {
 
   @PluginMethod
   fun logout(call:PluginCall) {
+    // Before the session ends: a waiting player signs in with the last server by itself (savedServerForWait), never
+    // after a sign-out
+    DeviceManager.deviceData.lastServerConnectionConfigId = null
+    // Session first: an answer dropped as stale by the bump below must already see it ended (SyncDeps.signedIn)
+    DeviceManager.serverConnectionConfig = null
     ApiHandler.invalidateAuthRequests()
     GlobalScope.launch(Dispatchers.IO) {
-      DeviceManager.serverConnectionConfig = null
-      DeviceManager.deviceData.lastServerConnectionConfigId = null
       DeviceManager.dbManager.saveDeviceData(DeviceManager.deviceData)
       call.resolve()
     }
@@ -359,87 +370,20 @@ class AbsDatabase : Plugin() {
       return call.resolve()
     }
 
-    apiHandler.syncLocalMediaProgressForUser {
-      val savedSessions = DeviceManager.dbManager.getPlaybackSessions().filter { it.serverConnectionConfigId == DeviceManager.serverConnectionConfigId }
+    val savedSessions = DeviceManager.dbManager.getPlaybackSessions().filter { it.serverConnectionConfigId == DeviceManager.serverConnectionConfigId }
 
-      if (savedSessions.isNotEmpty()) {
-        apiHandler.sendSyncLocalSessions(savedSessions) { success, errorMsg ->
-          if (!success) {
-            call.resolve(JSObject("{\"error\":\"$errorMsg\"}"))
-          } else {
-            AbsLogger.info("AbsDatabase", "syncLocalSessionsWithServer: Finished sending local playback sessions to server. Removing ${savedSessions.size} saved sessions.")
-            // Remove all local sessions
-            savedSessions.forEach {
-              DeviceManager.dbManager.removePlaybackSession(it.id)
-            }
-            call.resolve()
-          }
+    if (savedSessions.isNotEmpty()) {
+      apiHandler.sendSyncLocalSessions(savedSessions) { success, errorMsg, results ->
+        if (!success) {
+          call.resolve(JSObject().apply { put("error", errorMsg) })
+        } else {
+          AbsLogger.info("AbsDatabase", "syncLocalSessionsWithServer: Finished sending ${savedSessions.size} local playback sessions to server.")
+          LocalSessionsCleanup.settle(savedSessions, true, results) { call.resolve() }
         }
-      } else {
-        AbsLogger.info("AbsDatabase", "syncLocalSessionsWithServer: No saved local playback sessions to send to server.")
-        call.resolve()
-      }
-    }
-  }
-
-  // Updates received via web socket
-  // This function doesn't need to sync with the server also because this data is coming from the server
-  // If sending the localMediaProgressId then update existing media progress
-  // If sending localLibraryItemId then save new local media progress
-  @PluginMethod
-  fun syncServerMediaProgressWithLocalMediaProgress(call:PluginCall) {
-    val serverMediaProgress = call.getObject("mediaProgress").toString()
-    val localLibraryItemId = call.getString("localLibraryItemId", "").toString()
-    var localEpisodeId:String? = call.getString("localEpisodeId", "").toString()
-    if (localEpisodeId.isNullOrEmpty()) localEpisodeId = null
-    var localMediaProgressId = call.getString("localMediaProgressId") ?: ""
-
-    val mediaProgress =  jacksonMapper.readValue<MediaProgress>(serverMediaProgress)
-
-    if (localMediaProgressId == "") {
-      val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItem(localLibraryItemId)
-      if (localLibraryItem != null) {
-        localMediaProgressId = if (localEpisodeId.isNullOrEmpty()) localLibraryItemId else "$localLibraryItemId-$localEpisodeId"
-
-        val localMediaProgress = LocalMediaProgress(
-          id = localMediaProgressId,
-          localLibraryItemId = localLibraryItemId,
-          localEpisodeId = localEpisodeId,
-          duration = mediaProgress.duration,
-          progress = mediaProgress.progress,
-          currentTime = mediaProgress.currentTime,
-          isFinished = mediaProgress.isFinished,
-          ebookLocation = mediaProgress.ebookLocation,
-          ebookProgress = mediaProgress.ebookProgress,
-          lastUpdate = mediaProgress.lastUpdate,
-          startedAt = mediaProgress.startedAt,
-          finishedAt = mediaProgress.finishedAt,
-          serverConnectionConfigId = localLibraryItem.serverConnectionConfigId,
-          serverAddress = localLibraryItem.serverAddress,
-          serverUserId = localLibraryItem.serverUserId,
-          libraryItemId = localLibraryItem.libraryItemId,
-          episodeId = mediaProgress.episodeId)
-
-        Log.d(tag, "syncServerMediaProgressWithLocalMediaProgress: Saving new local media progress $localMediaProgress")
-        if (!DeviceManager.dbManager.saveLocalMediaProgressIfItemExists(localMediaProgress)) return call.resolve() // the download was deleted meanwhile; the server keeps its progress
-        call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
-      } else {
-        Log.e(tag, "syncServerMediaProgressWithLocalMediaProgress: Local library item not found")
       }
     } else {
-      Log.d(tag, "syncServerMediaProgressWithLocalMediaProgress $localMediaProgressId")
-      val localMediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId)
-
-      if (localMediaProgress == null) {
-        Log.w(tag, "syncServerMediaProgressWithLocalMediaProgress Local media progress not found $localMediaProgressId")
-        call.resolve()
-      } else {
-        MediaEventManager.syncEvent(mediaProgress, "Received from webhook event")
-
-        localMediaProgress.updateFromServerMediaProgress(mediaProgress)
-        if (!DeviceManager.dbManager.saveLocalMediaProgressIfItemExists(localMediaProgress)) return call.resolve() // the download was deleted meanwhile; the server keeps its progress
-        call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
-      }
+      AbsLogger.info("AbsDatabase", "syncLocalSessionsWithServer: No saved local playback sessions to send to server.")
+      call.resolve()
     }
   }
 
@@ -448,94 +392,8 @@ class AbsDatabase : Plugin() {
     val localLibraryItemId = call.getString("localLibraryItemId", "").toString()
     var localEpisodeId:String? = call.getString("localEpisodeId", "").toString()
     if (localEpisodeId.isNullOrEmpty()) localEpisodeId = null
-
-    val localMediaProgressId = if (localEpisodeId.isNullOrEmpty()) localLibraryItemId else "$localLibraryItemId-$localEpisodeId"
     val isFinished = call.getBoolean("isFinished", false) == true
-
-    Log.d(tag, "updateLocalMediaProgressFinished $localMediaProgressId | Is Finished:$isFinished")
-    var localMediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId)
-
-    if (localMediaProgress == null) { // Create new local media progress if does not exist
-     Log.d(tag, "updateLocalMediaProgressFinished Local Media Progress not found $localMediaProgressId - Creating new")
-      val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItem(localLibraryItemId)
-
-      if (localLibraryItem == null) {
-        return call.resolve(JSObject("{\"error\":\"Library Item not found\"}"))
-      }
-      if (localLibraryItem.mediaType != "podcast" && !localEpisodeId.isNullOrEmpty()) {
-        return call.resolve(JSObject("{\"error\":\"Invalid library item not a podcast\"}"))
-      }
-
-      val duration: Double
-      var podcastEpisode: PodcastEpisode? = null
-      if (!localEpisodeId.isNullOrEmpty()) {
-          val podcast = localLibraryItem.media as Podcast
-        podcastEpisode = podcast.episodes?.find { episode ->
-            episode.id == localEpisodeId
-          }
-        if (podcastEpisode == null) {
-          return call.resolve(JSObject("{\"error\":\"Podcast episode not found\"}"))
-        }
-        duration = podcastEpisode.duration ?: 0.0
-      } else {
-        val book = localLibraryItem.media as Book
-        duration = book.duration ?: 0.0
-      }
-
-      val currentTime = System.currentTimeMillis()
-      localMediaProgress = LocalMediaProgress(
-        id = localMediaProgressId,
-        localLibraryItemId = localLibraryItemId,
-        localEpisodeId = localEpisodeId,
-        duration = duration,
-        progress = if (isFinished) 1.0 else 0.0,
-        currentTime = 0.0,
-        isFinished = isFinished,
-        ebookLocation = null,
-        ebookProgress = null,
-        lastUpdate = currentTime,
-        startedAt = if (isFinished) currentTime else 0L,
-        finishedAt = if (isFinished) currentTime else null,
-        serverConnectionConfigId = localLibraryItem.serverConnectionConfigId,
-        serverAddress = localLibraryItem.serverAddress,
-        serverUserId = localLibraryItem.serverUserId,
-        libraryItemId = localLibraryItem.libraryItemId,
-        episodeId = podcastEpisode?.serverEpisodeId)
-    } else {
-      localMediaProgress.updateIsFinished(isFinished)
-    }
-
-    // Save local media progress locally
-    // Refused when the download was deleted meanwhile (R32-H02): reported like an item that is already gone
-    if (!DeviceManager.dbManager.saveLocalMediaProgressIfItemExists(localMediaProgress)) return call.resolve(JSObject("{\"error\":\"Library Item not found\"}"))
-
-    val lmpstring = jacksonMapper.writeValueAsString(localMediaProgress)
-    Log.d(tag, "updateLocalMediaProgressFinished: Local Media Progress String $lmpstring")
-
-    // Send update to server media progress is linked to a server and user is logged into that server
-    localMediaProgress.serverConnectionConfigId?.let { configId ->
-      if (DeviceManager.serverConnectionConfigId == configId) {
-        val libraryItemId = localMediaProgress.libraryItemId ?: ""
-        val episodeId = localMediaProgress.episodeId ?: ""
-        val updatePayload = JSObject()
-        updatePayload.put("isFinished", isFinished)
-        apiHandler.updateMediaProgress(libraryItemId,episodeId,updatePayload) {
-          Log.d(tag, "updateLocalMediaProgressFinished: Updated media progress isFinished on server")
-          val jsobj = JSObject()
-          jsobj.put("local", true)
-          jsobj.put("server", true)
-          jsobj.put("localMediaProgress", JSObject(lmpstring))
-          call.resolve(jsobj)
-        }
-      }
-    }
-    if (localMediaProgress.serverConnectionConfigId == null || DeviceManager.serverConnectionConfigId != localMediaProgress.serverConnectionConfigId) {
-      val jsobj = JSObject()
-      jsobj.put("local", true)
-      jsobj.put("server", false)
-      jsobj.put("localMediaProgress", JSObject(lmpstring))
-      call.resolve(jsobj)
-    }
+    call.resolve(finishLocalProgress(localLibraryItemId, localEpisodeId, isFinished))
   }
 
   @PluginMethod
@@ -755,4 +613,60 @@ class AbsDatabase : Plugin() {
       }
     }
   }
+}
+
+/**
+ * Marks the Paper progress of a downloaded item finished or not, creating it when missing. Only for copies without a
+ * server: a server item's "finished" goes through userdata.db and its outbox (`AbsData.markFinished`), so nothing is
+ * sent from here.
+ */
+internal fun finishLocalProgress(localLibraryItemId: String, localEpisodeId: String?, isFinished: Boolean): JSObject {
+  val localMediaProgressId = if (localEpisodeId.isNullOrEmpty()) localLibraryItemId else "$localLibraryItemId-$localEpisodeId"
+  var localMediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId)
+
+  if (localMediaProgress == null) {
+    val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItem(localLibraryItemId)
+            ?: return JSObject("{\"error\":\"Library Item not found\"}")
+    if (localLibraryItem.mediaType != "podcast" && !localEpisodeId.isNullOrEmpty()) {
+      return JSObject("{\"error\":\"Invalid library item not a podcast\"}")
+    }
+
+    val duration: Double
+    var podcastEpisode: PodcastEpisode? = null
+    if (!localEpisodeId.isNullOrEmpty()) {
+      podcastEpisode = (localLibraryItem.media as Podcast).episodes?.find { it.id == localEpisodeId }
+              ?: return JSObject("{\"error\":\"Podcast episode not found\"}")
+      duration = podcastEpisode.duration ?: 0.0
+    } else {
+      duration = (localLibraryItem.media as? Book)?.duration ?: 0.0
+    }
+
+    val now = System.currentTimeMillis()
+    localMediaProgress = LocalMediaProgress(
+            id = localMediaProgressId,
+            localLibraryItemId = localLibraryItemId,
+            localEpisodeId = localEpisodeId,
+            duration = duration,
+            progress = if (isFinished) 1.0 else 0.0,
+            currentTime = 0.0,
+            isFinished = isFinished,
+            ebookLocation = null,
+            ebookProgress = null,
+            lastUpdate = now,
+            startedAt = if (isFinished) now else 0L,
+            finishedAt = if (isFinished) now else null,
+            serverConnectionConfigId = localLibraryItem.serverConnectionConfigId,
+            serverAddress = localLibraryItem.serverAddress,
+            serverUserId = localLibraryItem.serverUserId,
+            libraryItemId = localLibraryItem.libraryItemId,
+            episodeId = podcastEpisode?.serverEpisodeId)
+  } else {
+    localMediaProgress.updateIsFinished(isFinished)
+  }
+  DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+
+  return JSObject()
+          .put("local", true)
+          .put("server", false)
+          .put("localMediaProgress", JSObject(jacksonObjectMapper().writeValueAsString(localMediaProgress)))
 }

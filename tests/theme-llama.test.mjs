@@ -1250,7 +1250,7 @@ test('Phase 4E layout rests on the existing player geometry, which is unchanged'
   assert.ok(249 >= 215 + 19.2 + 4 + 4 + 6)
   assert.ok(210 >= 200 + 4 + 6)
   // Title/author markup, marquee wrapper and text classes are unchanged (the readout needs no template change)
-  assert.match(player, /<div class="title-author-texts absolute z-30 left-0 right-0 overflow-hidden" @click="clickTitleAndAuthor">\s*<div ref="titlewrapper" class="overflow-hidden relative">\s*<p class="title-text whitespace-nowrap"><\/p>\s*<\/div>\s*<p class="author-text text-fg text-opacity-75 truncate">\{\{ authorName \}\}<\/p>/)
+  assert.match(player, /<div class="title-author-texts absolute z-30 left-0 right-0 overflow-hidden" @click="clickTitleAndAuthor">\s*<div ref="titlewrapper" class="overflow-hidden relative">\s*<p class="title-text whitespace-nowrap"><\/p>\s*<\/div>\s*<p class="author-text text-fg text-opacity-75 truncate">\{\{ authorLine \}\}<\/p>/)
   // Protected sizes: mini 120px, full panel 200px, play 65/40
   assert.match(style, /\.playerContainer \{\s*height: 120px;\s*\}/)
   assert.match(style, /\.fullscreen \.playerContainer \{\s*height: 200px;\s*\}/)
