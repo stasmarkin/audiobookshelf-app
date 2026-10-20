@@ -73,7 +73,7 @@ class SeekProgressPersistenceTest {
         else -> throw UnsupportedOperationException(method.name)
       }
     } as Player
-    syncer = MediaProgressSyncer(service, ApiHandler(ctx))
+    syncer = MediaProgressSyncer(service, apiHandler = { ApiHandler(ctx) })
     service.mediaProgressSyncer = syncer
     prepare("book")
   }
