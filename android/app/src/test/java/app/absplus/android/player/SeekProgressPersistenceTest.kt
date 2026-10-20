@@ -109,6 +109,14 @@ class SeekProgressPersistenceTest {
     assertTrue(persisted().lastUpdate > 1L)
   }
 
+  @Test fun theNextItemsStartSeekIsNotForcedIntoThePreviousSession() {
+    lastSync(System.currentTimeMillis() - 60_000)
+    // The player already holds the next item's session; the syncer still the previous one
+    service.currentPlaybackSession = service.currentPlaybackSession!!.clone().apply { id = "next-session" }
+    syncer.seek()
+    assertEquals(5.799, persisted().currentTime, 0.0)
+  }
+
   @Test fun pausedEpisodeSeekPreservesEpisodeIdentityAcrossFreshOwners() {
     prepare("podcast")
     syncer.seek()
