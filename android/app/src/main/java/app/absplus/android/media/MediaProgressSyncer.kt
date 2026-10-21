@@ -287,9 +287,6 @@ class MediaProgressSyncer(
 
     MediaEventManager.seekEvent(currentPlaybackSession!!, null)
 
-    // While the player prepares the next item its seek to the start position arrives before this syncer moves on:
-    // that position is not this session's, so it is not forced into its progress (recordSeek skips it too)
-    if (playerNotificationService.currentPlaybackSession?.id != currentPlaybackSession?.id) return
     // A seek is an explicit position change, even with the listening timer stopped or less than
     // a second after the last save. Use the normal durable/session/server path without counting
     // time spent paused as listening time. Do not wait for another Play or Pause event.
