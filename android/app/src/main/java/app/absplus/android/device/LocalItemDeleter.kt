@@ -35,6 +35,7 @@ object LocalItemDeleter {
           auto: Boolean,
           probe: VolumeProbe = AndroidVolumeProbe(ctx),
           io: StorageIo = AndroidStorageIo,
+          onDetail: (FolderFileDeletion.Detail) -> Unit = {},
           stillAllowed: (LocalLibraryItem) -> Boolean = { true }
   ): Outcome =
           LocalItemLocks.withItem(localLibraryItemId) {
@@ -50,7 +51,7 @@ object LocalItemDeleter {
             }
             val outcome =
                     try {
-                      deleteItemFiles(ctx, localLibraryItem, auto, probe, io) { operation ->
+                      deleteItemFiles(ctx, localLibraryItem, auto, probe, io, onDetail) { operation ->
                         if (!auto) operation()
                         else synchronized(DeviceManager.downloadAuthorizationLock) {
                           stillAllowed(localLibraryItem) && operation()
@@ -81,9 +82,9 @@ object LocalItemDeleter {
           }
 
   private fun deleteItemFiles(ctx: Context, item: LocalLibraryItem, auto: Boolean, probe: VolumeProbe, io: StorageIo,
-                              guarded: (() -> Boolean) -> Boolean): Outcome {
+                              onDetail: (FolderFileDeletion.Detail) -> Unit, guarded: (() -> Boolean) -> Boolean): Outcome {
     if (auto && AppStorage.isAppStorage(item.folderId)) {
-      val root = AppStorage.downloadsRoot(item.folderId, probe) ?: return Outcome.STORAGE_UNAVAILABLE
+      val root = AppStorage.downloadsRoot(item.folderId, probe) ?: return Outcome.STORAGE_UNAVAILABLE.also { onDetail(FolderFileDeletion.Detail.STORAGE_UNAVAILABLE) }
       val itemDir = java.io.File(item.absolutePath)
       if (itemDir.parentFile?.let { AppStorage.normalizedPath(it) } != AppStorage.normalizedPath(root)) return Outcome.FAILED
       if (itemDir.canonicalFile.parentFile != root.canonicalFile || io.kind(itemDir) != NodeKind.DIRECTORY) return Outcome.FAILED
@@ -104,7 +105,7 @@ object LocalItemDeleter {
           return folderReachable() && kind(uri) == FolderFileDeletion.Kind.FILE && io.delete(file)
         }
       }
-      val result = FolderFileDeletion.deleteFiles(item.localFiles.map { Uri.fromFile(java.io.File(it.absolutePath)).toString() }, docs, guarded)
+      val result = FolderFileDeletion.deleteFiles(item.localFiles.map { Uri.fromFile(java.io.File(it.absolutePath)).toString() }, docs, guarded, detail = onDetail)
       // App-private empty folder only, using the existing non-recursive filesystem operation.
       if (result == FolderFileDeletion.Result.DELETED) guarded {
         if (docs.folderReachable() && io.kind(itemDir) == NodeKind.DIRECTORY && io.list(itemDir)?.isEmpty() == true) io.delete(itemDir) else false
@@ -118,20 +119,22 @@ object LocalItemDeleter {
         // reporting a deletion whose files remain on the card (L01)
         AppStorageItemDeletion.Outcome.STORAGE_UNAVAILABLE -> {
           AbsLogger.info(TAG, "deleteItem: ${item.id} is on an SD card that is not available; not deleted")
+          onDetail(FolderFileDeletion.Detail.STORAGE_UNAVAILABLE)
           Outcome.STORAGE_UNAVAILABLE
         }
         AppStorageItemDeletion.Outcome.OUTSIDE_APP_STORAGE -> {
           AbsLogger.error(TAG, "deleteItem: ${item.id} path is not an app storage download folder; not deleting")
+          onDetail(FolderFileDeletion.Detail.UNVERIFIED)
           Outcome.FAILED
         }
-        AppStorageItemDeletion.Outcome.FAILED -> Outcome.FAILED
+        AppStorageItemDeletion.Outcome.FAILED -> Outcome.FAILED.also { onDetail(FolderFileDeletion.Detail.DELETE_FAILED) }
       }
     }
 
     // Only the registered files, each only while it is a regular file; folders are never deleted, and nothing is matched
     // by name: a provider's directory delete is recursive and no listing proves a folder empty (R32-C01, C02, C03)
     val docs = FolderFileDeletion.AndroidDocs(ctx, DeviceManager.dbManager.getLocalFolder(item.folderId), item.contentUrl)
-    return deletionOutcome(FolderFileDeletion.deleteFiles(item.localFiles.map { it.contentUrl }, docs, guarded, alreadyMissingIsDeleted = !auto))
+    return deletionOutcome(FolderFileDeletion.deleteFiles(item.localFiles.map { it.contentUrl }, docs, guarded, alreadyMissingIsDeleted = !auto, detail = onDetail))
   }
 
   private fun deletionOutcome(result: FolderFileDeletion.Result): Outcome = when (result) {
@@ -162,7 +165,8 @@ object LocalItemDeleter {
           trackLocalFileId: String,
           localEpisodeId: String?,
           probe: VolumeProbe = AndroidVolumeProbe(ctx),
-          io: StorageIo = AndroidStorageIo
+          io: StorageIo = AndroidStorageIo,
+          onDetail: (FolderFileDeletion.Detail) -> Unit = {}
   ): TrackResult {
     var outcome: LocalTrackDeletion.Outcome? = null
     val result = DeviceManager.dbManager.updateLocalLibraryItem(localLibraryItemId) { localLibraryItem ->
@@ -175,11 +179,17 @@ object LocalItemDeleter {
         if (AppStorage.isAppStorage(localLibraryItem.folderId)) {
           // Only on the registered card, and only the regular file itself (L01, M01)
           val file = java.io.File(localFile.absolutePath)
-          AppStorage.isVerified(localLibraryItem.folderId, probe) && io.kind(file) == NodeKind.FILE && io.delete(file)
+          when {
+            !AppStorage.isVerified(localLibraryItem.folderId, probe) -> false.also { onDetail(FolderFileDeletion.Detail.STORAGE_UNAVAILABLE) }
+            io.kind(file) == NodeKind.DIRECTORY -> false.also { onDetail(FolderFileDeletion.Detail.NOT_A_FILE) }
+            io.kind(file) != NodeKind.FILE -> false.also { onDetail(FolderFileDeletion.Detail.UNVERIFIED) }
+            else -> io.delete(file).also { if (!it) onDetail(FolderFileDeletion.Detail.DELETE_FAILED) }
+          }
         } else {
-          // Only while it is a regular file: a folder in its place is never deleted with its contents (R32-C02)
+          // Only while it is a regular file: a folder in its place is never deleted with its contents (R32-C02). A file
+          // that is verifiably gone already only loses its record, as the whole-item delete does
           val docs = FolderFileDeletion.AndroidDocs(ctx, DeviceManager.dbManager.getLocalFolder(localLibraryItem.folderId), localLibraryItem.contentUrl)
-          FolderFileDeletion.deleteFiles(listOf(localFile.contentUrl), docs) == FolderFileDeletion.Result.DELETED
+          FolderFileDeletion.deleteFiles(listOf(localFile.contentUrl), docs, alreadyMissingIsDeleted = true, detail = onDetail) == FolderFileDeletion.Result.DELETED
         }
       }
       when (outcome) {

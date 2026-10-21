@@ -1019,10 +1019,14 @@ class DownloadItemManager(
         val destination = synchronized(folderLock) {
           val owner = DownloadDestinationGuard.ownerOf(item, part)
           val others = synchronized(this@DownloadItemManager) { finalizationOwners(item, part, part.finalDestinationPath) }
-          check(others.all { DownloadDestinationGuard.sameOwner(owner, it) }) {
-            "Download location is used by another file; nothing was replaced"
+          // A name another download owns on record, or one taken in the folder, is never replaced: this download gets
+          // its own stable alternative name instead (the user's or an older download's files stay as they are)
+          val alternates = DownloadDestinationGuard.alternateFilename(part.filename, owner).let { alt ->
+            listOf(alt) + (2..MAX_ALTERNATE_NAMES).map { DownloadDestinationGuard.numberedFilename(alt, it) }
           }
-          SafDownloadPublisher(context).publish(root, part.finalDestinationSubfolder, part.filename, mimeTypeFor(part), staging)
+          val preferred = if (others.all { DownloadDestinationGuard.sameOwner(owner, it) }) part.filename else alternates.first()
+          SafDownloadPublisher(context).publish(root, part.finalDestinationSubfolder, preferred, mimeTypeFor(part), staging,
+                  alternates.filter { it != preferred })
         }
         part.completedDestinationUri = destination.toString()
         // Persist the actual returned identity before completing or discarding private staging.
@@ -1315,6 +1319,8 @@ class DownloadItemManager(
   private companion object {
     const val APP_MANAGED_DOWNLOAD_ID = -1L
     const val MAX_SIMULTANEOUS_DOWNLOADS = 3
+    // A taken download name gets the owner's alternative name, then numbered variants of it, up to this many names
+    const val MAX_ALTERNATE_NAMES = 9
     const val WATCH_INTERVAL_MS = 1_000L
     const val STALL_TIMEOUT_MS = 60_000L
     const val MAX_RETRIES = 5

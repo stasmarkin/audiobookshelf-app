@@ -14,10 +14,10 @@ import org.robolectric.annotation.Config
 class ContributorBuildTest {
   @Test fun packageAndVersionStayOnSeparateNonDebuggableChannel() {
     assertFalse(BuildConfig.DEBUG)
-    assertEquals("app.absplus.android.debug", BuildConfig.APPLICATION_ID)
-    assertEquals(138, BuildConfig.VERSION_CODE)
-    assertEquals("0.20.0-dev.1", BuildConfig.VERSION_NAME)
-    assertEquals("0.20.0-dev.1", BuildConfig.PLUS_VERSION)
+    assertEquals("app.absplus.android.contributor", BuildConfig.APPLICATION_ID)
+    assertEquals(139, BuildConfig.VERSION_CODE)
+    assertEquals("0.20.0-dev.2", BuildConfig.VERSION_NAME)
+    assertEquals("0.20.0-dev.2", BuildConfig.PLUS_VERSION)
   }
 
   @Test fun testSourcesAndProductionDownloadsAreUnavailable() {

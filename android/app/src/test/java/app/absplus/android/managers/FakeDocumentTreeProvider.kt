@@ -33,6 +33,8 @@ class FakeDocumentTreeProvider : ContentProvider() {
     var createResultId: String? = null
     var alternateFinalName: String? = null
     var corruptOnRead = false
+    /** Document ids whose deleteDocument fails (one file of several, for a partial delete). */
+    val failDeleteOf = mutableSetOf<String>()
 
     fun reset(dir: File) {
       base = dir
@@ -45,6 +47,7 @@ class FakeDocumentTreeProvider : ContentProvider() {
       createResultId = null
       alternateFinalName = null
       corruptOnRead = false
+      failDeleteOf.clear()
     }
   }
 
@@ -118,9 +121,23 @@ class FakeDocumentTreeProvider : ContentProvider() {
       }
       "android:deleteDocument" -> {
         deletes += documentId
-        if (failDelete) throw IllegalStateException("simulated delete failure")
+        if (failDelete || documentId in failDeleteOf) throw IllegalStateException("simulated delete failure")
         if (!fileOf(documentId).deleteRecursively()) throw IllegalStateException("delete failed")
         Bundle()
+      }
+      // As DocumentsProvider answers them for Android's storage provider (isChildDocument: Android 10+;
+      // findDocumentPath: Android 8+, the path from the tree's root document when asked through a tree URI)
+      "android:isChildDocument" -> {
+        @Suppress("DEPRECATION") val target = extras.getParcelable<Uri>("android.content.extra.TARGET_URI")!!
+        val child = DocumentsContract.getDocumentId(target)
+        Bundle().apply { putBoolean("result", child != documentId && child.startsWith("$documentId/")) }
+      }
+      "android:findDocumentPath" -> {
+        val treeId = DocumentsContract.getTreeDocumentId(uri)
+        if (!fileOf(documentId).exists() || (documentId != treeId && !documentId.startsWith("$treeId/"))) throw java.io.FileNotFoundException(documentId)
+        val path = mutableListOf(treeId)
+        documentId.removePrefix(treeId).split("/").filter { it.isNotEmpty() }.forEach { path += path.last() + "/" + it }
+        Bundle().apply { putParcelable("result", DocumentsContract.Path(null, path)) }
       }
       else -> throw UnsupportedOperationException(method)
     }

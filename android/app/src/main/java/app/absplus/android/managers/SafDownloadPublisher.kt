@@ -57,8 +57,14 @@ internal class SafDownloadPublisher(private val context: Context) {
     hash.digest()
   }
 
-  fun publish(root: DocumentFile, relativePath: String, filename: String, mime: String, staging: File): Uri {
-    checkName(filename)
+  /**
+   * Publishes [staging] as [filename] in [relativePath] below [root] or, when that name is taken (by a file or a
+   * folder, the user's or an earlier download's), as the first free name of [alternates]. Nothing that exists is ever
+   * replaced, renamed or deleted. The returned URI is the provider's, whatever name the provider finally gave it.
+   */
+  fun publish(root: DocumentFile, relativePath: String, filename: String, mime: String, staging: File,
+              alternates: List<String> = emptyList()): Uri {
+    (listOf(filename) + alternates).forEach(::checkName)
     check(root.isDirectory && staging.isFile && staging.length() > 0L) { "Download staging or destination unavailable" }
     var folder = root
     relativePath.split('/').filter { it.isNotEmpty() }.forEach { segment ->
@@ -74,15 +80,16 @@ internal class SafDownloadPublisher(private val context: Context) {
       }
     }
     val before = children(folder)
-    check(before.none { it.name == filename }) { "Download location is used by another file or directory; nothing was replaced" }
+    val name = (listOf(filename) + alternates).firstOrNull { candidate -> before.none { it.name == candidate } }
+            ?: error("Download location and its alternative names are used by other files or directories; nothing was replaced")
     val temporary = newlyCreated(folder,
             folder.createFile(mime, ".abs-${UUID.randomUUID()}.part") ?: error("Could not create temporary file"), before, false)
     val expectedHash = digest(staging)
     context.contentResolver.openOutputStream(temporary.uri, "w")?.use { output -> staging.inputStream().use { it.copyTo(output) } }
             ?: error("Could not open download output")
     // Check again immediately before rename. A provider that races external changes still controls rename semantics.
-    check(children(folder).none { it.name == filename }) { "Download destination changed during copy" }
-    check(temporary.isFile && temporary.renameTo(filename)) { "Could not finalize download" }
+    check(children(folder).none { it.name == name }) { "Download destination changed during copy" }
+    check(temporary.isFile && temporary.renameTo(name)) { "Could not finalize download" }
     // DocumentFile retains the URI returned by rename; never look up the expected filename afterwards.
     newlyCreated(folder, temporary, before, false)
     val actual = context.contentResolver.openInputStream(temporary.uri)?.use { input ->

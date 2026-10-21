@@ -166,43 +166,110 @@ class DownloadCollisionSafTest {
     }
   }
 
-  // the finalization guard: another episode's document is never deleted, even for a part that bypassed admission
+  private fun altName(item: DownloadItem, part: DownloadItemPart) =
+          DownloadDestinationGuard.alternateFilename(part.filename, DownloadDestinationGuard.ownerOf(item, part))
+
+  private fun docName(part: DownloadItemPart) =
+          DocumentsContract.getDocumentId(Uri.parse(part.completedDestinationUri!!)).substringAfterLast('/')
+
+  // the finalization guard: another episode's document is never replaced, even for a part that bypassed admission;
+  // the new download is saved under its own alternative name instead (audit F2)
   @Test fun anotherEpisodesDocumentIsNeverReplaced() {
     val a = download("ep-a", "episode.mp3", bytes("A"))
     val (item, part) = forced("ep-b", "episode.mp3", bytes("B"))
     move(item, part)
-    assertTrue(part.failed)
-    assertTrue(part.failureReason!!.contains("another file"))
+    assertTrue(part.failureReason, part.moved)
+    assertEquals(altName(item, part), docName(part))
     assertArrayEquals(bytes("A"), a.readBytes())
-    assertTrue(FakeDocumentTreeProvider.deletes.none { it.endsWith("/episode.mp3") })
+    assertArrayEquals(bytes("B"), File(showDir, altName(item, part)).readBytes())
+    assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
     assertTrue(hiddenTemporaries().isEmpty())
-    assertTrue(File(part.destinationPath).exists())
   }
 
-  // a file the user keeps in the folder, unknown to any record, is not deleted either
+  // a file the user keeps in the folder, unknown to any record, is not touched; the download gets another name
   @Test fun anUnrecordedDocumentInTheFolderIsKept() {
     showDir.mkdirs()
     val users = File(showDir, "episode.mp3").apply { writeBytes(bytes("USERS-OWN")) }
     val (item, part) = forced("ep-b", "episode.mp3", bytes("B"))
     move(item, part)
-    assertTrue(part.failed)
+    assertTrue(part.failureReason, part.moved)
     assertArrayEquals(bytes("USERS-OWN"), users.readBytes())
+    assertArrayEquals(bytes("B"), File(showDir, altName(item, part)).readBytes())
+    assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
   }
 
-  // Replacement now fails safely; old bytes and current staging remain, without backup renames.
-  @Test fun aSameEpisodeReplacementKeepsThePreviousCopyAndStaging() {
+  // A re-download of the same episode never replaces the earlier copy: the new one gets its own name, nothing is deleted
+  @Test fun aSameEpisodeRedownloadKeepsThePreviousCopy() {
     val first = download("ep-a", "episode.mp3", bytes("V1"))
     val (item, part) = forced("ep-a", "episode.mp3", bytes("V2-LONGER"))
-    val renames = FakeDocumentTreeProvider.renames.toList()
+    move(item, part)
+    assertTrue(part.failureReason, part.moved)
+    assertArrayEquals(bytes("V1"), first.readBytes())
+    assertArrayEquals(bytes("V2-LONGER"), File(showDir, docName(part)).readBytes())
+    assertEquals(setOf("episode.mp3", altName(item, part)), showDir.listFiles()!!.map { it.name }.toSet())
+    assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
+  }
+
+  // The v0.19.0 case: the records are gone but the files are still in the folder. The download completes under its own
+  // name, is saved with that name, and the old file stays (equal names are not taken as the same media)
+  @Test fun aLeftoverFileFromLostRecordsNoLongerBlocksTheDownload() {
+    showDir.mkdirs()
+    val leftover = File(showDir, "episode.mp3").apply { writeBytes(bytes("OLD-SAME-SIZE")) }
+    download("ep-a", "episode.mp3", bytes("NEW-SAME-SIZE"))
+    val local = DbManager().getLocalLibraryItems().single { it.folderId == "saf-r29" } // read back from Paper
+    val file = local.localFiles.single()
+    val expected = DownloadDestinationGuard.alternateFilename("episode.mp3",
+            DownloadDestinationGuard.Owner(config.userId, config.id, "show-1", "episode:ep-a"))
+    assertEquals(expected, file.filename)
+    assertTrue(file.absolutePath.endsWith("/Synthetic/$expected"))
+    assertEquals(expected, DocumentsContract.getDocumentId(Uri.parse(file.contentUrl)).substringAfterLast('/'))
+    assertArrayEquals(bytes("NEW-SAME-SIZE"), context.contentResolver.openInputStream(Uri.parse(file.contentUrl))!!.use { it.readBytes() })
+    assertArrayEquals(bytes("OLD-SAME-SIZE"), leftover.readBytes())
+    assertEquals(1, (local.media as Podcast).episodes!!.size)
+  }
+
+  // Several collisions: the name, its alternative (a file) and the first numbered variant (a folder) are all taken
+  @Test fun multipleCollisionsUseTheNextFreeNumberedName() {
+    val (item, part) = forced("ep-a", "episode.mp3", bytes("NEW"))
+    showDir.mkdirs()
+    val alt = altName(item, part)
+    File(showDir, "episode.mp3").writeBytes(bytes("ONE"))
+    File(showDir, alt).writeBytes(bytes("TWO"))
+    val dir = File(showDir, DownloadDestinationGuard.numberedFilename(alt, 2)).apply { mkdirs() }
+    File(dir, "inside").writeBytes(bytes("THREE"))
+    move(item, part)
+    assertTrue(part.failureReason, part.moved)
+    assertEquals(DownloadDestinationGuard.numberedFilename(alt, 3), docName(part))
+    assertArrayEquals(bytes("ONE"), File(showDir, "episode.mp3").readBytes())
+    assertArrayEquals(bytes("TWO"), File(showDir, alt).readBytes())
+    assertArrayEquals(bytes("THREE"), File(dir, "inside").readBytes())
+    assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
+  }
+
+  // When every candidate name is taken the download fails and nothing changes (staging is kept for Retry)
+  @Test fun allCandidateNamesTakenFailsWithoutTouchingAnything() {
+    val (item, part) = forced("ep-a", "episode.mp3", bytes("NEW"))
+    showDir.mkdirs()
+    val alt = altName(item, part)
+    val names = listOf("episode.mp3", alt) + (2..9).map { DownloadDestinationGuard.numberedFilename(alt, it) }
+    names.forEach { File(showDir, it).writeBytes(bytes(it)) }
     move(item, part)
     assertTrue(part.failed)
     assertFalse(part.moved)
-    assertNull(part.completedDestinationUri)
-    assertArrayEquals(bytes("V1"), first.readBytes())
-    assertArrayEquals(bytes("V2-LONGER"), File(part.destinationPath).readBytes())
-    assertEquals(listOf("episode.mp3"), showDir.listFiles()!!.map { it.name })
-    assertEquals(renames, FakeDocumentTreeProvider.renames)
+    names.forEach { assertArrayEquals(bytes(it), File(showDir, it).readBytes()) }
+    assertEquals(names.toSet(), showDir.listFiles()!!.map { it.name }.toSet())
+    assertArrayEquals(bytes("NEW"), File(part.destinationPath).readBytes())
     assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
+  }
+
+  // A provider that gives the document a name of its own: that name and URI are what gets saved
+  @Test fun aProviderChosenNameIsWhatTheItemRecords() {
+    FakeDocumentTreeProvider.alternateFinalName = "episode (1).mp3"
+    download("ep-a", "episode.mp3", bytes("A"))
+    val file = DbManager().getLocalLibraryItems().single { it.folderId == "saf-r29" }.localFiles.single()
+    assertEquals("episode (1).mp3", file.filename)
+    assertTrue(file.absolutePath.endsWith("/Synthetic/episode (1).mp3"))
+    assertArrayEquals(bytes("A"), context.contentResolver.openInputStream(Uri.parse(file.contentUrl))!!.use { it.readBytes() })
   }
 
   @Test fun aFailedFinalRenameKeepsStagingAndRetryCanSucceed() {
@@ -230,11 +297,12 @@ class DownloadCollisionSafTest {
     val renames = FakeDocumentTreeProvider.renames.toList()
     val (item, part) = forced("ep-b", "episode.mp3", bytes("B"))
     move(item, part)
-    assertTrue(part.failed)
-    assertFalse(part.moved)
+    // the name is ep-a's on record: ep-b gets its own name; the backup is neither restored nor renamed nor deleted
+    assertTrue(part.failureReason, part.moved)
+    assertEquals(altName(item, part), docName(part))
     assertArrayEquals(bytes("ONLY-COPY"), backup.readBytes())
     assertFalse(a.exists())
-    assertEquals(renames, FakeDocumentTreeProvider.renames)
+    assertTrue(FakeDocumentTreeProvider.renames.drop(renames.size).none { it.contains("abs-backup") })
     assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
   }
 
@@ -259,12 +327,13 @@ class DownloadCollisionSafTest {
     val child = File(target, "important").apply { writeBytes(bytes("KEEP")) }
     val (item, part) = forced("ep-a", "episode.mp3", bytes("A2"))
     move(item, part)
-    assertTrue(part.failed)
-    assertFalse(part.moved)
+    // the folder stays as it is; the download is saved next to it under its own name
+    assertTrue(part.failureReason, part.moved)
+    assertEquals(altName(item, part), docName(part))
     assertTrue(target.isDirectory)
     assertArrayEquals(bytes("KEEP"), child.readBytes())
     assertTrue(FakeDocumentTreeProvider.deletes.isEmpty())
-    assertTrue(FakeDocumentTreeProvider.renames.isEmpty())
+    assertTrue(FakeDocumentTreeProvider.renames.none { it.endsWith("-> episode.mp3") })
   }
 
   @Test fun deterministicTemporaryFileAndDirectoryCollisionsAreUntouched() {

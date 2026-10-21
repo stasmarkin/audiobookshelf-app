@@ -26,11 +26,13 @@ class FolderFileDeletionTest {
     var reachable: List<Boolean> = listOf(true),
     val kinds: MutableMap<String, MutableList<Kind>> = mutableMapOf(),
     val deleteAnswers: Map<String, Boolean> = emptyMap(),
-    val removeOnDelete: Boolean = true
+    val removeOnDelete: Boolean = true,
+    val why: FolderFileDeletion.Detail = FolderFileDeletion.Detail.STORAGE_UNAVAILABLE
   ) : FolderFileDeletion.Docs {
     val deleted = mutableListOf<String>()
     private var reachableCalls = 0
     override fun folderReachable(): Boolean = reachable[minOf(reachableCalls++, reachable.size - 1)]
+    override fun unavailableDetail() = why
     override fun kind(uri: String): Kind {
       val list = kinds.getValue(uri)
       return if (list.size > 1) list.removeAt(0) else list[0]
@@ -41,6 +43,35 @@ class FolderFileDeletionTest {
       if (ok && removeOnDelete) kinds[uri] = mutableListOf(Kind.MISSING)
       return ok
     }
+  }
+
+  /** Access (or the storage) disappears after the first of two registered files was already deleted. */
+  private fun lostAfterFirstDelete(why: FolderFileDeletion.Detail): Pair<Result, FolderFileDeletion.Detail?> {
+    val docs = FakeDocs(reachable = listOf(true, true, false), kinds = files("a" to Kind.FILE, "b" to Kind.FILE), why = why)
+    var detail: FolderFileDeletion.Detail? = null
+    val result = FolderFileDeletion.deleteFiles(listOf("a", "b"), docs, detail = { detail = it })
+    assertEquals("only the first file was touched", listOf("a"), docs.deleted)
+    return result to detail
+  }
+
+  @Test fun accessLostAfterSomeFilesWereDeletedIsReportedAsPartialAndAccessLost() {
+    assertEquals(Result.UNAVAILABLE to FolderFileDeletion.Detail.PARTIAL_ACCESS_LOST, lostAfterFirstDelete(FolderFileDeletion.Detail.FOLDER_ACCESS))
+  }
+
+  @Test fun aFolderThatVanishesAfterSomeFilesWereDeletedIsReportedAsPartialAndMissing() {
+    assertEquals(Result.UNAVAILABLE to FolderFileDeletion.Detail.PARTIAL_FOLDER_MISSING, lostAfterFirstDelete(FolderFileDeletion.Detail.FOLDER_MISSING))
+  }
+
+  @Test fun otherStorageLossAfterSomeFilesWereDeletedIsStillPartial() {
+    assertEquals(Result.UNAVAILABLE to FolderFileDeletion.Detail.PARTIAL, lostAfterFirstDelete(FolderFileDeletion.Detail.STORAGE_UNAVAILABLE))
+  }
+
+  @Test fun accessAlreadyGoneBeforeAnyDeleteStaysAPlainAccessLoss() {
+    val docs = FakeDocs(reachable = listOf(false), kinds = files("a" to Kind.FILE), why = FolderFileDeletion.Detail.FOLDER_ACCESS)
+    var detail: FolderFileDeletion.Detail? = null
+    assertEquals(Result.UNAVAILABLE, FolderFileDeletion.deleteFiles(listOf("a"), docs, detail = { detail = it }))
+    assertEquals(FolderFileDeletion.Detail.FOLDER_ACCESS, detail)
+    assertTrue(docs.deleted.isEmpty())
   }
 
   private fun files(vararg pairs: Pair<String, Kind>) = pairs.associate { it.first to mutableListOf(it.second) }.toMutableMap()

@@ -129,6 +129,7 @@
 </template>
 
 <script>
+import { deleteFailureMessage } from '@/utils/deleteResult'
 import draggable from 'vuedraggable'
 
 import { Capacitor } from '@capacitor/core'
@@ -380,7 +381,7 @@ export default {
         if (res && res.id) {
           this.$toast.success('Deleted track successfully')
           this.localLibraryItem = res
-        } else this.$toast.error('Failed to delete')
+        } else this.$toast.error(deleteFailureMessage(res, this.$strings))
       }
     },
     async deleteTrack() {
@@ -406,7 +407,7 @@ export default {
         if (res && res.id) {
           this.$toast.success('Deleted track successfully')
           this.localLibraryItem = res
-        } else this.$toast.error('Failed to delete')
+        } else this.$toast.error(deleteFailureMessage(res, this.$strings))
       }
     },
     async deleteItem() {
@@ -423,8 +424,7 @@ export default {
         if (res && res.success) {
           this.$toast.success('Deleted Successfully')
           this.$router.replace(this.isIos ? '/downloads' : `/localMedia/folders/${this.folderId}`)
-        } else if (res?.reason === 'storageUnavailable') this.$toast.error(this.$strings.LabelDownloadStorageUnavailable)
-        else this.$toast.error('Failed to delete')
+        } else this.$toast.error(deleteFailureMessage(res, this.$strings))
       }
     },
     // Auto delete may have removed this book in the background

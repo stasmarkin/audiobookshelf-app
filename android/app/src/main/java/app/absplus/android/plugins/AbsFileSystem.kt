@@ -16,6 +16,7 @@ import app.absplus.android.data.LocalFolder
 import app.absplus.android.data.LocalLibraryItem
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.device.FolderAccess
+import app.absplus.android.device.FolderFileDeletion
 import app.absplus.android.device.FolderScanner
 import app.absplus.android.device.LocalItemDeleter
 import app.absplus.android.device.RescanError
@@ -362,12 +363,16 @@ class AbsFileSystem : Plugin() {
   fun deleteItem(call: PluginCall) {
     val localLibraryItemId = call.data.getString("id", "").toString()
     Log.d(tag, "deleteItem $localLibraryItemId")
-    when (LocalItemDeleter.deleteItem(mainActivity, localLibraryItemId, auto = false)) {
+    // Why it did not happen, for the message (utils/deleteResult.js): folder access lost, folder missing, SD card out, ...
+    var detail: FolderFileDeletion.Detail? = null
+    when (LocalItemDeleter.deleteItem(mainActivity, localLibraryItemId, auto = false, onDetail = { detail = it })) {
       LocalItemDeleter.Outcome.DELETED -> call.resolve(JSObject("{\"success\":true}"))
-      LocalItemDeleter.Outcome.STORAGE_UNAVAILABLE -> call.resolve(JSObject("{\"success\":false,\"reason\":\"storageUnavailable\"}"))
-      else -> call.resolve(JSObject("{\"success\":false}"))
+      LocalItemDeleter.Outcome.STORAGE_UNAVAILABLE -> call.resolve(deleteFailure(detail ?: FolderFileDeletion.Detail.STORAGE_UNAVAILABLE))
+      else -> call.resolve(deleteFailure(detail ?: FolderFileDeletion.Detail.DELETE_FAILED))
     }
   }
+
+  private fun deleteFailure(detail: FolderFileDeletion.Detail) = JSObject().put("success", false).put("reason", detail.reason)
 
   @PluginMethod
   fun deleteTrackFromItem(call: PluginCall) {
@@ -377,7 +382,8 @@ class AbsFileSystem : Plugin() {
     val localEpisodeId = call.data.getString("localEpisodeId")
     Log.d(tag, "deleteTrackFromItem $localLibraryItemId $trackLocalFileId")
 
-    when (val result = LocalItemDeleter.deleteTrack(mainActivity, localLibraryItemId, trackLocalFileId, localEpisodeId)) {
+    var detail: FolderFileDeletion.Detail? = null
+    when (val result = LocalItemDeleter.deleteTrack(mainActivity, localLibraryItemId, trackLocalFileId, localEpisodeId, onDetail = { detail = it })) {
       is LocalItemDeleter.TrackResult.Deleted -> {
         // The episode's record is gone with its file: so is its local progress (not the server's or the saved sessions')
         if (result.episodeGone) DeviceManager.dbManager.removeLocalMediaProgressFor(localLibraryItemId, localEpisodeId)
@@ -387,7 +393,7 @@ class AbsFileSystem : Plugin() {
         Log.e(tag, "deleteTrackFromItem: file is shared with another episode; nothing deleted")
         call.resolve(JSObject("{\"success\":false,\"reason\":\"shared\"}"))
       }
-      LocalItemDeleter.TrackResult.Failed -> call.resolve(JSObject("{\"success\":false}"))
+      LocalItemDeleter.TrackResult.Failed -> call.resolve(deleteFailure(detail ?: FolderFileDeletion.Detail.DELETE_FAILED))
     }
   }
 

@@ -270,13 +270,16 @@ class MediaProgressSyncer(
   }
 
   fun seek() {
-    currentPlaybackSession?.currentTime = playerNotificationService.getCurrentTimeSeconds()
-    DLog.d(tag, "seek: $currentDisplayTitle, currentTime=${currentPlaybackSession?.currentTime}")
-
-    if (currentPlaybackSession == null) {
-      DLog.e(tag, "seek: Playback session not set")
+    // The player's position belongs to the player's session. While a new item is being prepared (queue advance,
+    // Android Auto, media buttons) the player already holds it and seeks to its start, but this syncer still holds the
+    // previous item until play() switches it: that position must not be written into the previous item.
+    val playerSessionId = playerNotificationService.currentPlaybackSession?.id
+    if (currentPlaybackSession == null || currentPlaybackSession?.id != playerSessionId) {
+      DLog.d(tag, "seek: not saved, the player's session ($playerSessionId) is not the one being synced ($currentSessionId)")
       return
     }
+    currentPlaybackSession?.currentTime = playerNotificationService.getCurrentTimeSeconds()
+    DLog.d(tag, "seek: $currentDisplayTitle, currentTime=${currentPlaybackSession?.currentTime}")
 
     // The widget shows the confirmed seek position right away (also while paused, e.g. its own jump keys)
     playerNotificationService.showWidgetPosition(currentPlaybackSession?.id, currentPlaybackSession?.currentTime)

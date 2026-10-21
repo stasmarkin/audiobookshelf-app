@@ -2649,6 +2649,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           mutableListOf(
                   "app.absplus.android",
                   "app.absplus.android.debug",
+                  "app.absplus.android.contributor",
                   ANDROID_AUTO_PKG_NAME,
                   ANDROID_AUTO_SIMULATOR_PKG_NAME,
                   ANDROID_WEARABLE_PKG_NAME,

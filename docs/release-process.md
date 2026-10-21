@@ -176,6 +176,17 @@ finalize docs), not before.
    and make sure every completed feature/fix it includes is documented in the README.
 5. Publish it, then update the `versionCode` table in this document.
 
+## Frontend build provenance
+
+A green Gradle build does not show which web source is inside the APK. `npm run generate` therefore runs
+`scripts/verify-frontend-source.js` before and after `nuxt generate`: it requires the repository root as the working
+directory, a private `.nuxt` build directory (`static.cacheDir` in `nuxt.config.js`; for static targets `nuxt generate` ignores
+`buildDir` and used `node_modules/.cache/nuxt`, which a linked `node_modules` shares between checkouts and which once built
+another checkout's store), generated entries that stay inside the checkout, and every store getter, mutation and action of the
+source present in the bundle. It stamps `dist/frontend-provenance.json` (commit, source hash, file hashes; use `SOURCE_COMMIT`
+when there is no `.git`). Before signing a distributed APK, run `node scripts/verify-frontend-source.js verify-apk <apk>
+--source --commit <HEAD>` and record the result with the release metadata.
+
 ## What the in-app updater expects of a release
 
 Once the updater (docs/in-app-updates.md) ships, installed apps rely on these. Changing them stops updates for those
