@@ -786,16 +786,23 @@ export default {
     newLocalLibraryItem(item) {
       if (item.libraryItemId == this.libraryItemId) {
         console.log('New local library item', item.id)
+        this.invalidateLocalReload()
         this.$set(this.libraryItem, 'localLibraryItem', item)
       }
     },
     onLocalLibraryItemMoved(item) {
       if (!this.libraryItem) return
       if (this.isLocal && item.id === this.libraryItem.id) {
+        this.invalidateLocalReload()
         this.libraryItem = item
       } else if (this.libraryItem.localLibraryItem?.id === item.id) {
+        this.invalidateLocalReload()
         this.$set(this.libraryItem, 'localLibraryItem', item)
       }
+    },
+    /** A copy that arrived by event is newer than any read still running: that read must not replace it. */
+    invalidateLocalReload() {
+      this.localReloadGeneration = (this.localReloadGeneration || 0) + 1
     },
     async reloadLocalLibraryItem() {
       // Only the latest read for this page lands: a late answer must not redirect another page or bring back a gone copy
