@@ -1,0 +1,321 @@
+{
+ "server": "2.37.1",
+ "unaccent": true,
+ "booksLibraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+ "podcastsLibraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+ "cases": [
+  {
+   "name": "title",
+   "mediaType": "book",
+   "q": "alpha",
+   "book": [
+    "701953a9-4811-453d-b3c8-72f5380c3ea6",
+    "1542ed61-b273-421a-a8ad-7a0164b0e229",
+    "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+   ],
+   "podcast": null,
+   "episodes": null,
+   "series": [
+    {
+     "id": "dab8e9ba-ca32-4c5c-a5d7-2f15aa722213",
+     "bookIds": [
+      "1542ed61-b273-421a-a8ad-7a0164b0e229",
+      "701953a9-4811-453d-b3c8-72f5380c3ea6",
+      "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+     ]
+    }
+   ],
+   "authors": [],
+   "narrators": [
+    {
+     "name": "Nar Alpha",
+     "numBooks": 3
+    }
+   ],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "subtitle part",
+   "mediaType": "book",
+   "q": "subtle",
+   "book": [
+    "90e7b648-f47b-48dc-a164-8c3176ec508a"
+   ],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "asin",
+   "mediaType": "book",
+   "q": "B0HOMEASIN",
+   "book": [
+    "90e7b648-f47b-48dc-a164-8c3176ec508a"
+   ],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "isbn",
+   "mediaType": "book",
+   "q": "978000000001",
+   "book": [
+    "49fe2317-f2b9-454e-affd-5179db79d758"
+   ],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "author",
+   "mediaType": "book",
+   "q": "archer",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [
+    "fcec6d18-8982-4329-9581-6ef8a2fa648c"
+   ],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "series",
+   "mediaType": "book",
+   "q": "cycle",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [
+    {
+     "id": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+     "bookIds": [
+      "07ce414e-8a29-49dd-bae9-c42ca12ab13c",
+      "bac6fc10-f902-4a13-b8dd-0be5caadaf1e",
+      "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+     ]
+    }
+   ],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "narrator",
+   "mediaType": "book",
+   "q": "nar beta",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [
+    {
+     "name": "Nar Beta",
+     "numBooks": 2
+    }
+   ],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "narrator with a comma",
+   "mediaType": "book",
+   "q": "jane",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [
+    {
+     "name": "Doe, Jane",
+     "numBooks": 2
+    }
+   ],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "genre",
+   "mediaType": "book",
+   "q": "myster",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": [
+    {
+     "name": "Mystery",
+     "numItems": 3
+    }
+   ]
+  },
+  {
+   "name": "tag",
+   "mediaType": "book",
+   "q": "favor",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [
+    {
+     "name": "favorite",
+     "numItems": 2
+    }
+   ],
+   "genres": []
+  },
+  {
+   "name": "cyrillic other case",
+   "mediaType": "book",
+   "q": "ЁЖИК",
+   "book": [
+    "92072364-1543-4676-b6d6-fb77a318285d"
+   ],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "cyrillic author",
+   "mediaType": "book",
+   "q": "дмитрий",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [
+    "7764e4e6-f812-4064-87b7-1de42a0d6b8b"
+   ],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "accent folded",
+   "mediaType": "book",
+   "q": "cafe",
+   "book": [
+    "49fe2317-f2b9-454e-affd-5179db79d758"
+   ],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "no match",
+   "mediaType": "book",
+   "q": "zzqqxx",
+   "book": [],
+   "podcast": null,
+   "episodes": null,
+   "series": [],
+   "authors": [],
+   "narrators": [],
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "podcast title",
+   "mediaType": "podcast",
+   "q": "home pod",
+   "book": null,
+   "podcast": [
+    "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d"
+   ],
+   "episodes": [],
+   "series": null,
+   "authors": null,
+   "narrators": null,
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "podcast author",
+   "mediaType": "podcast",
+   "q": "другой",
+   "book": null,
+   "podcast": [
+    "fe4055d7-55fb-48d5-ba27-42550ff630dd"
+   ],
+   "episodes": [],
+   "series": null,
+   "authors": null,
+   "narrators": null,
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "episode",
+   "mediaType": "podcast",
+   "q": "deep",
+   "book": null,
+   "podcast": [],
+   "episodes": [
+    {
+     "podcastId": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+     "episodeId": "adbb72ab-eb81-48b0-9b50-ed9dc0efd353"
+    },
+    {
+     "podcastId": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+     "episodeId": "d461bcfb-ef98-4ff1-a59b-b131b4f26047"
+    }
+   ],
+   "series": null,
+   "authors": null,
+   "narrators": null,
+   "tags": [],
+   "genres": []
+  },
+  {
+   "name": "podcast genre",
+   "mediaType": "podcast",
+   "q": "tech",
+   "book": null,
+   "podcast": [],
+   "episodes": [],
+   "series": null,
+   "authors": null,
+   "narrators": null,
+   "tags": [],
+   "genres": [
+    {
+     "name": "Tech",
+     "numItems": 2
+    }
+   ]
+  }
+ ]
+}

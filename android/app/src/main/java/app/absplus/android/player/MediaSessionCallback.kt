@@ -7,8 +7,6 @@ import android.os.*
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import android.view.KeyEvent
-import app.absplus.android.data.LibraryItemWrapper
-import app.absplus.android.data.PodcastEpisode
 import java.util.*
 import kotlin.concurrent.schedule
 
@@ -21,23 +19,21 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPrepare() {
     DLog.d(tag, "ON PREPARE MEDIA SESSION COMPAT")
-    playerNotificationService.mediaManager.getFirstItem()?.let { li ->
-      playerNotificationService.mediaManager.play(li, null, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-          DLog.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it,true, playbackRate)
-          }
-        }
-      }
-    }
+    startFirstPlayable()
   }
 
   override fun onPlay() {
     DLog.d(tag, "ON PLAY MEDIA SESSION COMPAT")
-    playerNotificationService.play()
+    // Android Auto's Play with nothing to resume starts the latest started item; a headset or the widget stays a no-op
+    val fromAuto = isAutoController(playerNotificationService.mediaSession.currentControllerInfo.packageName)
+    playerNotificationService.play(if (fromAuto) ({ startFirstPlayable { playerNotificationService.onMediaButtonHandled() } }) else null)
+  }
+
+  private fun startFirstPlayable(onNothing: () -> Unit = {}) {
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.firstPlayable { li, episode ->
+      if (li == null) onNothing() else playerNotificationService.startWrapper(li, episode, true, mediaManager.getSavedPlaybackRate())
+    }
   }
 
   override fun onPrepareFromSearch(query: String?, extras: Bundle?) {
@@ -47,17 +43,8 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlayFromSearch(query: String?, extras: Bundle?) {
     DLog.d(tag, "ON PLAY FROM SEARCH $query")
-    playerNotificationService.mediaManager.getFromSearch(query)?.let { li ->
-      playerNotificationService.mediaManager.play(li, null, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-           DLog.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, true, playbackRate)
-          }
-        }
-      }
+    playerNotificationService.mediaManager.findForVoice(query) { li, episode ->
+      li?.let { playerNotificationService.startWrapper(it, episode, true, playerNotificationService.mediaManager.getSavedPlaybackRate()) }
     }
   }
 
@@ -67,26 +54,36 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
   }
 
   override fun onStop() {
+    // Stop of a queue's wait is its Close; a lost stream keeps its session paused, as Stop always did
+    if (showsAwaitedItem || playerNotificationService.awaiting.blockedItem != null) return playerNotificationService.closePlayback()
     playerNotificationService.pause()
   }
 
+  // While a queue waits on another item, the system controls show that item: nothing may move the open session
+  private val showsAwaitedItem get() = playerNotificationService.awaitingDisplay != null
+
   override fun onSkipToPrevious() {
+    if (showsAwaitedItem) return
     playerNotificationService.skipToPrevious()
   }
 
   override fun onSkipToNext() {
+    if (showsAwaitedItem) return
     playerNotificationService.skipToNext()
   }
 
   override fun onFastForward() {
+    if (showsAwaitedItem) return
     playerNotificationService.jumpForward()
   }
 
   override fun onRewind() {
+    if (showsAwaitedItem) return
     playerNotificationService.jumpBackward()
   }
 
   override fun onSeekTo(pos: Long) {
+    if (showsAwaitedItem) return
     val currentTrackStartOffset = playerNotificationService.getCurrentTrackStartOffsetMs()
     playerNotificationService.seekPlayer(currentTrackStartOffset + pos)
   }
@@ -112,34 +109,13 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
     DLog.d(tag, "ON PLAY FROM MEDIA ID $mediaId")
-    val libraryItemWrapper: LibraryItemWrapper?
-    var podcastEpisode: PodcastEpisode? = null
-
-    if (mediaId.isNullOrEmpty()) {
-      libraryItemWrapper = playerNotificationService.mediaManager.getFirstItem()
-    } else {
-      val libraryItemWithEpisode = playerNotificationService.mediaManager.getPodcastWithEpisodeByEpisodeId(mediaId)
-      if (libraryItemWithEpisode != null) {
-        libraryItemWrapper = libraryItemWithEpisode.libraryItemWrapper
-        podcastEpisode = libraryItemWithEpisode.episode
+    if (mediaId.isNullOrEmpty()) return startFirstPlayable()
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.resolveForPlay(mediaId) { libraryItemWrapper, podcastEpisode ->
+      if (libraryItemWrapper == null) {
+        playerNotificationService.reportUnknownItem(mediaId)
       } else {
-        libraryItemWrapper = playerNotificationService.mediaManager.getById(mediaId)
-        if (libraryItemWrapper == null) {
-          DLog.e(tag, "onPlayFromMediaId: Media item not found $mediaId")
-        }
-      }
-    }
-
-    libraryItemWrapper?.let { li ->
-      playerNotificationService.mediaManager.play(li, podcastEpisode, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-         DLog.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, true, playbackRate)
-          }
-        }
+        playerNotificationService.startWrapper(libraryItemWrapper, podcastEpisode, true, mediaManager.getSavedPlaybackRate())
       }
     }
   }
@@ -233,9 +209,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
             if (0 == mediaButtonClickCount) playerNotificationService.pause()
             handleMediaButtonClickCount()
           }
-          KeyEvent.KEYCODE_MEDIA_STOP -> {
-            playerNotificationService.pause()
-          }
+          KeyEvent.KEYCODE_MEDIA_STOP -> onStop()
           else -> {
             DLog.d(tag, "KeyCode:${keyEvent.keyCode}")
             return false
@@ -262,11 +236,11 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
     override fun handleMessage(msg: Message) {
       super.handleMessage(msg)
       if (2 == msg.what) {
-        playerNotificationService.jumpBackward()
+        onRewind()
         playerNotificationService.play()
       }
       else if (msg.what >= 3) {
-        playerNotificationService.jumpForward()
+        onFastForward()
         playerNotificationService.play()
       }
     }
@@ -274,6 +248,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
 
   override fun onCustomAction(action: String?, extras: Bundle?) {
     super.onCustomAction(action, extras)
+    if (showsAwaitedItem) return
 
     when (action) {
       CUSTOM_ACTION_JUMP_FORWARD -> onFastForward()

@@ -1,0 +1,3792 @@
+{
+ "server": "2.37.1",
+ "recordedAt": 1792185845970,
+ "booksLibraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+ "podcastsLibraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+ "cases": [
+  {
+   "name": "books limit 10",
+   "mediaType": "book",
+   "limit": 10,
+   "settings": {
+    "onlyShowLaterBooksInContinueSeries": false,
+    "hideSingleBookSeries": false
+   },
+   "shelves": [
+    {
+     "id": "continue-listening",
+     "label": "Continue Listening",
+     "labelStringKey": "LabelContinueListening",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ef3f7b9a-f372-4f41-997d-573a546149b0"
+      },
+      {
+       "id": "92072364-1543-4676-b6d6-fb77a318285d"
+      },
+      {
+       "id": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3"
+      }
+     ]
+    },
+    {
+     "id": "continue-reading",
+     "label": "Continue Reading",
+     "labelStringKey": "LabelContinueReading",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      }
+     ]
+    },
+    {
+     "id": "continue-series",
+     "label": "Continue Series",
+     "labelStringKey": "LabelContinueSeries",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "sequence": "3"
+      },
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "b371fe1f-753a-428b-a1da-93856d132809",
+       "sequence": "2"
+      },
+      {
+       "id": "07ce414e-8a29-49dd-bae9-c42ca12ab13c",
+       "seriesId": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+       "sequence": "2"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229",
+       "seriesId": "dab8e9ba-ca32-4c5c-a5d7-2f15aa722213",
+       "sequence": "2"
+      }
+     ]
+    },
+    {
+     "id": "recently-added",
+     "label": "Recently Added",
+     "labelStringKey": "LabelRecentlyAdded",
+     "type": "book",
+     "total": 26,
+     "entities": [
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229"
+      },
+      {
+       "id": "701953a9-4811-453d-b3c8-72f5380c3ea6"
+      },
+      {
+       "id": "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+      },
+      {
+       "id": "07ce414e-8a29-49dd-bae9-c42ca12ab13c"
+      },
+      {
+       "id": "bac6fc10-f902-4a13-b8dd-0be5caadaf1e"
+      },
+      {
+       "id": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3"
+      },
+      {
+       "id": "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+      },
+      {
+       "id": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8"
+      },
+      {
+       "id": "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+      }
+     ]
+    },
+    {
+     "id": "recent-series",
+     "label": "Recent Series",
+     "labelStringKey": "LabelRecentSeries",
+     "type": "series",
+     "total": 8,
+     "entities": [
+      {
+       "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+       "bookIds": [
+        "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+        "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11"
+       ]
+      },
+      {
+       "id": "c37008b8-75ef-4167-a4e0-38955cafc7e0",
+       "bookIds": [
+        "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+       ]
+      },
+      {
+       "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "bookIds": [
+        "69b0e5a8-4337-4da7-b347-042ed3af2cfd",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "b371fe1f-753a-428b-a1da-93856d132809",
+       "bookIds": [
+        "a2df075f-c7ce-4468-af87-24eb5831357c",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "c0e994d8-c878-46e9-80fa-ecb24d689194",
+       "bookIds": [
+        "6e8d9207-c9c1-43ac-a237-d3874dcd18a8",
+        "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+       ]
+      }
+     ]
+    },
+    {
+     "id": "discover",
+     "label": "Discover",
+     "labelStringKey": "LabelDiscover",
+     "type": "book",
+     "total": 6,
+     "entities": [
+      {
+       "id": "49fe2317-f2b9-454e-affd-5179db79d758"
+      },
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f"
+      },
+      {
+       "id": "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+      },
+      {
+       "id": "90e7b648-f47b-48dc-a164-8c3176ec508a"
+      },
+      {
+       "id": "9222210d-8761-4ba3-a19d-8ba9954ec878"
+      },
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      }
+     ]
+    },
+    {
+     "id": "listen-again",
+     "label": "Listen Again",
+     "labelStringKey": "LabelListenAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473"
+      },
+      {
+       "id": "0f0fffbf-e93e-49f8-8c64-e92d1c46e685"
+      },
+      {
+       "id": "69b0e5a8-4337-4da7-b347-042ed3af2cfd"
+      },
+      {
+       "id": "a2df075f-c7ce-4468-af87-24eb5831357c"
+      },
+      {
+       "id": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8"
+      },
+      {
+       "id": "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+      },
+      {
+       "id": "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+      },
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      }
+     ]
+    },
+    {
+     "id": "read-again",
+     "label": "Read Again",
+     "labelStringKey": "LabelReadAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02"
+      }
+     ]
+    },
+    {
+     "id": "newest-authors",
+     "label": "Newest Authors",
+     "labelStringKey": "LabelNewestAuthors",
+     "type": "authors",
+     "total": 6,
+     "entities": [
+      {
+       "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9"
+      },
+      {
+       "id": "7764e4e6-f812-4064-87b7-1de42a0d6b8b"
+      },
+      {
+       "id": "23324794-b27d-4b48-bdbb-9ebde6b879f0"
+      },
+      {
+       "id": "47769b3e-5116-4c10-96f2-dff9beab13f2"
+      },
+      {
+       "id": "65bd7e8c-8849-4a74-aa7f-ec6f7a29f9c4"
+      },
+      {
+       "id": "fcec6d18-8982-4329-9581-6ef8a2fa648c"
+      }
+     ]
+    }
+   ],
+   "sample": {
+    "continue-listening": {
+     "id": "ef3f7b9a-f372-4f41-997d-573a546149b0",
+     "ino": "1441865",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 23",
+     "relPath": "HB 23",
+     "isFile": false,
+     "mtimeMs": 1792185841648,
+     "ctimeMs": 1792185841648,
+     "birthtimeMs": 1792185841595,
+     "addedAt": 1792185842419,
+     "updatedAt": 1792185845231,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "bcfa41b5-853a-4a76-9c2c-44027e9e8b3b",
+      "metadata": {
+       "title": "Listening Now",
+       "titleIgnorePrefix": "Listening Now",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "Bob",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "continue-reading": {
+     "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48",
+     "ino": "1441858",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 19",
+     "relPath": "HB 19",
+     "isFile": false,
+     "mtimeMs": 1792185842175,
+     "ctimeMs": 1792185842175,
+     "birthtimeMs": 1792185841435,
+     "addedAt": 1792185842567,
+     "updatedAt": 1792185845085,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "4826e853-e37b-4cc8-b9f6-1d9eb943dc47",
+      "metadata": {
+       "title": "Paper Reader",
+       "titleIgnorePrefix": "Paper Reader",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1254,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1254
+    },
+    "continue-series": {
+     "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+     "ino": "1441844",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 12",
+     "relPath": "HB 12",
+     "isFile": false,
+     "mtimeMs": 1792185841116,
+     "ctimeMs": 1792185841116,
+     "birthtimeMs": 1792185841059,
+     "addedAt": 1792185842845,
+     "updatedAt": 1792185844806,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "652e19ce-1e24-4b1a-bba2-dc507210cf5c",
+      "metadata": {
+       "title": "Delta Second",
+       "titleIgnorePrefix": "Delta Second",
+       "subtitle": null,
+       "authorName": "Dana Dell",
+       "authorNameLF": "Dell, Dana",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false,
+       "series": {
+        "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+        "name": "Epsilon Duo",
+        "sequence": "3"
+       }
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "recently-added": {
+     "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1",
+     "ino": "1441822",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 01",
+     "relPath": "HB 01",
+     "isFile": false,
+     "mtimeMs": 1792185840413,
+     "ctimeMs": 1792185840413,
+     "birthtimeMs": 1792185840331,
+     "addedAt": 1792185843302,
+     "updatedAt": 1792185844361,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "f669b523-4f47-48a6-98b4-5370d17ab258",
+      "metadata": {
+       "title": "Alpha Saga One",
+       "titleIgnorePrefix": "Alpha Saga One",
+       "subtitle": null,
+       "authorName": "Ann Archer",
+       "authorNameLF": "Archer, Ann",
+       "narratorName": "Nar Alpha",
+       "seriesName": "Alpha Saga #1",
+       "genres": [
+        "Fantasy"
+       ],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [
+       "favorite"
+      ],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120511
+     },
+     "numFiles": 1,
+     "size": 120511
+    },
+    "recent-series": {
+     "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+     "name": "Eta Unread",
+     "nameIgnorePrefix": "Eta Unread",
+     "description": null,
+     "addedAt": 1792185844921,
+     "updatedAt": 1792185844921,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "books": [
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+       "ino": "1441850",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 15",
+       "relPath": "HB 15",
+       "isFile": false,
+       "mtimeMs": 1792185841277,
+       "ctimeMs": 1792185841277,
+       "birthtimeMs": 1792185841222,
+       "addedAt": 1792185842735,
+       "updatedAt": 1792185844931,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "8b78d9f0-b498-4ed6-b492-4c8f13c1a6ae",
+        "metadata": {
+         "title": "Eta Opening",
+         "titleIgnorePrefix": "Eta Opening",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      },
+      {
+       "id": "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11",
+       "ino": "1441852",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 16",
+       "relPath": "HB 16",
+       "isFile": false,
+       "mtimeMs": 1792185841328,
+       "ctimeMs": 1792185841328,
+       "birthtimeMs": 1792185841277,
+       "addedAt": 1792185842699,
+       "updatedAt": 1792185844965,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "eb025eef-3ac6-494b-8161-63fb6cdf1f31",
+        "metadata": {
+         "title": "Eta Closing",
+         "titleIgnorePrefix": "Eta Closing",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      }
+     ]
+    },
+    "discover": {
+     "id": "49fe2317-f2b9-454e-affd-5179db79d758",
+     "ino": "1441867",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 24",
+     "relPath": "HB 24",
+     "isFile": false,
+     "mtimeMs": 1792185841703,
+     "ctimeMs": 1792185841703,
+     "birthtimeMs": 1792185841649,
+     "addedAt": 1792185842376,
+     "updatedAt": 1792185845263,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "0af2d003-3cda-44d7-b371-d0502522ea5e",
+      "metadata": {
+       "title": "Café Society",
+       "titleIgnorePrefix": "Café Society",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": "9780000000017",
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "listen-again": {
+     "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473",
+     "ino": "1441861",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 21",
+     "relPath": "HB 21",
+     "isFile": false,
+     "mtimeMs": 1792185841544,
+     "ctimeMs": 1792185841544,
+     "birthtimeMs": 1792185841491,
+     "addedAt": 1792185842505,
+     "updatedAt": 1792185845157,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "89665b2e-b32c-4dfc-ba65-04a467e2e895",
+      "metadata": {
+       "title": "Finished Hidden",
+       "titleIgnorePrefix": "Finished Hidden",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "read-again": {
+     "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02",
+     "ino": "1441869",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 25",
+     "relPath": "HB 25",
+     "isFile": false,
+     "mtimeMs": 1792185842196,
+     "ctimeMs": 1792185842196,
+     "birthtimeMs": 1792185841703,
+     "addedAt": 1792185842339,
+     "updatedAt": 1792185845304,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "c58a325f-d54e-45d1-99cf-b3fe9a676729",
+      "metadata": {
+       "title": "Paper Finished",
+       "titleIgnorePrefix": "Paper Finished",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1260,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1260
+    },
+    "newest-authors": {
+     "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9",
+     "asin": null,
+     "name": "Eve Echo",
+     "description": null,
+     "imagePath": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "addedAt": 1792185845049,
+     "updatedAt": 1792185845049,
+     "numBooks": 8
+    }
+   }
+  },
+  {
+   "name": "books limit 3",
+   "mediaType": "book",
+   "limit": 3,
+   "settings": {
+    "onlyShowLaterBooksInContinueSeries": false,
+    "hideSingleBookSeries": false
+   },
+   "shelves": [
+    {
+     "id": "continue-listening",
+     "label": "Continue Listening",
+     "labelStringKey": "LabelContinueListening",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ef3f7b9a-f372-4f41-997d-573a546149b0"
+      },
+      {
+       "id": "92072364-1543-4676-b6d6-fb77a318285d"
+      }
+     ]
+    },
+    {
+     "id": "continue-reading",
+     "label": "Continue Reading",
+     "labelStringKey": "LabelContinueReading",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      }
+     ]
+    },
+    {
+     "id": "continue-series",
+     "label": "Continue Series",
+     "labelStringKey": "LabelContinueSeries",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "sequence": "3"
+      },
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "b371fe1f-753a-428b-a1da-93856d132809",
+       "sequence": "2"
+      },
+      {
+       "id": "07ce414e-8a29-49dd-bae9-c42ca12ab13c",
+       "seriesId": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+       "sequence": "2"
+      }
+     ]
+    },
+    {
+     "id": "recently-added",
+     "label": "Recently Added",
+     "labelStringKey": "LabelRecentlyAdded",
+     "type": "book",
+     "total": 26,
+     "entities": [
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229"
+      },
+      {
+       "id": "701953a9-4811-453d-b3c8-72f5380c3ea6"
+      }
+     ]
+    },
+    {
+     "id": "recent-series",
+     "label": "Recent Series",
+     "labelStringKey": "LabelRecentSeries",
+     "type": "series",
+     "total": 8,
+     "entities": [
+      {
+       "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+       "bookIds": [
+        "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+        "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11"
+       ]
+      },
+      {
+       "id": "c37008b8-75ef-4167-a4e0-38955cafc7e0",
+       "bookIds": [
+        "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+       ]
+      },
+      {
+       "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "bookIds": [
+        "69b0e5a8-4337-4da7-b347-042ed3af2cfd",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "b371fe1f-753a-428b-a1da-93856d132809",
+       "bookIds": [
+        "a2df075f-c7ce-4468-af87-24eb5831357c",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "c0e994d8-c878-46e9-80fa-ecb24d689194",
+       "bookIds": [
+        "6e8d9207-c9c1-43ac-a237-d3874dcd18a8",
+        "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+       ]
+      }
+     ]
+    },
+    {
+     "id": "discover",
+     "label": "Discover",
+     "labelStringKey": "LabelDiscover",
+     "type": "book",
+     "total": 6,
+     "entities": [
+      {
+       "id": "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+      },
+      {
+       "id": "90e7b648-f47b-48dc-a164-8c3176ec508a"
+      },
+      {
+       "id": "49fe2317-f2b9-454e-affd-5179db79d758"
+      }
+     ]
+    },
+    {
+     "id": "listen-again",
+     "label": "Listen Again",
+     "labelStringKey": "LabelListenAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473"
+      },
+      {
+       "id": "0f0fffbf-e93e-49f8-8c64-e92d1c46e685"
+      }
+     ]
+    },
+    {
+     "id": "read-again",
+     "label": "Read Again",
+     "labelStringKey": "LabelReadAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02"
+      }
+     ]
+    },
+    {
+     "id": "newest-authors",
+     "label": "Newest Authors",
+     "labelStringKey": "LabelNewestAuthors",
+     "type": "authors",
+     "total": 6,
+     "entities": [
+      {
+       "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9"
+      },
+      {
+       "id": "7764e4e6-f812-4064-87b7-1de42a0d6b8b"
+      },
+      {
+       "id": "23324794-b27d-4b48-bdbb-9ebde6b879f0"
+      }
+     ]
+    }
+   ],
+   "sample": {
+    "continue-listening": {
+     "id": "ef3f7b9a-f372-4f41-997d-573a546149b0",
+     "ino": "1441865",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 23",
+     "relPath": "HB 23",
+     "isFile": false,
+     "mtimeMs": 1792185841648,
+     "ctimeMs": 1792185841648,
+     "birthtimeMs": 1792185841595,
+     "addedAt": 1792185842419,
+     "updatedAt": 1792185845231,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "bcfa41b5-853a-4a76-9c2c-44027e9e8b3b",
+      "metadata": {
+       "title": "Listening Now",
+       "titleIgnorePrefix": "Listening Now",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "Bob",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "continue-reading": {
+     "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48",
+     "ino": "1441858",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 19",
+     "relPath": "HB 19",
+     "isFile": false,
+     "mtimeMs": 1792185842175,
+     "ctimeMs": 1792185842175,
+     "birthtimeMs": 1792185841435,
+     "addedAt": 1792185842567,
+     "updatedAt": 1792185845085,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "4826e853-e37b-4cc8-b9f6-1d9eb943dc47",
+      "metadata": {
+       "title": "Paper Reader",
+       "titleIgnorePrefix": "Paper Reader",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1254,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1254
+    },
+    "continue-series": {
+     "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+     "ino": "1441844",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 12",
+     "relPath": "HB 12",
+     "isFile": false,
+     "mtimeMs": 1792185841116,
+     "ctimeMs": 1792185841116,
+     "birthtimeMs": 1792185841059,
+     "addedAt": 1792185842845,
+     "updatedAt": 1792185844806,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "652e19ce-1e24-4b1a-bba2-dc507210cf5c",
+      "metadata": {
+       "title": "Delta Second",
+       "titleIgnorePrefix": "Delta Second",
+       "subtitle": null,
+       "authorName": "Dana Dell",
+       "authorNameLF": "Dell, Dana",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false,
+       "series": {
+        "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+        "name": "Epsilon Duo",
+        "sequence": "3"
+       }
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "recently-added": {
+     "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1",
+     "ino": "1441822",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 01",
+     "relPath": "HB 01",
+     "isFile": false,
+     "mtimeMs": 1792185840413,
+     "ctimeMs": 1792185840413,
+     "birthtimeMs": 1792185840331,
+     "addedAt": 1792185843302,
+     "updatedAt": 1792185844361,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "f669b523-4f47-48a6-98b4-5370d17ab258",
+      "metadata": {
+       "title": "Alpha Saga One",
+       "titleIgnorePrefix": "Alpha Saga One",
+       "subtitle": null,
+       "authorName": "Ann Archer",
+       "authorNameLF": "Archer, Ann",
+       "narratorName": "Nar Alpha",
+       "seriesName": "Alpha Saga #1",
+       "genres": [
+        "Fantasy"
+       ],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [
+       "favorite"
+      ],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120511
+     },
+     "numFiles": 1,
+     "size": 120511
+    },
+    "recent-series": {
+     "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+     "name": "Eta Unread",
+     "nameIgnorePrefix": "Eta Unread",
+     "description": null,
+     "addedAt": 1792185844921,
+     "updatedAt": 1792185844921,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "books": [
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+       "ino": "1441850",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 15",
+       "relPath": "HB 15",
+       "isFile": false,
+       "mtimeMs": 1792185841277,
+       "ctimeMs": 1792185841277,
+       "birthtimeMs": 1792185841222,
+       "addedAt": 1792185842735,
+       "updatedAt": 1792185844931,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "8b78d9f0-b498-4ed6-b492-4c8f13c1a6ae",
+        "metadata": {
+         "title": "Eta Opening",
+         "titleIgnorePrefix": "Eta Opening",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      },
+      {
+       "id": "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11",
+       "ino": "1441852",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 16",
+       "relPath": "HB 16",
+       "isFile": false,
+       "mtimeMs": 1792185841328,
+       "ctimeMs": 1792185841328,
+       "birthtimeMs": 1792185841277,
+       "addedAt": 1792185842699,
+       "updatedAt": 1792185844965,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "eb025eef-3ac6-494b-8161-63fb6cdf1f31",
+        "metadata": {
+         "title": "Eta Closing",
+         "titleIgnorePrefix": "Eta Closing",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      }
+     ]
+    },
+    "discover": {
+     "id": "35a237f0-6de0-49b0-bfb9-37596ed3011c",
+     "ino": "1441848",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 14",
+     "relPath": "HB 14",
+     "isFile": false,
+     "mtimeMs": 1792185841221,
+     "ctimeMs": 1792185841221,
+     "birthtimeMs": 1792185841168,
+     "addedAt": 1792185842774,
+     "updatedAt": 1792185844893,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "10d92ce7-7e96-4eca-a2d8-8a68546c16f4",
+      "metadata": {
+       "title": "Zeta Alone",
+       "titleIgnorePrefix": "Zeta Alone",
+       "subtitle": null,
+       "authorName": "Дмитрий Тестов",
+       "authorNameLF": "Тестов, Дмитрий",
+       "narratorName": "",
+       "seriesName": "Zeta Single #1",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "listen-again": {
+     "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473",
+     "ino": "1441861",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 21",
+     "relPath": "HB 21",
+     "isFile": false,
+     "mtimeMs": 1792185841544,
+     "ctimeMs": 1792185841544,
+     "birthtimeMs": 1792185841491,
+     "addedAt": 1792185842505,
+     "updatedAt": 1792185845157,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "89665b2e-b32c-4dfc-ba65-04a467e2e895",
+      "metadata": {
+       "title": "Finished Hidden",
+       "titleIgnorePrefix": "Finished Hidden",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "read-again": {
+     "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02",
+     "ino": "1441869",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 25",
+     "relPath": "HB 25",
+     "isFile": false,
+     "mtimeMs": 1792185842196,
+     "ctimeMs": 1792185842196,
+     "birthtimeMs": 1792185841703,
+     "addedAt": 1792185842339,
+     "updatedAt": 1792185845304,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "c58a325f-d54e-45d1-99cf-b3fe9a676729",
+      "metadata": {
+       "title": "Paper Finished",
+       "titleIgnorePrefix": "Paper Finished",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1260,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1260
+    },
+    "newest-authors": {
+     "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9",
+     "asin": null,
+     "name": "Eve Echo",
+     "description": null,
+     "imagePath": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "addedAt": 1792185845049,
+     "updatedAt": 1792185845049,
+     "numBooks": 8
+    }
+   }
+  },
+  {
+   "name": "books only later",
+   "mediaType": "book",
+   "limit": 10,
+   "settings": {
+    "onlyShowLaterBooksInContinueSeries": true,
+    "hideSingleBookSeries": false
+   },
+   "shelves": [
+    {
+     "id": "continue-listening",
+     "label": "Continue Listening",
+     "labelStringKey": "LabelContinueListening",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ef3f7b9a-f372-4f41-997d-573a546149b0"
+      },
+      {
+       "id": "92072364-1543-4676-b6d6-fb77a318285d"
+      },
+      {
+       "id": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3"
+      }
+     ]
+    },
+    {
+     "id": "continue-reading",
+     "label": "Continue Reading",
+     "labelStringKey": "LabelContinueReading",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      }
+     ]
+    },
+    {
+     "id": "continue-series",
+     "label": "Continue Series",
+     "labelStringKey": "LabelContinueSeries",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "sequence": "3"
+      },
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "b371fe1f-753a-428b-a1da-93856d132809",
+       "sequence": "2"
+      },
+      {
+       "id": "bac6fc10-f902-4a13-b8dd-0be5caadaf1e",
+       "seriesId": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+       "sequence": "4"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229",
+       "seriesId": "dab8e9ba-ca32-4c5c-a5d7-2f15aa722213",
+       "sequence": "2"
+      }
+     ]
+    },
+    {
+     "id": "recently-added",
+     "label": "Recently Added",
+     "labelStringKey": "LabelRecentlyAdded",
+     "type": "book",
+     "total": 26,
+     "entities": [
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229"
+      },
+      {
+       "id": "701953a9-4811-453d-b3c8-72f5380c3ea6"
+      },
+      {
+       "id": "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+      },
+      {
+       "id": "07ce414e-8a29-49dd-bae9-c42ca12ab13c"
+      },
+      {
+       "id": "bac6fc10-f902-4a13-b8dd-0be5caadaf1e"
+      },
+      {
+       "id": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3"
+      },
+      {
+       "id": "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+      },
+      {
+       "id": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8"
+      },
+      {
+       "id": "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+      }
+     ]
+    },
+    {
+     "id": "recent-series",
+     "label": "Recent Series",
+     "labelStringKey": "LabelRecentSeries",
+     "type": "series",
+     "total": 8,
+     "entities": [
+      {
+       "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+       "bookIds": [
+        "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+        "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11"
+       ]
+      },
+      {
+       "id": "c37008b8-75ef-4167-a4e0-38955cafc7e0",
+       "bookIds": [
+        "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+       ]
+      },
+      {
+       "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "bookIds": [
+        "69b0e5a8-4337-4da7-b347-042ed3af2cfd",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "b371fe1f-753a-428b-a1da-93856d132809",
+       "bookIds": [
+        "a2df075f-c7ce-4468-af87-24eb5831357c",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "c0e994d8-c878-46e9-80fa-ecb24d689194",
+       "bookIds": [
+        "6e8d9207-c9c1-43ac-a237-d3874dcd18a8",
+        "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+       ]
+      }
+     ]
+    },
+    {
+     "id": "discover",
+     "label": "Discover",
+     "labelStringKey": "LabelDiscover",
+     "type": "book",
+     "total": 6,
+     "entities": [
+      {
+       "id": "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+      },
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f"
+      },
+      {
+       "id": "9222210d-8761-4ba3-a19d-8ba9954ec878"
+      },
+      {
+       "id": "90e7b648-f47b-48dc-a164-8c3176ec508a"
+      },
+      {
+       "id": "49fe2317-f2b9-454e-affd-5179db79d758"
+      },
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      }
+     ]
+    },
+    {
+     "id": "listen-again",
+     "label": "Listen Again",
+     "labelStringKey": "LabelListenAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473"
+      },
+      {
+       "id": "0f0fffbf-e93e-49f8-8c64-e92d1c46e685"
+      },
+      {
+       "id": "69b0e5a8-4337-4da7-b347-042ed3af2cfd"
+      },
+      {
+       "id": "a2df075f-c7ce-4468-af87-24eb5831357c"
+      },
+      {
+       "id": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8"
+      },
+      {
+       "id": "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+      },
+      {
+       "id": "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+      },
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      }
+     ]
+    },
+    {
+     "id": "read-again",
+     "label": "Read Again",
+     "labelStringKey": "LabelReadAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02"
+      }
+     ]
+    },
+    {
+     "id": "newest-authors",
+     "label": "Newest Authors",
+     "labelStringKey": "LabelNewestAuthors",
+     "type": "authors",
+     "total": 6,
+     "entities": [
+      {
+       "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9"
+      },
+      {
+       "id": "7764e4e6-f812-4064-87b7-1de42a0d6b8b"
+      },
+      {
+       "id": "23324794-b27d-4b48-bdbb-9ebde6b879f0"
+      },
+      {
+       "id": "47769b3e-5116-4c10-96f2-dff9beab13f2"
+      },
+      {
+       "id": "65bd7e8c-8849-4a74-aa7f-ec6f7a29f9c4"
+      },
+      {
+       "id": "fcec6d18-8982-4329-9581-6ef8a2fa648c"
+      }
+     ]
+    }
+   ],
+   "sample": {
+    "continue-listening": {
+     "id": "ef3f7b9a-f372-4f41-997d-573a546149b0",
+     "ino": "1441865",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 23",
+     "relPath": "HB 23",
+     "isFile": false,
+     "mtimeMs": 1792185841648,
+     "ctimeMs": 1792185841648,
+     "birthtimeMs": 1792185841595,
+     "addedAt": 1792185842419,
+     "updatedAt": 1792185845231,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "bcfa41b5-853a-4a76-9c2c-44027e9e8b3b",
+      "metadata": {
+       "title": "Listening Now",
+       "titleIgnorePrefix": "Listening Now",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "Bob",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "continue-reading": {
+     "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48",
+     "ino": "1441858",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 19",
+     "relPath": "HB 19",
+     "isFile": false,
+     "mtimeMs": 1792185842175,
+     "ctimeMs": 1792185842175,
+     "birthtimeMs": 1792185841435,
+     "addedAt": 1792185842567,
+     "updatedAt": 1792185845085,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "4826e853-e37b-4cc8-b9f6-1d9eb943dc47",
+      "metadata": {
+       "title": "Paper Reader",
+       "titleIgnorePrefix": "Paper Reader",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1254,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1254
+    },
+    "continue-series": {
+     "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+     "ino": "1441844",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 12",
+     "relPath": "HB 12",
+     "isFile": false,
+     "mtimeMs": 1792185841116,
+     "ctimeMs": 1792185841116,
+     "birthtimeMs": 1792185841059,
+     "addedAt": 1792185842845,
+     "updatedAt": 1792185844806,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "652e19ce-1e24-4b1a-bba2-dc507210cf5c",
+      "metadata": {
+       "title": "Delta Second",
+       "titleIgnorePrefix": "Delta Second",
+       "subtitle": null,
+       "authorName": "Dana Dell",
+       "authorNameLF": "Dell, Dana",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false,
+       "series": {
+        "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+        "name": "Epsilon Duo",
+        "sequence": "3"
+       }
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "recently-added": {
+     "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1",
+     "ino": "1441822",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 01",
+     "relPath": "HB 01",
+     "isFile": false,
+     "mtimeMs": 1792185840413,
+     "ctimeMs": 1792185840413,
+     "birthtimeMs": 1792185840331,
+     "addedAt": 1792185843302,
+     "updatedAt": 1792185844361,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "f669b523-4f47-48a6-98b4-5370d17ab258",
+      "metadata": {
+       "title": "Alpha Saga One",
+       "titleIgnorePrefix": "Alpha Saga One",
+       "subtitle": null,
+       "authorName": "Ann Archer",
+       "authorNameLF": "Archer, Ann",
+       "narratorName": "Nar Alpha",
+       "seriesName": "Alpha Saga #1",
+       "genres": [
+        "Fantasy"
+       ],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [
+       "favorite"
+      ],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120511
+     },
+     "numFiles": 1,
+     "size": 120511
+    },
+    "recent-series": {
+     "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+     "name": "Eta Unread",
+     "nameIgnorePrefix": "Eta Unread",
+     "description": null,
+     "addedAt": 1792185844921,
+     "updatedAt": 1792185844921,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "books": [
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+       "ino": "1441850",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 15",
+       "relPath": "HB 15",
+       "isFile": false,
+       "mtimeMs": 1792185841277,
+       "ctimeMs": 1792185841277,
+       "birthtimeMs": 1792185841222,
+       "addedAt": 1792185842735,
+       "updatedAt": 1792185844931,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "8b78d9f0-b498-4ed6-b492-4c8f13c1a6ae",
+        "metadata": {
+         "title": "Eta Opening",
+         "titleIgnorePrefix": "Eta Opening",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      },
+      {
+       "id": "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11",
+       "ino": "1441852",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 16",
+       "relPath": "HB 16",
+       "isFile": false,
+       "mtimeMs": 1792185841328,
+       "ctimeMs": 1792185841328,
+       "birthtimeMs": 1792185841277,
+       "addedAt": 1792185842699,
+       "updatedAt": 1792185844965,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "eb025eef-3ac6-494b-8161-63fb6cdf1f31",
+        "metadata": {
+         "title": "Eta Closing",
+         "titleIgnorePrefix": "Eta Closing",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      }
+     ]
+    },
+    "discover": {
+     "id": "35a237f0-6de0-49b0-bfb9-37596ed3011c",
+     "ino": "1441848",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 14",
+     "relPath": "HB 14",
+     "isFile": false,
+     "mtimeMs": 1792185841221,
+     "ctimeMs": 1792185841221,
+     "birthtimeMs": 1792185841168,
+     "addedAt": 1792185842774,
+     "updatedAt": 1792185844893,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "10d92ce7-7e96-4eca-a2d8-8a68546c16f4",
+      "metadata": {
+       "title": "Zeta Alone",
+       "titleIgnorePrefix": "Zeta Alone",
+       "subtitle": null,
+       "authorName": "Дмитрий Тестов",
+       "authorNameLF": "Тестов, Дмитрий",
+       "narratorName": "",
+       "seriesName": "Zeta Single #1",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "listen-again": {
+     "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473",
+     "ino": "1441861",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 21",
+     "relPath": "HB 21",
+     "isFile": false,
+     "mtimeMs": 1792185841544,
+     "ctimeMs": 1792185841544,
+     "birthtimeMs": 1792185841491,
+     "addedAt": 1792185842505,
+     "updatedAt": 1792185845157,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "89665b2e-b32c-4dfc-ba65-04a467e2e895",
+      "metadata": {
+       "title": "Finished Hidden",
+       "titleIgnorePrefix": "Finished Hidden",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "read-again": {
+     "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02",
+     "ino": "1441869",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 25",
+     "relPath": "HB 25",
+     "isFile": false,
+     "mtimeMs": 1792185842196,
+     "ctimeMs": 1792185842196,
+     "birthtimeMs": 1792185841703,
+     "addedAt": 1792185842339,
+     "updatedAt": 1792185845304,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "c58a325f-d54e-45d1-99cf-b3fe9a676729",
+      "metadata": {
+       "title": "Paper Finished",
+       "titleIgnorePrefix": "Paper Finished",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1260,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1260
+    },
+    "newest-authors": {
+     "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9",
+     "asin": null,
+     "name": "Eve Echo",
+     "description": null,
+     "imagePath": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "addedAt": 1792185845049,
+     "updatedAt": 1792185845049,
+     "numBooks": 8
+    }
+   }
+  },
+  {
+   "name": "books hide single book series",
+   "mediaType": "book",
+   "limit": 10,
+   "settings": {
+    "onlyShowLaterBooksInContinueSeries": false,
+    "hideSingleBookSeries": true
+   },
+   "shelves": [
+    {
+     "id": "continue-listening",
+     "label": "Continue Listening",
+     "labelStringKey": "LabelContinueListening",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ef3f7b9a-f372-4f41-997d-573a546149b0"
+      },
+      {
+       "id": "92072364-1543-4676-b6d6-fb77a318285d"
+      },
+      {
+       "id": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3"
+      }
+     ]
+    },
+    {
+     "id": "continue-reading",
+     "label": "Continue Reading",
+     "labelStringKey": "LabelContinueReading",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      }
+     ]
+    },
+    {
+     "id": "continue-series",
+     "label": "Continue Series",
+     "labelStringKey": "LabelContinueSeries",
+     "type": "book",
+     "total": 4,
+     "entities": [
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "sequence": "3"
+      },
+      {
+       "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+       "seriesId": "b371fe1f-753a-428b-a1da-93856d132809",
+       "sequence": "2"
+      },
+      {
+       "id": "07ce414e-8a29-49dd-bae9-c42ca12ab13c",
+       "seriesId": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+       "sequence": "2"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229",
+       "seriesId": "dab8e9ba-ca32-4c5c-a5d7-2f15aa722213",
+       "sequence": "2"
+      }
+     ]
+    },
+    {
+     "id": "recently-added",
+     "label": "Recently Added",
+     "labelStringKey": "LabelRecentlyAdded",
+     "type": "book",
+     "total": 26,
+     "entities": [
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      },
+      {
+       "id": "1542ed61-b273-421a-a8ad-7a0164b0e229"
+      },
+      {
+       "id": "701953a9-4811-453d-b3c8-72f5380c3ea6"
+      },
+      {
+       "id": "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+      },
+      {
+       "id": "07ce414e-8a29-49dd-bae9-c42ca12ab13c"
+      },
+      {
+       "id": "bac6fc10-f902-4a13-b8dd-0be5caadaf1e"
+      },
+      {
+       "id": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3"
+      },
+      {
+       "id": "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+      },
+      {
+       "id": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8"
+      },
+      {
+       "id": "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+      }
+     ]
+    },
+    {
+     "id": "recent-series",
+     "label": "Recent Series",
+     "labelStringKey": "LabelRecentSeries",
+     "type": "series",
+     "total": 7,
+     "entities": [
+      {
+       "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+       "bookIds": [
+        "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+        "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11"
+       ]
+      },
+      {
+       "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+       "bookIds": [
+        "69b0e5a8-4337-4da7-b347-042ed3af2cfd",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "b371fe1f-753a-428b-a1da-93856d132809",
+       "bookIds": [
+        "a2df075f-c7ce-4468-af87-24eb5831357c",
+        "ebb00bb6-1a85-4bbe-b47e-653826d729e7"
+       ]
+      },
+      {
+       "id": "c0e994d8-c878-46e9-80fa-ecb24d689194",
+       "bookIds": [
+        "6e8d9207-c9c1-43ac-a237-d3874dcd18a8",
+        "5f309add-0994-46eb-9ddc-3c35a2ddce0b"
+       ]
+      },
+      {
+       "id": "83b3f6a5-8b59-4c09-ac33-fdd6b853bba2",
+       "bookIds": [
+        "ab85b8ac-d40e-4021-9176-dfc55b55ebd3",
+        "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+       ]
+      }
+     ]
+    },
+    {
+     "id": "discover",
+     "label": "Discover",
+     "labelStringKey": "LabelDiscover",
+     "type": "book",
+     "total": 6,
+     "entities": [
+      {
+       "id": "49fe2317-f2b9-454e-affd-5179db79d758"
+      },
+      {
+       "id": "90e7b648-f47b-48dc-a164-8c3176ec508a"
+      },
+      {
+       "id": "9222210d-8761-4ba3-a19d-8ba9954ec878"
+      },
+      {
+       "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48"
+      },
+      {
+       "id": "35a237f0-6de0-49b0-bfb9-37596ed3011c"
+      },
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f"
+      }
+     ]
+    },
+    {
+     "id": "listen-again",
+     "label": "Listen Again",
+     "labelStringKey": "LabelListenAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473"
+      },
+      {
+       "id": "0f0fffbf-e93e-49f8-8c64-e92d1c46e685"
+      },
+      {
+       "id": "69b0e5a8-4337-4da7-b347-042ed3af2cfd"
+      },
+      {
+       "id": "a2df075f-c7ce-4468-af87-24eb5831357c"
+      },
+      {
+       "id": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8"
+      },
+      {
+       "id": "02eba543-4f9a-40b7-a6da-37c8bdea8952"
+      },
+      {
+       "id": "c20a8723-4252-491f-aff8-f4d6b3363c8b"
+      },
+      {
+       "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1"
+      }
+     ]
+    },
+    {
+     "id": "read-again",
+     "label": "Read Again",
+     "labelStringKey": "LabelReadAgain",
+     "type": "book",
+     "total": 9,
+     "entities": [
+      {
+       "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02"
+      }
+     ]
+    },
+    {
+     "id": "newest-authors",
+     "label": "Newest Authors",
+     "labelStringKey": "LabelNewestAuthors",
+     "type": "authors",
+     "total": 6,
+     "entities": [
+      {
+       "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9"
+      },
+      {
+       "id": "7764e4e6-f812-4064-87b7-1de42a0d6b8b"
+      },
+      {
+       "id": "23324794-b27d-4b48-bdbb-9ebde6b879f0"
+      },
+      {
+       "id": "47769b3e-5116-4c10-96f2-dff9beab13f2"
+      },
+      {
+       "id": "65bd7e8c-8849-4a74-aa7f-ec6f7a29f9c4"
+      },
+      {
+       "id": "fcec6d18-8982-4329-9581-6ef8a2fa648c"
+      }
+     ]
+    }
+   ],
+   "sample": {
+    "continue-listening": {
+     "id": "ef3f7b9a-f372-4f41-997d-573a546149b0",
+     "ino": "1441865",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 23",
+     "relPath": "HB 23",
+     "isFile": false,
+     "mtimeMs": 1792185841648,
+     "ctimeMs": 1792185841648,
+     "birthtimeMs": 1792185841595,
+     "addedAt": 1792185842419,
+     "updatedAt": 1792185845231,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "bcfa41b5-853a-4a76-9c2c-44027e9e8b3b",
+      "metadata": {
+       "title": "Listening Now",
+       "titleIgnorePrefix": "Listening Now",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "Bob",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "continue-reading": {
+     "id": "00592b9f-f9b1-4a53-bbf2-d1fc2399ca48",
+     "ino": "1441858",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 19",
+     "relPath": "HB 19",
+     "isFile": false,
+     "mtimeMs": 1792185842175,
+     "ctimeMs": 1792185842175,
+     "birthtimeMs": 1792185841435,
+     "addedAt": 1792185842567,
+     "updatedAt": 1792185845085,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "4826e853-e37b-4cc8-b9f6-1d9eb943dc47",
+      "metadata": {
+       "title": "Paper Reader",
+       "titleIgnorePrefix": "Paper Reader",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1254,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1254
+    },
+    "continue-series": {
+     "id": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+     "ino": "1441844",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 12",
+     "relPath": "HB 12",
+     "isFile": false,
+     "mtimeMs": 1792185841116,
+     "ctimeMs": 1792185841116,
+     "birthtimeMs": 1792185841059,
+     "addedAt": 1792185842845,
+     "updatedAt": 1792185844806,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "652e19ce-1e24-4b1a-bba2-dc507210cf5c",
+      "metadata": {
+       "title": "Delta Second",
+       "titleIgnorePrefix": "Delta Second",
+       "subtitle": null,
+       "authorName": "Dana Dell",
+       "authorNameLF": "Dell, Dana",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false,
+       "series": {
+        "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+        "name": "Epsilon Duo",
+        "sequence": "3"
+       }
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "recently-added": {
+     "id": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1",
+     "ino": "1441822",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 01",
+     "relPath": "HB 01",
+     "isFile": false,
+     "mtimeMs": 1792185840413,
+     "ctimeMs": 1792185840413,
+     "birthtimeMs": 1792185840331,
+     "addedAt": 1792185843302,
+     "updatedAt": 1792185844361,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "f669b523-4f47-48a6-98b4-5370d17ab258",
+      "metadata": {
+       "title": "Alpha Saga One",
+       "titleIgnorePrefix": "Alpha Saga One",
+       "subtitle": null,
+       "authorName": "Ann Archer",
+       "authorNameLF": "Archer, Ann",
+       "narratorName": "Nar Alpha",
+       "seriesName": "Alpha Saga #1",
+       "genres": [
+        "Fantasy"
+       ],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [
+       "favorite"
+      ],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120511
+     },
+     "numFiles": 1,
+     "size": 120511
+    },
+    "recent-series": {
+     "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+     "name": "Eta Unread",
+     "nameIgnorePrefix": "Eta Unread",
+     "description": null,
+     "addedAt": 1792185844921,
+     "updatedAt": 1792185844921,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "books": [
+      {
+       "id": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+       "ino": "1441850",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 15",
+       "relPath": "HB 15",
+       "isFile": false,
+       "mtimeMs": 1792185841277,
+       "ctimeMs": 1792185841277,
+       "birthtimeMs": 1792185841222,
+       "addedAt": 1792185842735,
+       "updatedAt": 1792185844931,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "8b78d9f0-b498-4ed6-b492-4c8f13c1a6ae",
+        "metadata": {
+         "title": "Eta Opening",
+         "titleIgnorePrefix": "Eta Opening",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      },
+      {
+       "id": "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11",
+       "ino": "1441852",
+       "oldLibraryItemId": null,
+       "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+       "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+       "path": "/home-books/HB 16",
+       "relPath": "HB 16",
+       "isFile": false,
+       "mtimeMs": 1792185841328,
+       "ctimeMs": 1792185841328,
+       "birthtimeMs": 1792185841277,
+       "addedAt": 1792185842699,
+       "updatedAt": 1792185844965,
+       "isMissing": false,
+       "isInvalid": false,
+       "mediaType": "book",
+       "media": {
+        "id": "eb025eef-3ac6-494b-8161-63fb6cdf1f31",
+        "metadata": {
+         "title": "Eta Closing",
+         "titleIgnorePrefix": "Eta Closing",
+         "subtitle": null,
+         "authorName": "",
+         "authorNameLF": "",
+         "narratorName": "",
+         "seriesName": "",
+         "genres": [],
+         "publishedYear": null,
+         "publishedDate": null,
+         "publisher": null,
+         "description": null,
+         "isbn": null,
+         "asin": null,
+         "language": null,
+         "explicit": false,
+         "abridged": false
+        },
+        "coverPath": null,
+        "tags": [],
+        "numTracks": 1,
+        "numAudioFiles": 1,
+        "numChapters": 0,
+        "duration": 30,
+        "size": 120512
+       },
+       "numFiles": 1,
+       "size": 120512
+      }
+     ]
+    },
+    "discover": {
+     "id": "49fe2317-f2b9-454e-affd-5179db79d758",
+     "ino": "1441867",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 24",
+     "relPath": "HB 24",
+     "isFile": false,
+     "mtimeMs": 1792185841703,
+     "ctimeMs": 1792185841703,
+     "birthtimeMs": 1792185841649,
+     "addedAt": 1792185842376,
+     "updatedAt": 1792185845263,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "0af2d003-3cda-44d7-b371-d0502522ea5e",
+      "metadata": {
+       "title": "Café Society",
+       "titleIgnorePrefix": "Café Society",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": "9780000000017",
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "listen-again": {
+     "id": "d3aa7e0c-81ae-453b-9442-1bab648bd473",
+     "ino": "1441861",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 21",
+     "relPath": "HB 21",
+     "isFile": false,
+     "mtimeMs": 1792185841544,
+     "ctimeMs": 1792185841544,
+     "birthtimeMs": 1792185841491,
+     "addedAt": 1792185842505,
+     "updatedAt": 1792185845157,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "89665b2e-b32c-4dfc-ba65-04a467e2e895",
+      "metadata": {
+       "title": "Finished Hidden",
+       "titleIgnorePrefix": "Finished Hidden",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": null,
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 1,
+      "numAudioFiles": 1,
+      "numChapters": 0,
+      "duration": 30,
+      "size": 120512
+     },
+     "numFiles": 1,
+     "size": 120512
+    },
+    "read-again": {
+     "id": "ee2e1fad-8097-4b08-aa06-832a130d5a02",
+     "ino": "1441869",
+     "oldLibraryItemId": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "folderId": "4f062ae4-f243-4faa-9570-c418a0776422",
+     "path": "/home-books/HB 25",
+     "relPath": "HB 25",
+     "isFile": false,
+     "mtimeMs": 1792185842196,
+     "ctimeMs": 1792185842196,
+     "birthtimeMs": 1792185841703,
+     "addedAt": 1792185842339,
+     "updatedAt": 1792185845304,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "book",
+     "media": {
+      "id": "c58a325f-d54e-45d1-99cf-b3fe9a676729",
+      "metadata": {
+       "title": "Paper Finished",
+       "titleIgnorePrefix": "Paper Finished",
+       "subtitle": null,
+       "authorName": "Eve Echo",
+       "authorNameLF": "Echo, Eve",
+       "narratorName": "",
+       "seriesName": "",
+       "genres": [],
+       "publishedYear": null,
+       "publishedDate": null,
+       "publisher": null,
+       "description": null,
+       "isbn": null,
+       "asin": null,
+       "language": "en",
+       "explicit": false,
+       "abridged": false
+      },
+      "coverPath": null,
+      "tags": [],
+      "numTracks": 0,
+      "numAudioFiles": 0,
+      "numChapters": 0,
+      "duration": 0,
+      "size": 1260,
+      "ebookFormat": "epub"
+     },
+     "numFiles": 1,
+     "size": 1260
+    },
+    "newest-authors": {
+     "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9",
+     "asin": null,
+     "name": "Eve Echo",
+     "description": null,
+     "imagePath": null,
+     "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+     "addedAt": 1792185845049,
+     "updatedAt": 1792185845049,
+     "numBooks": 8
+    }
+   }
+  },
+  {
+   "name": "podcasts limit 10",
+   "mediaType": "podcast",
+   "limit": 10,
+   "settings": {
+    "onlyShowLaterBooksInContinueSeries": false,
+    "hideSingleBookSeries": true
+   },
+   "shelves": [
+    {
+     "id": "continue-listening",
+     "label": "Continue Listening",
+     "labelStringKey": "LabelContinueListening",
+     "type": "episode",
+     "total": 2,
+     "entities": [
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "adbb72ab-eb81-48b0-9b50-ed9dc0efd353"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "682a59a0-6d8b-4e82-9ff6-bf977e8be8fb"
+      }
+     ]
+    },
+    {
+     "id": "newest-episodes",
+     "label": "Newest Episodes",
+     "labelStringKey": "LabelNewestEpisodes",
+     "type": "episode",
+     "total": 6,
+     "entities": [
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "f6a79bdf-38bc-40a0-82b1-553cf2c5ccbc"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "d461bcfb-ef98-4ff1-a59b-b131b4f26047"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "682a59a0-6d8b-4e82-9ff6-bf977e8be8fb"
+      },
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "e6ef6aa2-be0e-4173-8a2c-4c7f6a9d7004"
+      },
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "adbb72ab-eb81-48b0-9b50-ed9dc0efd353"
+      },
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "9e683f6f-e5a6-497a-b593-5909fea88135"
+      }
+     ]
+    },
+    {
+     "id": "recently-added",
+     "label": "Recently Added",
+     "labelStringKey": "LabelRecentlyAdded",
+     "type": "podcast",
+     "total": 2,
+     "entities": [
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d"
+      },
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd"
+      }
+     ]
+    },
+    {
+     "id": "listen-again",
+     "label": "Listen Again",
+     "labelStringKey": "LabelListenAgain",
+     "type": "episode",
+     "total": 2,
+     "entities": [
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "e6ef6aa2-be0e-4173-8a2c-4c7f6a9d7004"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "d461bcfb-ef98-4ff1-a59b-b131b4f26047"
+      }
+     ]
+    }
+   ],
+   "sample": {
+    "continue-listening": {
+     "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+     "ino": "1441876",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 2",
+     "relPath": "HP 2",
+     "isFile": false,
+     "mtimeMs": 1792185842100,
+     "ctimeMs": 1792185842100,
+     "birthtimeMs": 1792185841927,
+     "addedAt": 1792185842301,
+     "updatedAt": 1792185845368,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "metadata": {
+       "title": "Second Signal",
+       "author": "Другой Автор",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech",
+        "News"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500002",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Second Signal"
+      },
+      "coverPath": null,
+      "tags": [],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 0
+     },
+     "numFiles": 3,
+     "size": 361553,
+     "recentEpisode": {
+      "libraryItemId": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+      "podcastId": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "id": "adbb72ab-eb81-48b0-9b50-ed9dc0efd353",
+      "oldEpisodeId": null,
+      "index": null,
+      "season": null,
+      "episode": null,
+      "episodeType": null,
+      "title": "Deep Water",
+      "subtitle": null,
+      "description": null,
+      "enclosure": null,
+      "guid": null,
+      "pubDate": null,
+      "chapters": [],
+      "audioFile": {
+       "index": 1,
+       "ino": "1441878",
+       "metadata": {
+        "filename": "02.mp3",
+        "ext": ".mp3",
+        "path": "/home-podcasts/HP 2/02.mp3",
+        "relPath": "02.mp3",
+        "size": 120517,
+        "mtimeMs": 1792185842034,
+        "ctimeMs": 1792185842037,
+        "birthtimeMs": 1792185842002
+       },
+       "addedAt": 1792185842300,
+       "updatedAt": 1792185842300,
+       "trackNumFromMeta": null,
+       "discNumFromMeta": null,
+       "trackNumFromFilename": null,
+       "discNumFromFilename": null,
+       "manuallyVerified": false,
+       "exclude": false,
+       "error": null,
+       "format": "MP2/3 (MPEG audio layer 2/3)",
+       "duration": 30,
+       "bitRate": 32000,
+       "language": null,
+       "codec": "mp3",
+       "timeBase": "1/14112000",
+       "channels": 1,
+       "channelLayout": "mono",
+       "chapters": [],
+       "embeddedCoverArt": null,
+       "metaTags": {
+        "tagTitle": "Deep Water",
+        "tagEncoder": "Lavf62.12.102"
+       },
+       "mimeType": "audio/mpeg"
+      },
+      "publishedAt": null,
+      "addedAt": 1792185842305,
+      "updatedAt": 1792185842305
+     }
+    },
+    "newest-episodes": {
+     "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+     "ino": "1441872",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 1",
+     "relPath": "HP 1",
+     "isFile": false,
+     "mtimeMs": 1792185841926,
+     "ctimeMs": 1792185841926,
+     "birthtimeMs": 1792185841757,
+     "addedAt": 1792185842415,
+     "updatedAt": 1792185845380,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+      "metadata": {
+       "title": "Home Pod One",
+       "author": "Pod Host",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500001",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Home Pod One"
+      },
+      "coverPath": null,
+      "tags": [
+       "weekly"
+      ],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 0
+     },
+     "numFiles": 3,
+     "size": 361566,
+     "recentEpisode": {
+      "libraryItemId": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+      "podcastId": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+      "id": "f6a79bdf-38bc-40a0-82b1-553cf2c5ccbc",
+      "oldEpisodeId": null,
+      "index": null,
+      "season": null,
+      "episode": null,
+      "episodeType": null,
+      "title": "Финал Сезона",
+      "subtitle": null,
+      "description": null,
+      "enclosure": null,
+      "guid": null,
+      "pubDate": null,
+      "chapters": [],
+      "audioFile": {
+       "index": 1,
+       "ino": "1441875",
+       "metadata": {
+        "filename": "03.mp3",
+        "ext": ".mp3",
+        "path": "/home-podcasts/HP 1/03.mp3",
+        "relPath": "03.mp3",
+        "size": 120530,
+        "mtimeMs": 1792185841924,
+        "ctimeMs": 1792185841926,
+        "birthtimeMs": 1792185841893
+       },
+       "addedAt": 1792185842414,
+       "updatedAt": 1792185842414,
+       "trackNumFromMeta": null,
+       "discNumFromMeta": null,
+       "trackNumFromFilename": null,
+       "discNumFromFilename": null,
+       "manuallyVerified": false,
+       "exclude": false,
+       "error": null,
+       "format": "MP2/3 (MPEG audio layer 2/3)",
+       "duration": 30,
+       "bitRate": 32000,
+       "language": null,
+       "codec": "mp3",
+       "timeBase": "1/14112000",
+       "channels": 1,
+       "channelLayout": "mono",
+       "chapters": [],
+       "embeddedCoverArt": null,
+       "metaTags": {
+        "tagTitle": "Финал Сезона",
+        "tagEncoder": "Lavf62.12.102"
+       },
+       "mimeType": "audio/mpeg"
+      },
+      "publishedAt": null,
+      "addedAt": 1792185842417,
+      "updatedAt": 1792185842417
+     }
+    },
+    "recently-added": {
+     "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+     "ino": "1441872",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 1",
+     "relPath": "HP 1",
+     "isFile": false,
+     "mtimeMs": 1792185841926,
+     "ctimeMs": 1792185841926,
+     "birthtimeMs": 1792185841757,
+     "addedAt": 1792185842415,
+     "updatedAt": 1792185845380,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+      "metadata": {
+       "title": "Home Pod One",
+       "author": "Pod Host",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500001",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Home Pod One"
+      },
+      "coverPath": null,
+      "tags": [
+       "weekly"
+      ],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 361566
+     },
+     "numFiles": 3,
+     "size": 361566,
+     "numEpisodesIncomplete": 2
+    },
+    "listen-again": {
+     "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+     "ino": "1441876",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 2",
+     "relPath": "HP 2",
+     "isFile": false,
+     "mtimeMs": 1792185842100,
+     "ctimeMs": 1792185842100,
+     "birthtimeMs": 1792185841927,
+     "addedAt": 1792185842301,
+     "updatedAt": 1792185845368,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "metadata": {
+       "title": "Second Signal",
+       "author": "Другой Автор",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech",
+        "News"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500002",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Second Signal"
+      },
+      "coverPath": null,
+      "tags": [],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 0
+     },
+     "numFiles": 3,
+     "size": 361553,
+     "recentEpisode": {
+      "libraryItemId": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+      "podcastId": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "id": "e6ef6aa2-be0e-4173-8a2c-4c7f6a9d7004",
+      "oldEpisodeId": null,
+      "index": null,
+      "season": null,
+      "episode": null,
+      "episodeType": null,
+      "title": "Signal End",
+      "subtitle": null,
+      "description": null,
+      "enclosure": null,
+      "guid": null,
+      "pubDate": null,
+      "chapters": [],
+      "audioFile": {
+       "index": 1,
+       "ino": "1441879",
+       "metadata": {
+        "filename": "03.mp3",
+        "ext": ".mp3",
+        "path": "/home-podcasts/HP 2/03.mp3",
+        "relPath": "03.mp3",
+        "size": 120517,
+        "mtimeMs": 1792185842097,
+        "ctimeMs": 1792185842100,
+        "birthtimeMs": 1792185842063
+       },
+       "addedAt": 1792185842300,
+       "updatedAt": 1792185842300,
+       "trackNumFromMeta": null,
+       "discNumFromMeta": null,
+       "trackNumFromFilename": null,
+       "discNumFromFilename": null,
+       "manuallyVerified": false,
+       "exclude": false,
+       "error": null,
+       "format": "MP2/3 (MPEG audio layer 2/3)",
+       "duration": 30,
+       "bitRate": 32000,
+       "language": null,
+       "codec": "mp3",
+       "timeBase": "1/14112000",
+       "channels": 1,
+       "channelLayout": "mono",
+       "chapters": [],
+       "embeddedCoverArt": null,
+       "metaTags": {
+        "tagTitle": "Signal End",
+        "tagEncoder": "Lavf62.12.102"
+       },
+       "mimeType": "audio/mpeg"
+      },
+      "publishedAt": null,
+      "addedAt": 1792185842305,
+      "updatedAt": 1792185842305
+     }
+    }
+   }
+  },
+  {
+   "name": "podcasts limit 3",
+   "mediaType": "podcast",
+   "limit": 3,
+   "settings": {
+    "onlyShowLaterBooksInContinueSeries": false,
+    "hideSingleBookSeries": true
+   },
+   "shelves": [
+    {
+     "id": "continue-listening",
+     "label": "Continue Listening",
+     "labelStringKey": "LabelContinueListening",
+     "type": "episode",
+     "total": 2,
+     "entities": [
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "adbb72ab-eb81-48b0-9b50-ed9dc0efd353"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "682a59a0-6d8b-4e82-9ff6-bf977e8be8fb"
+      }
+     ]
+    },
+    {
+     "id": "newest-episodes",
+     "label": "Newest Episodes",
+     "labelStringKey": "LabelNewestEpisodes",
+     "type": "episode",
+     "total": 6,
+     "entities": [
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "f6a79bdf-38bc-40a0-82b1-553cf2c5ccbc"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "d461bcfb-ef98-4ff1-a59b-b131b4f26047"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "682a59a0-6d8b-4e82-9ff6-bf977e8be8fb"
+      }
+     ]
+    },
+    {
+     "id": "recently-added",
+     "label": "Recently Added",
+     "labelStringKey": "LabelRecentlyAdded",
+     "type": "podcast",
+     "total": 2,
+     "entities": [
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d"
+      },
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd"
+      }
+     ]
+    },
+    {
+     "id": "listen-again",
+     "label": "Listen Again",
+     "labelStringKey": "LabelListenAgain",
+     "type": "episode",
+     "total": 2,
+     "entities": [
+      {
+       "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+       "episodeId": "e6ef6aa2-be0e-4173-8a2c-4c7f6a9d7004"
+      },
+      {
+       "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+       "episodeId": "d461bcfb-ef98-4ff1-a59b-b131b4f26047"
+      }
+     ]
+    }
+   ],
+   "sample": {
+    "continue-listening": {
+     "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+     "ino": "1441876",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 2",
+     "relPath": "HP 2",
+     "isFile": false,
+     "mtimeMs": 1792185842100,
+     "ctimeMs": 1792185842100,
+     "birthtimeMs": 1792185841927,
+     "addedAt": 1792185842301,
+     "updatedAt": 1792185845368,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "metadata": {
+       "title": "Second Signal",
+       "author": "Другой Автор",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech",
+        "News"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500002",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Second Signal"
+      },
+      "coverPath": null,
+      "tags": [],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 0
+     },
+     "numFiles": 3,
+     "size": 361553,
+     "recentEpisode": {
+      "libraryItemId": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+      "podcastId": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "id": "adbb72ab-eb81-48b0-9b50-ed9dc0efd353",
+      "oldEpisodeId": null,
+      "index": null,
+      "season": null,
+      "episode": null,
+      "episodeType": null,
+      "title": "Deep Water",
+      "subtitle": null,
+      "description": null,
+      "enclosure": null,
+      "guid": null,
+      "pubDate": null,
+      "chapters": [],
+      "audioFile": {
+       "index": 1,
+       "ino": "1441878",
+       "metadata": {
+        "filename": "02.mp3",
+        "ext": ".mp3",
+        "path": "/home-podcasts/HP 2/02.mp3",
+        "relPath": "02.mp3",
+        "size": 120517,
+        "mtimeMs": 1792185842034,
+        "ctimeMs": 1792185842037,
+        "birthtimeMs": 1792185842002
+       },
+       "addedAt": 1792185842300,
+       "updatedAt": 1792185842300,
+       "trackNumFromMeta": null,
+       "discNumFromMeta": null,
+       "trackNumFromFilename": null,
+       "discNumFromFilename": null,
+       "manuallyVerified": false,
+       "exclude": false,
+       "error": null,
+       "format": "MP2/3 (MPEG audio layer 2/3)",
+       "duration": 30,
+       "bitRate": 32000,
+       "language": null,
+       "codec": "mp3",
+       "timeBase": "1/14112000",
+       "channels": 1,
+       "channelLayout": "mono",
+       "chapters": [],
+       "embeddedCoverArt": null,
+       "metaTags": {
+        "tagTitle": "Deep Water",
+        "tagEncoder": "Lavf62.12.102"
+       },
+       "mimeType": "audio/mpeg"
+      },
+      "publishedAt": null,
+      "addedAt": 1792185842305,
+      "updatedAt": 1792185842305
+     }
+    },
+    "newest-episodes": {
+     "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+     "ino": "1441872",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 1",
+     "relPath": "HP 1",
+     "isFile": false,
+     "mtimeMs": 1792185841926,
+     "ctimeMs": 1792185841926,
+     "birthtimeMs": 1792185841757,
+     "addedAt": 1792185842415,
+     "updatedAt": 1792185845380,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+      "metadata": {
+       "title": "Home Pod One",
+       "author": "Pod Host",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500001",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Home Pod One"
+      },
+      "coverPath": null,
+      "tags": [
+       "weekly"
+      ],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 0
+     },
+     "numFiles": 3,
+     "size": 361566,
+     "recentEpisode": {
+      "libraryItemId": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+      "podcastId": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+      "id": "f6a79bdf-38bc-40a0-82b1-553cf2c5ccbc",
+      "oldEpisodeId": null,
+      "index": null,
+      "season": null,
+      "episode": null,
+      "episodeType": null,
+      "title": "Финал Сезона",
+      "subtitle": null,
+      "description": null,
+      "enclosure": null,
+      "guid": null,
+      "pubDate": null,
+      "chapters": [],
+      "audioFile": {
+       "index": 1,
+       "ino": "1441875",
+       "metadata": {
+        "filename": "03.mp3",
+        "ext": ".mp3",
+        "path": "/home-podcasts/HP 1/03.mp3",
+        "relPath": "03.mp3",
+        "size": 120530,
+        "mtimeMs": 1792185841924,
+        "ctimeMs": 1792185841926,
+        "birthtimeMs": 1792185841893
+       },
+       "addedAt": 1792185842414,
+       "updatedAt": 1792185842414,
+       "trackNumFromMeta": null,
+       "discNumFromMeta": null,
+       "trackNumFromFilename": null,
+       "discNumFromFilename": null,
+       "manuallyVerified": false,
+       "exclude": false,
+       "error": null,
+       "format": "MP2/3 (MPEG audio layer 2/3)",
+       "duration": 30,
+       "bitRate": 32000,
+       "language": null,
+       "codec": "mp3",
+       "timeBase": "1/14112000",
+       "channels": 1,
+       "channelLayout": "mono",
+       "chapters": [],
+       "embeddedCoverArt": null,
+       "metaTags": {
+        "tagTitle": "Финал Сезона",
+        "tagEncoder": "Lavf62.12.102"
+       },
+       "mimeType": "audio/mpeg"
+      },
+      "publishedAt": null,
+      "addedAt": 1792185842417,
+      "updatedAt": 1792185842417
+     }
+    },
+    "recently-added": {
+     "id": "ce1004ae-0f2f-4eea-8bb4-87acf04bb95d",
+     "ino": "1441872",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 1",
+     "relPath": "HP 1",
+     "isFile": false,
+     "mtimeMs": 1792185841926,
+     "ctimeMs": 1792185841926,
+     "birthtimeMs": 1792185841757,
+     "addedAt": 1792185842415,
+     "updatedAt": 1792185845380,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "13b0a0a1-2c6b-4a7b-affd-b0c456fccd57",
+      "metadata": {
+       "title": "Home Pod One",
+       "author": "Pod Host",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500001",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Home Pod One"
+      },
+      "coverPath": null,
+      "tags": [
+       "weekly"
+      ],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 361566
+     },
+     "numFiles": 3,
+     "size": 361566,
+     "numEpisodesIncomplete": 2
+    },
+    "listen-again": {
+     "id": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+     "ino": "1441876",
+     "oldLibraryItemId": null,
+     "libraryId": "84320dcf-7f2c-4bde-8d76-836a0f773048",
+     "folderId": "a384535f-187f-45c2-b376-ea0e4d2db7e7",
+     "path": "/home-podcasts/HP 2",
+     "relPath": "HP 2",
+     "isFile": false,
+     "mtimeMs": 1792185842100,
+     "ctimeMs": 1792185842100,
+     "birthtimeMs": 1792185841927,
+     "addedAt": 1792185842301,
+     "updatedAt": 1792185845368,
+     "isMissing": false,
+     "isInvalid": false,
+     "mediaType": "podcast",
+     "media": {
+      "id": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "metadata": {
+       "title": "Second Signal",
+       "author": "Другой Автор",
+       "description": null,
+       "releaseDate": null,
+       "genres": [
+        "Tech",
+        "News"
+       ],
+       "feedUrl": null,
+       "imageUrl": null,
+       "itunesPageUrl": null,
+       "itunesId": "1234500002",
+       "itunesArtistId": null,
+       "explicit": false,
+       "language": null,
+       "type": "episodic",
+       "titleIgnorePrefix": "Second Signal"
+      },
+      "coverPath": null,
+      "tags": [],
+      "numEpisodes": 0,
+      "autoDownloadEpisodes": false,
+      "autoDownloadSchedule": "0 * * * *",
+      "lastEpisodeCheck": null,
+      "maxEpisodesToKeep": 0,
+      "maxNewEpisodesToDownload": 3,
+      "size": 0
+     },
+     "numFiles": 3,
+     "size": 361553,
+     "recentEpisode": {
+      "libraryItemId": "fe4055d7-55fb-48d5-ba27-42550ff630dd",
+      "podcastId": "34e41693-4c08-4b99-a2a1-cb846b20bb2c",
+      "id": "e6ef6aa2-be0e-4173-8a2c-4c7f6a9d7004",
+      "oldEpisodeId": null,
+      "index": null,
+      "season": null,
+      "episode": null,
+      "episodeType": null,
+      "title": "Signal End",
+      "subtitle": null,
+      "description": null,
+      "enclosure": null,
+      "guid": null,
+      "pubDate": null,
+      "chapters": [],
+      "audioFile": {
+       "index": 1,
+       "ino": "1441879",
+       "metadata": {
+        "filename": "03.mp3",
+        "ext": ".mp3",
+        "path": "/home-podcasts/HP 2/03.mp3",
+        "relPath": "03.mp3",
+        "size": 120517,
+        "mtimeMs": 1792185842097,
+        "ctimeMs": 1792185842100,
+        "birthtimeMs": 1792185842063
+       },
+       "addedAt": 1792185842300,
+       "updatedAt": 1792185842300,
+       "trackNumFromMeta": null,
+       "discNumFromMeta": null,
+       "trackNumFromFilename": null,
+       "discNumFromFilename": null,
+       "manuallyVerified": false,
+       "exclude": false,
+       "error": null,
+       "format": "MP2/3 (MPEG audio layer 2/3)",
+       "duration": 30,
+       "bitRate": 32000,
+       "language": null,
+       "codec": "mp3",
+       "timeBase": "1/14112000",
+       "channels": 1,
+       "channelLayout": "mono",
+       "chapters": [],
+       "embeddedCoverArt": null,
+       "metaTags": {
+        "tagTitle": "Signal End",
+        "tagEncoder": "Lavf62.12.102"
+       },
+       "mimeType": "audio/mpeg"
+      },
+      "publishedAt": null,
+      "addedAt": 1792185842305,
+      "updatedAt": 1792185842305
+     }
+    }
+   }
+  }
+ ]
+}

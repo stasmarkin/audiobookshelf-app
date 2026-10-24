@@ -28,28 +28,28 @@
 
       <div class="flex items-center pt-2">
         <!-- Play/Pause Button -->
-        <div class="episode-play-control h-9 px-4 border border-border hover:bg-white hover:bg-opacity-10 rounded-full flex items-center justify-center cursor-pointer" :class="userIsFinished ? 'text-fg text-opacity-40' : ''" @click.stop="playClick">
+        <div class="episode-play-control h-9 px-4 border border-border hover:bg-white hover:bg-opacity-10 rounded-full flex items-center justify-center cursor-pointer" :class="[userIsFinished ? 'text-fg text-opacity-40' : '', notAvailableOffline && !streamIsPlaying ? 'opacity-50' : '']" :aria-disabled="notAvailableOffline && !streamIsPlaying" @click.stop="playClick">
           <span v-if="!playerIsStartingForThisMedia" class="material-symbols text-2xl fill leading-none" :class="streamIsPlaying ? '' : 'text-success'">
             {{ streamIsPlaying ? 'pause' : 'play_arrow' }}
           </span>
           <svg v-else class="animate-spin" style="width: 22px; height: 22px" viewBox="0 0 24 24">
             <path fill="currentColor" d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
           </svg>
-          <p class="pl-2 pr-1 text-sm font-semibold">{{ timeRemaining }}</p>
+          <p class="pl-2 pr-1 text-sm font-semibold">{{ notAvailableOffline && !streamIsPlaying ? notAvailableOfflineLabel() : timeRemaining }}</p>
         </div>
 
         <!-- Read Status Button -->
         <ui-read-icon-btn :disabled="isProcessingReadUpdate" :is-read="userIsFinished" borderless class="mx-1" @click="toggleFinished" />
 
         <!-- Add to Playlist Button -->
-        <button v-if="!isLocal" class="mx-1.5" @click.stop="addToPlaylist">
+        <button v-if="!isLocal" class="mx-1.5 disabled:opacity-50" :disabled="!isServerOnline" :aria-label="isServerOnline ? null : requiresServerLabel()" @click.stop="addToPlaylist">
           <span class="material-symbols text-2xl leading-none">playlist_add</span>
         </button>
 
         <!-- Download Section -->
         <div v-if="userCanDownload" class="flex items-center">
           <span v-if="isLocal" class="material-symbols px-2 text-success text-2xl leading-none">audio_file</span>
-          <span v-else-if="!localEpisode" class="material-symbols mx-1.5 text-2xl leading-none" :class="downloadItem || pendingDownload ? 'animate-bounce text-warning text-opacity-75' : ''" @click.stop="downloadClick">
+          <span v-else-if="!localEpisode" class="material-symbols mx-1.5 text-2xl leading-none" :class="[downloadItem || pendingDownload ? 'animate-bounce text-warning text-opacity-75' : '', { 'opacity-50': !isServerOnline }]" :aria-disabled="!isServerOnline" :aria-label="isServerOnline ? null : requiresServerLabel()" @click.stop="downloadClick">
             {{ downloadItem || pendingDownload ? 'downloading' : 'download' }}
           </span>
           <span v-else class="material-symbols px-2 text-success text-2xl leading-none">download_done</span>
@@ -57,6 +57,7 @@
 
         <!-- Spacer to push elements left -->
         <div class="flex-grow" />
+        <p v-if="isServerAway && !isLocal" class="requires-server-label text-xs text-fg-muted">{{ requiresServerLabel() }}</p>
       </div>
     </div>
 
@@ -72,6 +73,7 @@
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import CellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
   props: {
@@ -94,7 +96,7 @@ export default {
       processing: false
     }
   },
-  mixins: [CellularPermissionHelpers],
+  mixins: [CellularPermissionHelpers, requiresServer],
   computed: {
     bookCoverAspectRatio() {
       return this.$store.getters['libraries/getBookCoverAspectRatio']
@@ -181,6 +183,10 @@ export default {
     },
     podcast() {
       return this.episode.podcast || {}
+    },
+    /** Offline only this episode downloaded plays (the row knows the episode's copy, not the podcast's). */
+    notAvailableOffline() {
+      return this.isNotAvailableOffline({ isLocal: this.isLocal }, this.localEpisode ? { media: { episodes: [this.localEpisode] } } : null, this.episode.id)
     }
   },
   methods: {
@@ -188,6 +194,7 @@ export default {
       this.$router.push(`/item/${this.libraryItemId}/${this.episode.id}`)
     },
     addToPlaylist() {
+      if (!this.isServerOnline) return
       this.$emit('addToPlaylist', this.episode)
     },
     async selectFolder() {
@@ -198,6 +205,7 @@ export default {
       return folderObj
     },
     async downloadClick() {
+      if (!this.isServerOnline) return
       if (this.downloadItem || this.pendingDownload) return
 
       const hasPermission = await this.checkCellularPermission('download')
@@ -253,7 +261,7 @@ export default {
       }
     },
     async playClick() {
-      if (this.playerIsStartingPlayback) return
+      if (this.playerIsStartingPlayback || (this.notAvailableOffline && !this.streamIsPlaying)) return
 
       await this.$hapticsImpact()
       if (this.streamIsPlaying) {
@@ -281,7 +289,11 @@ export default {
       await this.$hapticsImpact()
 
       this.isProcessingReadUpdate = true
-      if (this.isLocal || this.localEpisode) {
+      if (!this.isLocal) {
+        // Works offline; native also updates a downloaded copy's own progress
+        await this.$absData.markFinished({ libraryItemId: this.libraryItemId, episodeId: this.episode.id, isFinished: !this.userIsFinished }).catch((error) => console.error('[LatestEpisodeRow] Could not save finished', error))
+        this.isProcessingReadUpdate = false
+      } else {
         const isFinished = !this.userIsFinished
         const localLibraryItemId = this.isLocal ? this.libraryItemId : this.localLibraryItemId
         const localEpisodeId = this.isLocal ? this.episode.id : this.localEpisode.id
@@ -301,19 +313,6 @@ export default {
           }
         }
         this.isProcessingReadUpdate = false
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        this.$nativeHttp
-          .patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload)
-          .catch((error) => {
-            console.error('Failed', error)
-            this.$toast.error(`Failed to mark as ${updatePayload.isFinished ? 'Finished' : 'Not Finished'}`)
-          })
-          .finally(() => {
-            this.isProcessingReadUpdate = false
-          })
       }
     }
   }

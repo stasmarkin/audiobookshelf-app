@@ -300,7 +300,7 @@ test('errors carry no credentials', async () => {
 function fakeStore(initial = { id: 'server-a', address: 'https://a.test.invalid', token: 'access-0' }) {
   const subscribers = []
   const store = {
-    state: { user: { serverConnectionConfig: initial.id ? { id: initial.id, address: initial.address } : null, accessToken: initial.token } },
+    state: { serverState: 'online', user: { serverConnectionConfig: initial.id ? { id: initial.id, address: initial.address } : null, accessToken: initial.token } },
     getters: {},
     dispatched: [],
     commit(type, payload) {
@@ -310,11 +310,13 @@ function fakeStore(initial = { id: 'server-a', address: 'https://a.test.invalid'
         store.state.user.accessToken = null
         store.state.user.serverConnectionConfig = null
       }
+      if (type === 'setServerState') store.state.serverState = payload
       subscribers.forEach((fn) => fn({ type, payload }))
     },
     async dispatch(type) {
       store.dispatched.push(type)
       if (type === 'user/logout') store.commit('user/logout')
+      if (type === 'user/revokeSession') store.commit('user/setAccessToken', null)
     },
     subscribe: (fn) => subscribers.push(fn)
   }
@@ -350,7 +352,9 @@ async function app({ store = fakeStore() } = {}) {
   const inject = (name, value) => (ctx[`$${name}`] = value)
   const renewalPlugin = await loadPlugin('../plugins/authRenewal.js', { AbsDatabase: { refreshAccessToken: ({ serverConnectionConfigId }) => native.refresh(serverConnectionConfigId) }, createAuthRenewal })
   renewalPlugin(ctx, inject)
-  const nativeHttpPlugin = await loadPlugin('../plugins/nativeHttp.js', { CapacitorHttp: http.CapacitorHttp, isRenewableUrl })
+  // Reachability reports go to native AbsData (covered by dataService.test.mjs); here they are ignored
+  const AbsData = { reportServerResponse: async () => {}, reportServerUnreachable: async () => {} }
+  const nativeHttpPlugin = await loadPlugin('../plugins/nativeHttp.js', { CapacitorHttp: http.CapacitorHttp, isRenewableUrl, AbsData })
   nativeHttpPlugin(ctx, inject)
   return { ctx, store, native, http, location }
 }
@@ -405,15 +409,54 @@ test('a server error after renewal fails only that request and does not sign out
   assert.deepEqual(store.dispatched, [])
 })
 
-test('a refused refresh token signs out once and shows the sign-in screen', async () => {
+test('a refused refresh token revokes the session once and stays in the app as unauthorized', async () => {
   const { ctx, store, native, location } = await app()
   const results = Promise.all([ctx.$nativeHttp.get('/api/me').catch((e) => e.kind), ctx.$nativeHttp.get('/api/libraries').catch((e) => e.kind)])
   await flush(30)
   native.calls[0].resolve({ status: 'rejected' })
   assert.deepEqual(await results, ['rejected', 'rejected'])
   await flush(30)
-  assert.deepEqual(store.dispatched, ['user/logout'])
-  assert.equal(location.href, '/connect?error=refreshTokenFailed&serverConnectionConfigId=server-a')
+  assert.deepEqual(store.dispatched, ['user/revokeSession'], 'not user/logout')
+  assert.equal(store.state.serverState, 'unauthorized')
+  assert.equal(location.href, '/bookshelf', 'no jump to /connect')
+  assert.equal(store.getters['user/getServerConnectionConfigId'], 'server-a', 'the server stays selected')
+})
+
+test('revoked session keeps the library context', async () => {
+  let src = await read('../store/user.js')
+  src = src.replace(/^import .*\n/gm, '').replace(/^export const (\w+) =/gm, 'exports.$1 =')
+  const exports = {}
+  new Function('exports', 'AbsLogger', 'Browser', src)(exports, { info: async () => {} }, {})
+  const state = exports.state()
+  state.user = { id: 'user-1', permissions: { download: true } }
+  state.accessToken = 'access-0'
+  state.serverConnectionConfig = { id: 'server-a' }
+  state.cachedUser = { id: 'user-1', permissions: { download: true } }
+  state.mediaProgress = [{ libraryItemId: 'li1', currentTime: 30 }]
+  state.bookmarks = [{ libraryItemId: 'li1', time: 1, title: 'A' }]
+  const seen = { commits: [], invalidated: 0, socketLogout: 0, removedLibrary: 0 }
+  const commit = (type, payload, opts) => {
+    seen.commits.push(opts?.root ? `root:${type}` : type)
+    exports.mutations[type]?.(state, payload)
+  }
+  const ctx = {
+    $authRenewal: { invalidate: () => seen.invalidated++ },
+    $socket: { logout: () => seen.socketLogout++ },
+    $localStore: { removeLastLibraryId: () => seen.removedLibrary++ },
+    $db: { logout: async () => assert.fail('the saved server is not signed out') }
+  }
+  await exports.actions.revokeSession.call(ctx, { state, commit })
+
+  assert.equal(state.user, null)
+  assert.equal(state.accessToken, null)
+  assert.equal(seen.invalidated, 1)
+  assert.equal(seen.socketLogout, 1)
+  assert.equal(seen.removedLibrary, 0, 'the last library is kept')
+  assert.ok(!seen.commits.some((c) => c.startsWith('root:') || c === 'logout'), 'no library reset, no logout')
+  assert.deepEqual(state.serverConnectionConfig, { id: 'server-a' })
+  assert.equal(state.mediaProgress.length, 1)
+  assert.equal(state.bookmarks.length, 1)
+  assert.equal(exports.getters.getUserCanDownload(state), true, 'rights come from the cached user')
 })
 
 test('a transient renewal failure (offline) fails the requests but keeps the user signed in', async () => {

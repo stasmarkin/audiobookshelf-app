@@ -8,9 +8,12 @@
 
       <div class="w-full overflow-y-auto">
         <template v-for="item in navItems">
-          <button v-if="item.action" :key="item.text" :tabindex="show ? 0 : -1" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg-muted" @click="clickAction(item.action)">
+          <button v-if="item.action" :key="item.text" :tabindex="show ? 0 : -1" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg-muted disabled:opacity-50" :disabled="item.requiresServer && !isServerOnline" @click="clickAction(item.action)">
             <span class="material-symbols fill text-lg">{{ item.icon }}</span>
-            <p class="pl-4">{{ item.text }}</p>
+            <div class="pl-4 text-left">
+              <p>{{ item.text }}</p>
+              <p v-if="item.requiresServer && isServerAway" class="requires-server-label text-xs">{{ requiresServerLabel() }}</p>
+            </div>
           </button>
           <nuxt-link v-else :to="item.to" :key="item.text" :tabindex="show ? 0 : -1" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg" :class="currentRoutePath.startsWith(item.to) ? 'bg-bg-hover/50' : 'text-fg-muted'">
             <span class="material-symbols fill text-lg">{{ item.icon }}</span>
@@ -37,8 +40,10 @@
 
 <script>
 import TouchEvent from '@/objects/TouchEvent'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   data() {
     return {
       touchEvent: null
@@ -142,7 +147,8 @@ export default {
         items.push({
           icon: 'language',
           text: this.$strings.ButtonGoToWebClient,
-          action: 'openWebClient'
+          action: 'openWebClient',
+          requiresServer: true
         })
 
         items.push({
@@ -165,10 +171,14 @@ export default {
         await this.logout()
         this.$router.push('/connect')
       } else if (action === 'openWebClient') {
-        this.show = false
-        let path = `/library/${this.$store.state.libraries.currentLibraryId}`
-        await this.$store.dispatch('user/openWebClient', path)
+        await this.openWebClient()
       }
+    },
+    async openWebClient() {
+      if (!this.isServerOnline) return
+      this.show = false
+      let path = `/library/${this.$store.state.libraries.currentLibraryId}`
+      await this.$store.dispatch('user/openWebClient', path)
     },
     clickBackground() {
       this.show = false

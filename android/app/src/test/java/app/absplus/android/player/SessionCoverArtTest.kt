@@ -10,6 +10,12 @@ import app.absplus.android.data.LocalLibraryItem
 import app.absplus.android.data.MediaType
 import app.absplus.android.data.MediaTypeMetadata
 import app.absplus.android.data.PlaybackSession
+import app.absplus.android.managers.DbManager
+import app.absplus.android.media.COVER_CACHE_DIR
+import app.absplus.android.media.CoverCache
+import app.absplus.android.media.CoverStore
+import app.absplus.android.sync.ServerState
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,7 +55,29 @@ class SessionCoverArtTest {
   @After fun tearDown() {
     CoverArt.decoder = platformDecoder
     CoverArt.reset()
+    CoverCache.setForTest(null)
+    File(ctx.filesDir, COVER_CACHE_DIR).deleteRecursively()
   }
+
+  private val server = app.absplus.android.data.ServerConnectionConfig("config-1", 0, "Home", "https://abs.example", "2.20.0", "u", "user", "tok", null)
+
+  private fun coverCache(state: ServerState = ServerState.OFFLINE): CoverStore {
+    resetFileProviderRoots()
+    val store = CoverStore(File(ctx.filesDir, COVER_CACHE_DIR))
+    CoverCache.setForTest(CoverCache(store, { _, _, _ -> null }, { server }, { state }, { _, _ -> null }, scope))
+    return store
+  }
+
+  private fun libraryItem(id: String, updatedAt: Long) = app.absplus.android.data.LibraryItem(
+    id, "ino", "lib", "folder", "/p", "p", 0L, 0L, 0L, 0L, updatedAt, null, null, false, false, "book",
+    app.absplus.android.data.MediaType(MediaTypeMetadata("Book", false), null), null, null, null, null, null
+  )
+
+  private fun streamedSession(id: String) = PlaybackSession(
+    "session-$id", "user", id, null, "book", MediaTypeMetadata("Book", false), DeviceInfo("d", "m", "x", 35, "0"),
+    emptyList(), "Book", "Author", "/metadata/items/$id/cover.jpg", 360.0, 0, 0L, 0L, 0L, mutableListOf(), 0.0, null, null, null,
+    "config-1", "https://abs.example", null
+  )
 
   private fun localSession(id: String, cover: Uri?): PlaybackSession {
     val item = LocalLibraryItem(
@@ -135,5 +163,65 @@ class SessionCoverArtTest {
     runBlocking { job.join() }
     assertFalse(resolved)
     assertTrue(job.isCancelled)
+  }
+
+  @Test fun streamedSessionUsesTheCachedCover() {
+    DbManager.initialize(ctx)
+    val store = coverCache()
+
+    val withoutCache = streamedSession("li_s1").getCoverUri(ctx)
+    assertTrue("nothing cached: the server URL", withoutCache.toString().startsWith("https://abs.example/api/items/li_s1/cover"))
+
+    store.put("li_s1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+    val cached = streamedSession("li_s1").getCoverUri(ctx)
+    assertEquals("content", cached.scheme)
+    assertTrue(cached.toString().contains("/cover_cache/li_s1_5.jpg"))
+  }
+
+  @Test fun copyCoverStillWins() {
+    val store = coverCache()
+    store.put("li_c1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+
+    assertEquals(coverFile("li_c1"), localSession("li_c1", coverFile("li_c1")).getCoverUri(ctx))
+  }
+
+  @Test fun cachedCoverIsDecodedLocally() {
+    val store = coverCache()
+    store.put("li_d1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+    CoverArt.decoder = { _, _ -> bitmap }
+
+    val session = streamedSession("li_d1")
+    assertTrue(resolve(session))
+    assertNotNull(art(session))
+  }
+
+  @Test fun vanishedCachedCoverFallsBackToTheDefault() {
+    val store = coverCache()
+    store.put("li_v1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!.file.delete()
+    CoverArt.decoder = { _, _ -> throw FileNotFoundException("gone") }
+
+    val session = streamedSession("li_v1")
+    assertTrue(resolve(session))
+    assertEquals(CoverArt.defaultUri().toString(), iconUri(session))
+  }
+
+  @Test fun onlineAnOlderCachedCoverGivesWayToTheServer() {
+    DbManager.initialize(ctx)
+    coverCache(ServerState.ONLINE).put("li_o1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }
+    val session = streamedSession("li_o1").apply { libraryItem = libraryItem("li_o1", 9) }
+    assertTrue("online, the cover changed since it was cached", session.getCoverUri(ctx).toString().startsWith("https://abs.example/api/items/li_o1/cover"))
+
+    coverCache(ServerState.OFFLINE)
+    assertEquals("offline the older cover is shown", "content", session.getCoverUri(ctx).scheme)
+
+    coverCache(ServerState.UNKNOWN)
+    assertEquals("a widget-started process does not know the server yet: the older cover", "content", session.getCoverUri(ctx).scheme)
+
+    coverCache(ServerState.UNAUTHORIZED)
+    assertEquals("Glide would fetch without the custom headers: the older cover", "content", session.getCoverUri(ctx).scheme)
+
+    coverCache(ServerState.ONLINE)
+    assertEquals("the same version online stays cached", "content", streamedSession("li_o1").apply { libraryItem = libraryItem("li_o1", 5) }.getCoverUri(ctx).scheme)
+    assertEquals("without the item's updatedAt nothing changes", "content", streamedSession("li_o1").getCoverUri(ctx).scheme)
   }
 }

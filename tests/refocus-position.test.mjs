@@ -42,15 +42,26 @@ async function loadContainer() {
   return { component: sandbox.component, sandbox }
 }
 
-function makeContext(component, { native, server } = {}) {
-  const calls = { seek: [], sync: [], native: 0 }
+// $absData.applyServerProgress stands for native's merge: by default it takes only a newer value than the saved one;
+// `applied` forces its answer. Not taken, it answers the row it holds: `rowTime` (by default where the player is, as
+// after this device's own last tick) and `protected` (an unsent change or listening session). calls.sync: values taken
+function makeContext(component, { native, server, applied, rowTime, protected: isProtected = false } = {}) {
+  const calls = { seek: [], sync: [], asked: [], db: [], native: 0 }
   const ctx = {
     currentPlaybackSession: session,
     currentTime: SAVED,
     $store: { getters: { 'globals/getLocalMediaProgressById': (id) => (id === 'local_oz' ? { id: 'progress-1', currentTime: SAVED, lastUpdate: 2000 } : null) } },
     onPlaybackEnded: async () => {},
     getServerMediaProgressForCurrentSession: async () => server || { currentTime: SAVED, lastUpdate: 1000 },
-    syncServerMediaProgressWithLocalMediaProgress: async (...args) => calls.sync.push(args)
+    $absData: {
+      applyServerProgress: async ({ progress }) => {
+        calls.asked.push(progress)
+        const taken = applied ?? progress.lastUpdate > 2000
+        if (taken) calls.sync.push(progress)
+        return { applied: taken, protected: isProtected, currentTime: taken ? progress.currentTime : rowTime ?? ctx.$refs.audioPlayer.currentTime }
+      }
+    },
+    $db: new Proxy({}, { get: (_, name) => (...args) => calls.db.push([name, args]) })
   }
   ctx.$refs = {
     audioPlayer: {
@@ -125,10 +136,49 @@ test('deviceFocused keeps its other behaviour: no work while playing or unfocuse
   const remote = makeContext(component, { server: { currentTime: 9000, lastUpdate: 3000 } })
   await component.methods.deviceFocused.call(remote.ctx, true)
   assert.deepEqual(remote.calls.seek, [9000])
-  assert.equal(remote.calls.sync.length, 1)
+  assert.equal(remote.calls.sync.length, 1, 'taken through $absData.applyServerProgress')
+  assert.deepEqual(remote.calls.db, [], 'nothing written to Paper from JS')
 })
 
-test('Bookmark timestamp: the modal posts the container time, which after refocus is the live paused position', async () => {
+test('refocus applies server progress through Room and seeks only if accepted', async () => {
+  const { component, sandbox } = await loadContainer()
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
+  const newer = { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }
+  // The device has an unsent change of this item: native keeps it although the server value is newer
+  const kept = makeContext(component, { server: newer, applied: false, protected: true, rowTime: SAVED + 50 })
+  await component.methods.deviceFocused.call(kept.ctx, true)
+  assert.deepEqual(kept.calls.asked, [newer], 'the server value is handed to native')
+  assert.deepEqual(kept.calls.seek, [], 'no seek to a value native did not take')
+  assert.deepEqual(kept.calls.db, [])
+
+  const taken = makeContext(component, { server: newer, applied: true })
+  await component.methods.deviceFocused.call(taken.ctx, true)
+  assert.deepEqual(taken.calls.seek, [9000])
+})
+
+test('refocus after a sync already took the server position still moves the paused player', async () => {
+  const { component, sandbox } = await loadContainer()
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
+  // The reconcile on return wrote 9000 into Room first: the same value is no longer "taken", yet the player is behind
+  const synced = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }, applied: false, rowTime: 9000 })
+  await component.methods.deviceFocused.call(synced.ctx, true)
+  assert.deepEqual(synced.calls.seek, [9000])
+
+  // Moved on while paused: native wrote the seek into its row (MediaProgressSyncer.recordSeek), so the row is where
+  // the player is and nothing moves it back to the last tick
+  const sought = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 6000, lastUpdate: 1500 }, applied: false, rowTime: 7500 })
+  sought.ctx.$refs.audioPlayer.currentTime = 7500
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => ({ playbackSession: { id: 'session-1' }, currentTime: 7500 })
+  await component.methods.deviceFocused.call(sought.ctx, true)
+  assert.deepEqual(sought.calls.seek, [], 'a seek made while paused is kept')
+  sandbox.AbsAudioPlayer.getCurrentPlaybackState = async () => null
+
+  const pending = makeContext(component, { server: { libraryItemId: 'item-1', currentTime: 9000, lastUpdate: 3000 }, applied: false, rowTime: 9000, protected: true })
+  await component.methods.deviceFocused.call(pending.ctx, true)
+  assert.deepEqual(pending.calls.seek, [], 'the device keeps its own position')
+})
+
+test('Bookmark timestamp: the modal saves the container time, which after refocus is the live paused position', async () => {
   const container = await read('../components/app/AudioPlayerContainer.vue')
   assert.match(container, /@updateTime="\(t\) => \(currentTime = t\)"/)
   assert.match(container, /<modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="currentTime"/)
@@ -139,21 +189,25 @@ test('Bookmark timestamp: the modal posts the container time, which after refocu
     .replace('export default', 'globalThis.component =')
   const sandbox = { Dialog: {}, console }
   vm.runInNewContext(script, sandbox)
-  const posts = []
+  const added = []
   const ctx = {
     currentTime: LIVE,
     libraryItemId: 'item-1',
+    serverConfigId: null,
     newBookmarkTitle: 'check',
     showBookmarkTitleInput: true,
-    $nativeHttp: { post: (url, body) => (posts.push([url, body]), Promise.resolve()) },
+    $absData: { addBookmark: (args) => (added.push(args), Promise.resolve()) },
     $toast: { success() {}, error() {} },
     $strings: {},
     $formatDate: () => ''
   }
   Object.defineProperty(ctx, 'show', { set() {}, get: () => true })
   sandbox.component.methods.submitCreateBookmark.call(ctx)
-  assert.deepEqual(JSON.parse(JSON.stringify(posts)), [['/api/me/item/item-1/bookmark', { title: 'check', time: Math.floor(LIVE) }]])
-  assert.equal(posts[0][1].time, 7107)
+  assert.equal(added.length, 1)
+  assert.equal(added[0].libraryItemId, 'item-1')
+  assert.equal(added[0].title, 'check')
+  assert.equal(added[0].time, Math.floor(LIVE))
+  assert.equal(added[0].time, 7107)
 })
 
 test('Layout consumers above the collapsed player follow its projected height (bars: the variable; lists: the page height)', async () => {

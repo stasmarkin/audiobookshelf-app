@@ -4,8 +4,13 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.support.v4.media.MediaBrowserCompat
 import androidx.test.core.app.ApplicationProvider
+import app.absplus.android.data.ItemInProgress
 import app.absplus.android.data.Library
+import app.absplus.android.data.LibraryItem
 import app.absplus.android.data.LibraryStats
+import app.absplus.android.data.MediaType
+import app.absplus.android.data.MediaTypeMetadata
+import app.absplus.android.media.AutoSnapshot
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -72,5 +77,82 @@ class AutoRootMenuTest {
     val first = service.provisionalAutoRootItems()
     first.add(MediaBrowserCompat.MediaItem(first[0].description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE))
     assertEquals(1, service.provisionalAutoRootItems().size)
+  }
+
+  private fun startedBook(id: String) = ItemInProgress(LibraryItem(id, "ino", "lib1", "f", "/$id", id, 1, 1, 1, 1, 1, null, null, false, false, "book",
+    MediaType(MediaTypeMetadata(id, false), null), null, null, null, null, null), null, 1, false)
+
+  private fun snapshot(ready: Set<String> = setOf("lib1"), started: Boolean = true, generation: Long = 1, server: String = "srv") = AutoSnapshot(
+    server, listOf(Library("lib1", "Library lib1", mutableListOf(), "database", "book", null)), ready, emptySet(),
+    if (started) listOf(startedBook("b1")) else emptyList(), emptyMap(), generation)
+
+  @Test fun replicaRootIsCompleteWithoutTheServer() {
+    val snap = snapshot()
+    val root = service.provisionalAutoRootItems(snap)
+    assertEquals(listOf(CONTINUE_ROOT, RECENTLY_ROOT, LIBRARIES_ROOT, DOWNLOADS_ROOT), root.map { it.mediaId })
+    assertTrue(root.all { it.isBrowsable })
+    assertEquals(listOf("lib1"), service.buildAutoTree(snap)[LIBRARIES_ROOT]!!.map { it.description.mediaId })
+    assertEquals(listOf("__RECENTLY__lib1"), service.buildAutoTree(snap)[RECENTLY_ROOT]!!.map { it.description.mediaId })
+    assertEquals(listOf(DOWNLOADS_ROOT), service.provisionalAutoRootItems(null).map { it.mediaId })
+  }
+
+  @Test fun readyLibraryNodesAreServedBeforeTheFirstLoad() {
+    assertTrue(servableWithoutServer("__LIBRARY__lib1__SERIES_LIST", setOf("lib1")))
+    assertFalse(servableWithoutServer("__LIBRARY__lib2__SERIES_LIST", setOf("lib1")))
+    assertTrue(servableWithoutServer("__RECENTLY__lib1__BOOK", setOf("lib1")))
+    assertFalse(servableWithoutServer("__RECENTLY__lib2", setOf("lib1")))
+    assertFalse(servableWithoutServer(CONTINUE_ROOT, emptySet()))
+    assertTrue(servableWithoutServer("local_x", emptySet()))
+    val snap = snapshot()
+    val tree = service.buildAutoTree(snap)
+    (tree[AUTO_BROWSE_ROOT]!! + tree[LIBRARIES_ROOT]!! + tree[RECENTLY_ROOT]!!).map { it.description.mediaId!! }
+      .forEach { assertTrue(it, servableWithoutServer(it, snap.readyLibraryIds)) }
+  }
+
+  @Test fun everySnapshotRootEntryPassesTheGuard() {
+    val snap = snapshot()
+    service.provisionalAutoRootItems(snap).forEach { assertTrue(it.mediaId!!, servableWithoutServer(it.mediaId!!, snap.readyLibraryIds)) }
+  }
+
+  @Test fun anUnreconciledReplicaOffersOnlyWhatTheGuardServes() {
+    val snap = snapshot(ready = emptySet())
+    assertEquals(listOf(DOWNLOADS_ROOT), service.provisionalAutoRootItems(snap).map { it.mediaId })
+  }
+
+  @Test fun searchCacheKeyFollowsTheSnapshot() {
+    val key = autoSearchCacheKey("dune", "srv", 1, true, 0)
+    assertEquals(key, autoSearchCacheKey("dune", "srv", 1, true, 0))
+    assertNotEquals(key, autoSearchCacheKey("dune", "srv", 2, true, 0))
+    assertNotEquals(key, autoSearchCacheKey("dune", "srv2", 1, true, 0))
+    assertNotEquals(key, autoSearchCacheKey("dune2", "srv", 1, true, 0))
+    assertNotEquals("an answer before the server load is not reused after it", key, autoSearchCacheKey("dune", "srv", 1, false, 0))
+    assertNotEquals("a download changed the marks", key, autoSearchCacheKey("dune", "srv", 1, true, 1))
+  }
+
+  @Test fun onlyAutoControllersStartWithoutAChoice() {
+    listOf(ANDROID_AUTO_PKG_NAME, ANDROID_AUTO_SIMULATOR_PKG_NAME, ANDROID_AUTOMOTIVE_PKG_NAME, ANDROID_GSEARCH_PKG_NAME).forEach { assertTrue(it, isAutoController(it)) }
+    listOf(null, "", "android.media.session.MediaController", "com.android.bluetooth", "app.absplus.android", ANDROID_WEARABLE_PKG_NAME)
+      .forEach { assertFalse(it.toString(), isAutoController(it)) }
+  }
+  @Test fun offlineMarkSkipsDownloadsAndBrowsableItems() {
+    fun item(id: String, flags: Int, downloaded: Boolean = false) = MediaBrowserCompat.MediaItem(
+      android.support.v4.media.MediaDescriptionCompat.Builder().setMediaId(id).setTitle("T").setSubtitle("Author").setExtras(android.os.Bundle().apply {
+        if (downloaded) putLong(android.support.v4.media.MediaDescriptionCompat.EXTRA_DOWNLOAD_STATUS, android.support.v4.media.MediaDescriptionCompat.STATUS_DOWNLOADED)
+      }).build(), flags)
+    val label = "Not available offline"
+    val offline = app.absplus.android.sync.ServerState.OFFLINE
+    val stream = withOfflineMark(item("li1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), offline, label)
+    assertEquals("Author · $label", stream.description.subtitle.toString())
+    assertEquals("li1", stream.mediaId)
+    assertTrue(stream.isPlayable)
+    assertEquals("Author", withOfflineMark(item("local_1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), offline, label).description.subtitle)
+    assertEquals("a device copy's episode", "Author", withOfflineMark(item("local_ep_1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), offline, label).description.subtitle)
+    assertEquals("Author", withOfflineMark(item("li2", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE, downloaded = true), offline, label).description.subtitle)
+    assertEquals("Author", withOfflineMark(item("pod1", MediaBrowserCompat.MediaItem.FLAG_BROWSABLE), offline, label).description.subtitle)
+    assertEquals("Author", withOfflineMark(item("li1", MediaBrowserCompat.MediaItem.FLAG_PLAYABLE), app.absplus.android.sync.ServerState.ONLINE, label).description.subtitle)
+  }
+  @Test fun onlyAutoOpensTheReconcileLease() {
+    listOf(ANDROID_AUTO_PKG_NAME, ANDROID_AUTO_SIMULATOR_PKG_NAME, ANDROID_AUTOMOTIVE_PKG_NAME).forEach { assertTrue(it, opensReconcileLease(it)) }
+    listOf(null, ANDROID_GSEARCH_PKG_NAME, ANDROID_WEARABLE_PKG_NAME, "app.absplus.android").forEach { assertFalse(it.toString(), opensReconcileLease(it)) }
   }
 }
