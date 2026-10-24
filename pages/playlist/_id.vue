@@ -56,6 +56,7 @@ async function readPlaylist({ $absData, $db }, id, activeServerConfigId) {
     const ino = item.libraryItem?.ino
     const copy = localLibraryItems.find((lli) => {
       if (activeServerConfigId && lli.serverConnectionConfigId !== activeServerConfigId) return false
+      if (lli.isInvalid) return false
       return lli.libraryItemId === item.libraryItemId || (ino && lli.ino && lli.ino === ino)
     })
     if (!copy) return
@@ -249,11 +250,13 @@ export default {
   mounted() {
     this.loadedServerConfigId = this.$store.state.activeServerConfigId
     this.$eventBus.$on('library-changed', this.libraryChanged)
+    this.$eventBus.$on('local-library-items-changed', this.reload)
     this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },
   beforeDestroy() {
     this.isDestroyed = true
     this.$eventBus.$off('library-changed', this.libraryChanged)
+    this.$eventBus.$off('local-library-items-changed', this.reload)
     if (this.stopDataChanged) this.stopDataChanged()
     this.stopDataChanged = null
     if (this.refreshDebouncer) this.refreshDebouncer.cancel()
