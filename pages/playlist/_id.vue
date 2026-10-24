@@ -199,6 +199,21 @@ export default {
         this.$router.replace('/bookshelf/playlists')
       }
     },
+    // Downloads may have been removed (or added) in the background: re-match every item and drop the gone ones
+    async refreshLocalItems() {
+      const items = this.playlist.items || []
+      if (!items.length) return
+      const mediaType = items.find((i) => i.libraryItem)?.libraryItem.mediaType
+      if (!mediaType) return
+      const locals = (await this.$db.getLocalLibraryItems(mediaType)) || []
+      items.forEach((playlistItem) => {
+        const match = locals.find((lli) => lli.libraryItemId === playlistItem.libraryItemId || (playlistItem.libraryItem?.ino && lli.ino && lli.ino === playlistItem.libraryItem.ino))
+        const localEpisode = match && playlistItem.episode ? match.media.episodes?.find((lep) => lep.serverEpisodeId === playlistItem.episodeId) || null : null
+        const bound = match && (!playlistItem.episode || localEpisode)
+        this.$set(playlistItem, 'localLibraryItem', bound ? match : null)
+        this.$set(playlistItem, 'localEpisode', bound ? localEpisode : null)
+      })
+    },
     libraryChanged() {
       // Playlist contents are shown in the context of the selected library, so leave this page
       // when the library changes rather than showing stale items
@@ -207,11 +222,13 @@ export default {
   },
   mounted() {
     this.$eventBus.$on('library-changed', this.libraryChanged)
+    this.$eventBus.$on('local-library-items-changed', this.refreshLocalItems)
     this.$socket.$on('playlist_updated', this.playlistUpdated)
     this.$socket.$on('playlist_removed', this.playlistRemoved)
   },
   beforeDestroy() {
     this.$eventBus.$off('library-changed', this.libraryChanged)
+    this.$eventBus.$off('local-library-items-changed', this.refreshLocalItems)
     this.$socket.$off('playlist_updated', this.playlistUpdated)
     this.$socket.$off('playlist_removed', this.playlistRemoved)
   }

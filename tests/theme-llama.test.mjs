@@ -473,17 +473,17 @@ test('Phase 3A: a drag started while a seek is still pending keeps the played li
 test('Gate B semantic hooks: player keys, unavailable state and sleep readout are marked in the player template', async () => {
   const player = await read('../components/app/AudioPlayer.vue')
   const template = player.slice(0, player.indexOf('</template>'))
-  // Eight keys: chapter start/end, both jumps, and queue, bookmark, sleep, chapters in the secondary row
-  assert.equal((template.match(/class="player-key /g) || []).length, 8)
+  // Ten keys: chapter start/end, short and long jumps, and queue, bookmark, sleep, chapters in the secondary row
+  assert.equal((template.match(/class="player-key /g) || []).length, 10)
   assert.equal((template.match(/class="player-key [^"]*next-icon/g) || []).length, 2)
-  assert.equal((template.match(/class="player-key [^"]*jump-icon/g) || []).length, 2)
+  assert.equal((template.match(/class="player-key [^"]*jump-icon/g) || []).length, 4)
   // The four secondary-row keys also carry the utility hooks (Phase 4J); the sleep key is the icon's wrapper
   assert.match(template, /v-if="playerSettings\.showQueueIcon" class="player-key utility-key queue-key relative cursor-pointer"/)
   assert.match(template, /class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="\{ fill: bookmarks\.length \}"/)
   assert.match(template, /<span v-if="!sleepTimerRunning" class="player-key utility-key sleep-key flex cursor-pointer" @click\.stop="\$emit\('showSleepTimer'\)">\s*<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" class="h-7 w-7 text-fg-muted"/)
   assert.match(template, /class="player-key utility-key chapters-key material-symbols text-3xl text-fg cursor-pointer" :class="chapters\.length \? 'text-opacity-75' : 'text-opacity-10 key-disabled'"/)
   // Unavailable keys are marked together with the existing dimmed glyph state, never instead of it
-  assert.equal((template.match(/'text-opacity-10 key-disabled'/g) || []).length, 5)
+  assert.equal((template.match(/'text-opacity-10 key-disabled'/g) || []).length, 7)
   assert.doesNotMatch(template, /'text-opacity-10'/)
   // The invisible podcast placeholder, the speed readout and the round play button are not keys
   assert.match(template, /<span v-else class="material-symbols text-3xl text-white text-opacity-0">bookmark<\/span>/)
@@ -1033,10 +1033,10 @@ test('Phase 4B amber legends: both jumps and chapter start/end, and (finishing p
   // primary Play/Pause legend and its loading spinner (Phase 4H) and the utility keys' legends (finishing pass)
   const amber = Object.entries(rules).filter(([selector, d]) => /#playerContent|#playerControls/.test(selector) && Object.values(d).some((v) => String(v).includes('--color-legend')))
   assert.deepEqual(amber.map(([selector]) => selector.slice(root.length + 1)).sort(), [...LEGEND_SELECTORS, ...PRIMARY_LEGEND_SELECTORS, ...UTILITY_LEGEND_SELECTORS].sort())
-  // The hooks sit on the four transport keys only: queue, bookmark, sleep and chapters carry neither hook
+  // The hooks sit on the transport keys only (short and long jumps, chapter start/end): queue, bookmark, sleep and chapters carry neither hook
   const player = await read('../components/app/AudioPlayer.vue')
   const template = player.slice(0, player.indexOf('</template>'))
-  assert.equal((template.match(/jump-icon/g) || []).length, 2)
+  assert.equal((template.match(/jump-icon/g) || []).length, 4)
   assert.equal((template.match(/next-icon/g) || []).length, 2)
   for (const utility of [/showQueueIcon" class="[^"]*"/, /class="player-key utility-key bookmark-key [^"]*"/, /<span v-if="!sleepTimerRunning"[^>]*class="[^"]*"/, /class="player-key utility-key chapters-key [^"]*"/]) {
     const m = template.match(utility)
@@ -1148,7 +1148,10 @@ const READOUT_LAYOUT_PROPERTIES = {
   '.fullscreen #playerControls .player-key': KEY_BOX_GEOMETRY,
   '.fullscreen #playerControls .jump-icon > .material-symbols': ['font-size', 'transform'],
   '.fullscreen #playerControls .jump-label': ['font-weight'],
+  '.fullscreen #playerControls .jump-icon': ['padding-top'],
   '.fullscreen #playerControls .next-icon': ['font-size'],
+  '.fullscreen #playerControls > div.long-jumps': ['gap'],
+  '.fullscreen #playerControls .long-jumps .player-key': ['flex', 'min-width'],
   '#streamContainer:not(.fullscreen) #playerControls .player-key': KEY_BOX_GEOMETRY,
   '#streamContainer:not(.fullscreen) #playerControls .jump-icon > .material-symbols': ['transform'],
   '#playerContent .utility-key': KEY_BOX_GEOMETRY,

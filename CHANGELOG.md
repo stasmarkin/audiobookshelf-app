@@ -7,11 +7,6 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
-- **Android Auto without a reachable server** (issue #33, Discussion #30): the Android Auto menu now opens at once
-  with Downloads, instead of waiting for the server checks. With a server that was unreachable or stalled, the menu used
-  to appear only after the connection attempts gave up (about 3 s per saved server, or about 30 s when the server
-  answered its ping but then stalled). Downloaded books and podcast episodes can be opened and played right away.
-  Continue, Recent and Libraries are added as soon as the server has answered. Fully offline it was already immediate.
 - **Server unreachable is no longer "connected":** when the server goes down while Wi-Fi stays up, the app notices
   within seconds (the live connection drops, the app checks the server's `/ping`; up to about a minute when the whole
   server machine is switched off and the connection just goes silent) and the indicator in the app bar
@@ -20,6 +15,53 @@ Merged into `plus`, not yet in a published release.
   foreground), and when the server answers again the app signs in, reloads the library and syncs listening sessions
   by itself, without a restart. A server that refuses the sign-in shows "sign in again". Downloads still follow the
   network as before.
+
+## v0.20.0 — Automatic deletion, safer history and progress, long jumps
+
+Published 2026-10-21.
+
+- **Android 7 and partial-delete messages:** on Android 7 the delete message no longer promises a retry that cannot
+  work there (nothing is deleted and the download stays). If access to the folder is lost after some files were already
+  deleted, the message now says so instead of hiding the partial state; the records are kept either way.
+- **Frontend build check:** `npm run generate` now builds in a private `.nuxt` folder and verifies that the bundle matches
+  the checkout (see `docs/release-process.md`).
+- **New launcher icon** (brushed purple disc): the app icon is now a dry-brush purple disc with the white headphones-and-books emblem and
+  the original outlined plus, replacing the bronze icon (launcher, round, adaptive, monochrome, in-app logo and widget/notification
+  fallback artwork). Release has a purple plus; debug and contributor builds are identical except for a red plus.
+- **Android Auto without a reachable server** (issue #33, Discussion #30): the Android Auto menu now opens at once
+  with Downloads, instead of waiting for the server checks. With a server that was unreachable or stalled, the menu used
+  to appear only after the connection attempts gave up (about 3 s per saved server, or about 30 s when the server
+  answered its ping but then stalled). Downloaded books and podcast episodes can be opened and played right away.
+  Continue, Recent and Libraries are added as soon as the server has answered. Fully offline it was already immediate.
+- **Listening-history safety:** startup storage checks keep audiobook and podcast identities, listening progress,
+  completion history and bookmarks when files or storage are unavailable. Automatic eviction removes downloaded bytes
+  while retaining those records. Re-downloading an evicted book keeps its identity and existing local progress.
+- **Managed download folders and recovery:** folder selection explains that Audiobookshelf+ manages the selected
+  folder. SAF publication refuses unsafe collisions and does not automatically delete provider documents. Failed
+  downloads with lost folder access offer Choose folder, followed by an explicit Retry.
+- **Paused seeks:** an explicit seek while paused is saved without requiring playback to resume. When the next item
+  starts (a playlist, series or podcast continuing, Android Auto, media buttons or the widget), the player's seek to that
+  item's start is no longer saved into the previous item, which kept its finished state and position.
+- **Downloads into a taken file name:** a download whose name is already used in the selected folder (for example by
+  files left from a download whose record was lost) is saved under its own alternative name instead of failing; nothing
+  that exists is replaced.
+- **Delete messages:** deleting a download that can't be deleted now says why (folder access lost, folder or storage
+  missing, SD card out, a folder where a file should be, a file that couldn't be deleted, some files deleted) instead of
+  "Failed to delete" or "SD card not available". Deleting downloads in a picked folder now works on Android 8 and 9;
+  on Android 7 the app says to use the file manager.
+- **Automatic deletion and download budgets** (contributed by Stanislav Markin, PR #32): eligible finished audiobook
+  downloads can be evicted to reclaim space. The download budget is best-effort; unavailable storage and unsupported
+  SAF deletion are deferred, and listening history is retained. Podcast retention remains a separate policy.
+- **Downloads at the Android 15 time limit** (contributed by Stanislav Markin): Android 15 lets an app's downloads run
+  in the background for 6 hours a day. When that time is used up, downloads now pause instead of the app crashing, and
+  Android restarting the download service no longer crashes it again and again. Paused downloads keep what they have
+  downloaded, stay in the list as "Continues when the app is open", and continue from there when the app is opened. A
+  notification says that Android paused them. Background auto download runs continue in their own windows.
+- **Long jumps** (Settings → Long jump backwards / forwards time): an optional second jump in each direction, from 15
+  seconds to 30 minutes, Off by default. When on, the full player shows it outside the short jump. The notification,
+  headset, widget and Android Auto keep the short jumps. For everyone, the full player's jump keys are now chevrons
+  centered on Play (the short jumps used circular arrows); the collapsed player keeps the arrows.
+  Narrow layouts reserve space for every enabled control, and seek boundaries remain nonnegative for very short media.
 
 ## v0.19.0 — Podcast auto downloads, SD card storage, E-ink and Bluetooth controls
 

@@ -231,6 +231,33 @@ class DbManager {
   fun saveLocalMediaProgress(mediaProgress: LocalMediaProgress) {
     Paper.book("localMediaProgress").write(mediaProgress.id, mediaProgress)
   }
+  // Background writers use these: under the item's lock a write cannot slip between auto delete's last check and its delete.
+  // The player's own writes (MediaProgressSyncer) keep the plain call: they run on the main thread, which must not wait on a
+  // delete, and the book being played is never auto deleted.
+  fun saveLocalMediaProgressLocked(mediaProgress: LocalMediaProgress) {
+    LocalItemLocks.withItem(mediaProgress.localLibraryItemId) { saveLocalMediaProgress(mediaProgress) }
+  }
+  /**
+   * For an update of an existing download's progress: saves it under the item's lock only while the item still exists,
+   * and answers whether it did. An update that waited for a delete of its item is refused rather than saved as an orphan
+   * that the next start would silently remove (R32-H02); callers report it like an item that is already gone. Together
+   * with auto delete's last progress check under the same lock, an update either lands first and stops the delete,
+   * or comes after it and is refused, never lost silently.
+   */
+  fun saveLocalMediaProgressIfItemExists(mediaProgress: LocalMediaProgress): Boolean =
+    LocalItemLocks.withItem(mediaProgress.localLibraryItemId) {
+      if (getLocalLibraryItem(mediaProgress.localLibraryItemId) == null) false
+      else {
+        saveLocalMediaProgress(mediaProgress)
+        true
+      }
+    }
+  fun removeLocalMediaProgressLocked(localMediaProgressId: String) {
+    val itemId = getLocalMediaProgress(localMediaProgressId)?.localLibraryItemId
+    if (itemId == null) removeLocalMediaProgress(localMediaProgressId)
+    else LocalItemLocks.withItem(itemId) { removeLocalMediaProgress(localMediaProgressId) }
+  }
+
   // For books this will just be the localLibraryItemId for podcast episodes this will be
   // "{localLibraryItemId}-{episodeId}"
   fun getLocalMediaProgress(localMediaProgressId: String): LocalMediaProgress? {
@@ -264,55 +291,16 @@ class DbManager {
     Paper.book("localMediaProgress").destroy()
   }
 
-  // Make sure all local file ids still exist
+  // Startup observes availability through the playback/storage checks; it cannot authorize deletion.
+  // Keep these entry points for existing callers. No Paper writes means failures or concurrent progress
+  // updates cannot replace serialized history. Explicit user/account removal has separate operations.
+  @Suppress("UNUSED_PARAMETER")
   fun cleanLocalLibraryItems(context: Context) {
-    Paper.book("localLibraryItems").allKeys.forEach { id ->
-      updateLocalLibraryItem(id) { lli ->
-        // Never on removable storage (H02): a file that looks missing there may be on a card that is out, is being
-        // removed while this runs, or is a different card; the records, episodes and their progress are kept. Only an
-        // explicit user deletion removes them.
-        LocalItemCleanup.clean(lli, { it.exists(context) }, skip = lli.folderId.startsWith(AppStorage.APPSD_PREFIX))
-      }
-    }
+    Log.d(tag, "Startup: retaining all local media identities, including unavailable files")
   }
 
-  // Remove any local media progress where the local media item is not found
   fun cleanLocalMediaProgress() {
-    val localMediaProgress = getAllLocalMediaProgress()
-    val localLibraryItems = getLocalLibraryItems()
-    localMediaProgress.forEach {
-      val matchingLLI = localLibraryItems.find { lli -> lli.id == it.localLibraryItemId }
-      if (!it.id.startsWith("local")) {
-        // A bug on the server when syncing local media progress was replacing the media progress id
-        // causing duplicate progress. Remove them.
-        Log.d(
-                tag,
-                "cleanLocalMediaProgress: Invalid local media progress does not start with 'local' (fixed on server 2.0.24)"
-        )
-        Paper.book("localMediaProgress").delete(it.id)
-      } else if (matchingLLI == null) {
-        Log.d(
-                tag,
-                "cleanLocalMediaProgress: No matching local library item for local media progress ${it.id} - removing"
-        )
-        Paper.book("localMediaProgress").delete(it.id)
-      } else if (matchingLLI.isPodcast) {
-        if (it.localEpisodeId.isNullOrEmpty()) {
-          Log.d(tag, "cleanLocalMediaProgress: Podcast media progress has no episode id - removing")
-          Paper.book("localMediaProgress").delete(it.id)
-        } else {
-          val podcast = matchingLLI.media as Podcast
-          val matchingLEp = podcast.episodes?.find { ep -> ep.id == it.localEpisodeId }
-          if (matchingLEp == null) {
-            Log.d(
-                    tag,
-                    "cleanLocalMediaProgress: Podcast media progress for episode ${it.localEpisodeId} not found - removing"
-            )
-            Paper.book("localMediaProgress").delete(it.id)
-          }
-        }
-      }
-    }
+    Log.d(tag, "Startup: retaining listening history independently of local file availability")
   }
 
   fun saveMediaItemHistory(mediaItemHistory: MediaItemHistory) {
@@ -346,6 +334,36 @@ class DbManager {
   }
   fun getPodcastAutoDownloadKeys(): List<String> {
     return Paper.book("autoDownload").allKeys
+  }
+
+  // What an online auto delete pass saw on the server about a device progress; records of the older Long format read as none
+  fun getAutoDeleteConfirmed(progressId: String): AutoDeletePolicy.Confirmation? {
+    val stored: Any? = Paper.book("autoDeleteConfirmed").read(progressId)
+    return stored as? AutoDeletePolicy.Confirmation
+  }
+  fun saveAutoDeleteConfirmed(progressId: String, confirmation: AutoDeletePolicy.Confirmation) {
+    Paper.book("autoDeleteConfirmed").write(progressId, confirmation)
+  }
+  fun removeAutoDeleteConfirmed(progressId: String) {
+    Paper.book("autoDeleteConfirmed").delete(progressId)
+  }
+  fun getAutoDeleteConfirmedKeys(): List<String> {
+    return Paper.book("autoDeleteConfirmed").allKeys
+  }
+
+  // When a download finished (progress id -> time), so progress copied from the server with it is not taken for listening
+  fun getAutoDeleteDownloadedAt(progressId: String): Long? {
+    val stored: Any? = Paper.book("autoDeleteDownloadedAt").read(progressId)
+    return stored as? Long
+  }
+  fun saveAutoDeleteDownloadedAt(progressId: String, time: Long) {
+    Paper.book("autoDeleteDownloadedAt").write(progressId, time)
+  }
+  fun removeAutoDeleteDownloadedAt(progressId: String) {
+    Paper.book("autoDeleteDownloadedAt").delete(progressId)
+  }
+  fun getAutoDeleteDownloadedAtKeys(): List<String> {
+    return Paper.book("autoDeleteDownloadedAt").allKeys
   }
 
   // App logs now live in the rolling diagnostic log (DiagnosticLog), which migrates the old "log" book once

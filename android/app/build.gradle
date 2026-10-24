@@ -46,12 +46,12 @@ android {
     applicationId "app.absplus.android"
     minSdkVersion rootProject.ext.minSdkVersion
     targetSdkVersion rootProject.ext.targetSdkVersion
-    versionCode 137
+    versionCode 138
     versionName "0.14.2-beta"
     // The Audiobookshelf+ public version of this build (the "v0.16.0" in the release tag). versionName stays the upstream
     // version, so the in-app updater compares releases with this; set it with versionCode for each release
     // (docs/release-process.md). Installs are still decided by the APK's own versionCode.
-    buildConfigField "String", "PLUS_VERSION", "\"0.19.0\""
+    buildConfigField "String", "PLUS_VERSION", "\"0.20.0\""
     testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     manifestPlaceholders = [
       "appAuthRedirectScheme": "app.absplus.android"
@@ -86,12 +86,37 @@ android {
         signingConfig signingConfigs.release
       }
     }
+    // Separate, non-debuggable contributor channel. Signed offline with its own
+    // persistent key; never reads the production signing configuration.
+    contributor {
+      initWith release
+      // Its own package (not the debug builds' app.absplus.android.debug), so it never collides with a CI or local debug install
+      applicationIdSuffix ".contributor"
+      debuggable false
+      signingConfig null
+      matchingFallbacks = ['release']
+      buildConfigField "String", "PLUS_VERSION", "\"0.20.0-dev.2\""
+    }
+  }
+  sourceSets {
+    // Launcher icon with the RED plus. contributor is initWith release, so it does not inherit src/debug
+    debug.res.srcDir "src/devicon/res"
+    contributor.res.srcDir "src/devicon/res"
   }
   testOptions {
     unitTests.includeAndroidResources = true
     unitTests.all {
       // Paper's Kryo serializers reflect into JDK internals, which JDK 17+ only allows when opened
       jvmArgs '--add-opens=java.base/java.util=ALL-UNNAMED', '--add-opens=java.base/java.lang=ALL-UNNAMED'
+    }
+  }
+}
+
+androidComponents {
+  onVariants(selector().withBuildType("contributor")) { variant ->
+    variant.outputs.each { output ->
+      output.versionCode.set(139)
+      output.versionName.set("0.20.0-dev.2")
     }
   }
 }

@@ -17,6 +17,8 @@ import app.absplus.android.data.PodcastAutoDownloadEntry
 import app.absplus.android.data.PodcastEpisode
 import app.absplus.android.data.PodcastMetadata
 import app.absplus.android.data.ServerConnectionConfig
+import app.absplus.android.device.NodeKind
+import app.absplus.android.device.StorageIo
 import app.absplus.android.device.AndroidStorageIo
 import app.absplus.android.device.AppStorage
 import app.absplus.android.device.AppVolume
@@ -173,7 +175,7 @@ class RemovableStorageSafetyTest {
     DeviceManager.dbManager.saveLocalLibraryItem(sdItem)
     DeviceManager.dbManager.saveLocalMediaProgress(progressFor("e1"))
     val before = mapper.writeValueAsString(DeviceManager.dbManager.getLocalLibraryItem(sdItem.id))
-    // Control: an internal item with a really missing file is still cleaned up as before
+    // Missing internal files also retain episode identity and history under the startup preservation policy.
     val internalDir = File(context.filesDir, "downloads/li_int")
     val present = media(internalDir, "present.mp3")
     val internal = podcastLocal("internal-podcast", internalDir, "p" to present, "gone" to File(internalDir, "gone.mp3"))
@@ -187,7 +189,7 @@ class RemovableStorageSafetyTest {
 
     assertEquals("the SD item, its episodes and file records are unchanged", before, mapper.writeValueAsString(DeviceManager.dbManager.getLocalLibraryItem(sdItem.id)))
     assertNotNull("its progress is kept", DeviceManager.dbManager.getLocalMediaProgress("local_$pod-local_ep_e1"))
-    assertEquals(listOf("p"), (DeviceManager.dbManager.getLocalLibraryItem("local_li_int")!!.media as Podcast).episodes!!.map { it.serverEpisodeId })
+    assertEquals(listOf("p", "gone"), (DeviceManager.dbManager.getLocalLibraryItem("local_li_int")!!.media as Podcast).episodes!!.map { it.serverEpisodeId })
   }
 
   // ---- Finalizing downloads on removable storage (H02)
@@ -247,6 +249,29 @@ class RemovableStorageSafetyTest {
   }
 
   @Test
+  fun completedRedownloadReactivatesTheRetainedItemButAnUnfinishedAttemptDoesNot() {
+    val part = sdPart("li_reactivated", "01.mp3")
+    media(File(part.finalDestinationPath).parentFile!!, "01.mp3")
+    val download = sdItem("li_reactivated", part)
+    val saved = scan(download)!!.localLibraryItem
+    saved.isInvalid = true
+    DeviceManager.dbManager.saveLocalLibraryItem(saved)
+    val history = LocalMediaProgress(saved.id, saved.id, null, 20.0, 0.1, 2.0, false, null, null,
+            9000, 1000, null, server, "http://127.0.0.1:1", "alice", download.libraryItemId, null)
+    DeviceManager.dbManager.saveLocalMediaProgress(history)
+    val stale = app.absplus.android.data.MediaProgress("stale", download.libraryItemId, null, 20.0, 1.0, 20.0, true, null, null, 500, 0, 500)
+    val retry = download.copy(userMediaProgress = stale)
+    part.completed = false
+    assertTrue(scan(retry)!!.localLibraryItem.isInvalid)
+    part.completed = true
+    val restored = scan(retry)!!.localLibraryItem
+    assertEquals(saved.id, restored.id)
+    assertEquals(saved.serverConnectionConfigId, restored.serverConnectionConfigId)
+    assertFalse(restored.isInvalid)
+    assertEquals(mapper.writeValueAsString(history), mapper.writeValueAsString(DeviceManager.dbManager.getLocalMediaProgress(saved.id)))
+  }
+
+  @Test
   fun aFinishedSdDownloadThatSavedNothingStaysQueued() {
     assertTrue("card away", DownloadFinalizationPolicy.waitInsteadOfDropping(false, true, false))
     assertTrue("card present but the scan refused a partial item", DownloadFinalizationPolicy.waitInsteadOfDropping(false, false, true))
@@ -290,6 +315,53 @@ class RemovableStorageSafetyTest {
   }
 
   // ---- Explicit deletion (L01)
+
+  /** The real file operations, except that the card goes away at a chosen moment of the delete (R32-H03). */
+  private inner class CardPulledIo(private val probe: Probe, private val pullOnFirstDelete: Boolean) : StorageIo by AndroidStorageIo {
+    var pulled = false
+    override fun kind(file: File): NodeKind {
+      // Unmounted at the first look (pullOnFirstDelete=false): the filesystem then reports the folder as missing
+      if (!pullOnFirstDelete && !pulled) { pulled = true; probe.mounted = false }
+      return if (pulled) NodeKind.MISSING else AndroidStorageIo.kind(file)
+    }
+    override fun list(dir: File): List<String>? = if (pulled) null else AndroidStorageIo.list(dir)
+    override fun delete(file: File): Boolean {
+      if (pulled) return false
+      val ok = AndroidStorageIo.delete(file)
+      if (pullOnFirstDelete) { pulled = true; probe.mounted = false }
+      return ok
+    }
+  }
+
+  @Test
+  fun aCardPulledRightAfterVerificationIsNotADeleteAndKeepsTheItem() {
+    val dir = File(sdDownloads, pod)
+    val file = media(dir, "e1.mp3")
+    val item = podcastLocal(sdFolderId, dir, "e1" to file)
+    val probe = Probe()
+    // Verified, then the folder reads as missing because the card is out: must not be reported as deleted
+    assertEquals(AppStorageItemDeletion.Outcome.STORAGE_UNAVAILABLE, AppStorageItemDeletion.delete(item, probe, CardPulledIo(probe, pullOnFirstDelete = false)))
+    assertTrue("the media stays on the card", file.isFile)
+    // Card back: the delete finishes
+    probe.mounted = true
+    assertEquals(AppStorageItemDeletion.Outcome.DELETED, AppStorageItemDeletion.delete(item, probe, AndroidStorageIo))
+    assertFalse(dir.exists())
+  }
+
+  @Test
+  fun aCardPulledDuringTheDeleteIsNotADeleteAndCanBeFinishedLater() {
+    val dir = File(sdDownloads, pod)
+    media(dir, "e1.mp3")
+    media(dir, "e2.mp3")
+    val item = podcastLocal(sdFolderId, dir, "e1" to File(dir, "e1.mp3"), "e2" to File(dir, "e2.mp3"))
+    val probe = Probe()
+    val outcome = AppStorageItemDeletion.delete(item, probe, CardPulledIo(probe, pullOnFirstDelete = true))
+    assertTrue("partial or interrupted delete is not DELETED: $outcome", outcome != AppStorageItemDeletion.Outcome.DELETED)
+    assertTrue("what was not reached stays", File(dir, "e1.mp3").exists() || File(dir, "e2.mp3").exists())
+    probe.mounted = true
+    assertEquals(AppStorageItemDeletion.Outcome.DELETED, AppStorageItemDeletion.delete(item, probe, AndroidStorageIo))
+    assertFalse(dir.exists())
+  }
 
   @Test
   fun deletingAnSdItemNeedsItsCardAndStaysInsideItsDownloadFolder() {

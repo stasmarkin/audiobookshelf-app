@@ -956,7 +956,8 @@ class ApiHandler(var ctx:Context) {
     if (updateLogs.isNotEmpty()) {
       MediaEventManager.syncEvent(mediaProgress, "Sync on server connection")
     }
-    DeviceManager.dbManager.saveLocalMediaProgress(localMediaProgress)
+    // Not saved when the download was deleted meanwhile: the server keeps this progress (R32-H02)
+    DeviceManager.dbManager.saveLocalMediaProgressIfItemExists(localMediaProgress)
   }
 
   // Pushes local audio progress (currentTime/progress/isFinished/duration) to the server -
