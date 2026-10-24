@@ -132,10 +132,12 @@ export default {
     this.loadLocalPodcastLibraryItems()
     this.$eventBus.$on('library-changed', this.libraryChanged)
     this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$on('local-library-items-changed', this.loadLocalPodcastLibraryItems)
   },
   beforeDestroy() {
     this.$eventBus.$off('library-changed', this.libraryChanged)
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$off('local-library-items-changed', this.loadLocalPodcastLibraryItems)
     if (this.stopDataChanged) this.stopDataChanged()
     this.stopDataChanged = null
     if (this.refreshDebouncer) this.refreshDebouncer.cancel()

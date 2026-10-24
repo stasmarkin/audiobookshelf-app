@@ -62,6 +62,8 @@ New in v0.16.0 ([announcement](https://github.com/ADD-OCD/audiobookshelfplus-app
 - Optional prompt before playing an incomplete series, collection or playlist, with the choice to download what's
   missing.
 - A visible, reorderable Up Next queue.
+- Optional long jumps (15 seconds to 30 minutes, set separately back and forward) beside the short jumps in the full
+  player.
 - Podcasts auto-advance to the next unfinished episode, from playlists and from the podcast page.
 - More reliable background advancement (including under Android Doze), and playback pauses when Bluetooth disconnects.
 - Playback restoration: a paused book resumes from the widget, notification or a headset after Android closed the

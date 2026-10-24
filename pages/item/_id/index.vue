@@ -292,7 +292,7 @@ export default {
     },
     hasLocal() {
       // Server library item has matching local library item
-      return this.isLocal || this.libraryItem.localLibraryItem
+      return this.isLocal || (this.libraryItem.localLibraryItem && !this.libraryItem.localLibraryItem.isInvalid)
     },
     localLibraryItem() {
       if (this.isLocal) return this.libraryItem
@@ -797,6 +797,17 @@ export default {
         this.$set(this.libraryItem, 'localLibraryItem', item)
       }
     },
+    async reloadLocalLibraryItem() {
+      if (this.isLocal) {
+        // The page shows the local item itself, so when it is gone there is nothing left to show
+        const stillThere = await this.$db.getLocalLibraryItem(this.libraryItem.id)
+        if (!stillThere) this.$router.replace('/downloads')
+        else this.libraryItem = stillThere
+        return
+      }
+      const localItems = await this.$db.getLocalLibraryItems().catch(() => [])
+      this.$set(this.libraryItem, 'localLibraryItem', findLocalCopy(localItems, this.libraryItem, this.$store.state.activeServerConfigId))
+    },
     libraryChanged() {
       // Also announced when nothing changed (a sign-in, a reconnect): the current library and server decide
       const leaves = this.isLocal
@@ -838,6 +849,7 @@ export default {
       this.$eventBus.$on('library-changed', this.libraryChanged)
       this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
       if (!this.isLocal) this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
+      this.$eventBus.$on('local-library-items-changed', this.reloadLocalLibraryItem)
       this.checkDescriptionClamped()
 
       // Set height of page below cover image
@@ -918,6 +930,7 @@ export default {
     if (this.stopDataChanged) this.stopDataChanged()
     this.stopDataChanged = null
     if (this.refreshDebouncer) this.refreshDebouncer.cancel()
+    this.$eventBus.$off('local-library-items-changed', this.reloadLocalLibraryItem)
 
     // Set scroll position
     if (window['item-page']) {
