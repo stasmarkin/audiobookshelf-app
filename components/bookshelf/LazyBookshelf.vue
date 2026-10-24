@@ -530,6 +530,7 @@ export default {
       }
 
       this.$eventBus.$on('library-changed', this.libraryChanged)
+      this.$eventBus.$on('local-library-items-changed', this.localItemsChanged)
       this.$eventBus.$on('user-settings', this.settingsUpdated)
 
       this.$socket.$on('item_updated', this.libraryItemUpdated)
@@ -545,6 +546,18 @@ export default {
         document.addEventListener('orientationchange', this.screenOrientationChange)
       }
     },
+    // Downloads removed (or added) in the background: mounted cards must not keep Play pointing at a gone download
+    async localItemsChanged() {
+      if (!this.isBookEntity || !this.user) return
+      this.localLibraryItems = await this.$db.getLocalLibraryItems(this.currentLibraryMediaType)
+      for (const key in this.entityComponentRefs) {
+        const ref = this.entityComponentRefs[key]
+        const entity = this.entities[key]
+        if (!ref || !entity) continue
+        const match = this.localLibraryItems.find((lli) => lli.libraryItemId == entity.id || (entity.ino && lli.ino && lli.ino == entity.ino))
+        ref.setLocalLibraryItem(match || null)
+      }
+    },
     removeListeners() {
       const bookshelf = document.getElementById('bookshelf-wrapper')
       if (bookshelf) {
@@ -552,6 +565,7 @@ export default {
       }
 
       this.$eventBus.$off('library-changed', this.libraryChanged)
+      this.$eventBus.$off('local-library-items-changed', this.localItemsChanged)
       this.$eventBus.$off('user-settings', this.settingsUpdated)
 
       this.$socket.$off('item_updated', this.libraryItemUpdated)

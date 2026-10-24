@@ -216,18 +216,26 @@ class MediaProgressSyncer(
   }
 
   fun seek() {
-    currentPlaybackSession?.currentTime = playerNotificationService.getCurrentTimeSeconds()
-    DLog.d(tag, "seek: $currentDisplayTitle, currentTime=${currentPlaybackSession?.currentTime}")
-
-    if (currentPlaybackSession == null) {
-      DLog.e(tag, "seek: Playback session not set")
+    // The player's position belongs to the player's session. While a new item is being prepared (queue advance,
+    // Android Auto, media buttons) the player already holds it and seeks to its start, but this syncer still holds the
+    // previous item until play() switches it: that position must not be written into the previous item.
+    val playerSessionId = playerNotificationService.currentPlaybackSession?.id
+    if (currentPlaybackSession == null || currentPlaybackSession?.id != playerSessionId) {
+      DLog.d(tag, "seek: not saved, the player's session ($playerSessionId) is not the one being synced ($currentSessionId)")
       return
     }
+    currentPlaybackSession?.currentTime = playerNotificationService.getCurrentTimeSeconds()
+    DLog.d(tag, "seek: $currentDisplayTitle, currentTime=${currentPlaybackSession?.currentTime}")
 
     // The widget shows the confirmed seek position right away (also while paused, e.g. its own jump keys)
     playerNotificationService.showWidgetPosition(currentPlaybackSession?.id, currentPlaybackSession?.currentTime)
 
     MediaEventManager.seekEvent(currentPlaybackSession!!, null)
+
+    // A seek is an explicit position change, even with the listening timer stopped or less than
+    // a second after the last save. Use the normal durable/session/server path without counting
+    // time spent paused as listening time. Do not wait for another Play or Pause event.
+    sync(true, currentPlaybackSession!!.currentTime, forcePosition = true) {}
   }
 
   // Currently unused
@@ -244,17 +252,17 @@ class MediaProgressSyncer(
     }
   }
 
-  fun sync(shouldSyncServer: Boolean, currentTime: Double, cb: (SyncResult?) -> Unit) {
-    if (lastSyncTime <= 0) {
+  fun sync(shouldSyncServer: Boolean, currentTime: Double, forcePosition: Boolean = false, cb: (SyncResult?) -> Unit) {
+    if (!forcePosition && lastSyncTime <= 0) {
       DLog.e(tag, "Last sync time is not set $lastSyncTime")
       return cb(null)
     }
 
-    val diffSinceLastSync = System.currentTimeMillis() - lastSyncTime
-    if (diffSinceLastSync < 1000L) {
+    val diffSinceLastSync = if (lastSyncTime > 0) System.currentTimeMillis() - lastSyncTime else 0L
+    if (!forcePosition && diffSinceLastSync < 1000L) {
       return cb(null)
     }
-    val listeningTimeToAdd = diffSinceLastSync / 1000L
+    val listeningTimeToAdd = if (forcePosition && !listeningTimerRunning) 0L else diffSinceLastSync / 1000L
 
     // Captured now, not read live, so log lines in the async callbacks below stay correct even
     // if the syncer moves on to the next queue item before the network response arrives.

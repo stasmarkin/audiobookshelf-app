@@ -26,7 +26,7 @@
             </div>
             <div class="flex-grow min-w-0">
               <p class="break-all text-fg-muted">{{ itemPart.filename }}</p>
-              <p v-if="itemPart.failed && !itemPart.permissionLost && !itemPart.storageUnavailable && !itemPart.authorizationHold && itemPart.failureReason" class="text-xs text-error mt-0.5">{{ itemPart.failureReason }}</p>
+              <p v-if="stateOf(item) !== 'folderAccess' && itemPart.failed && !itemPart.permissionLost && !itemPart.storageUnavailable && !itemPart.authorizationHold && itemPart.failureReason" class="text-xs text-error mt-0.5">{{ itemPart.failureReason }}</p>
             </div>
           </div>
         </div>
@@ -120,7 +120,7 @@ export default {
       return {
         [DownloadAction.CANCEL]: this.$strings.ButtonCancel,
         [DownloadAction.RETRY]: this.$strings.ButtonRetry,
-        [DownloadAction.CHOOSE_FOLDER]: this.$strings.ButtonChooseFolder,
+        [DownloadAction.CHOOSE_FOLDER]: this.$strings.ButtonReselectFolder,
         [DownloadAction.CLEAR]: this.$strings.ButtonClear
       }[action]
     },
@@ -152,22 +152,30 @@ export default {
     },
     async retry(item) {
       const result = await AbsDownloader.retryDownload({ downloadItemId: item.id })
-      if (result?.errorCode === 'folderAccess') return this.$toast.error(this.$getString('MessageDownloadChooseFolder', [this.lostFolderName(item)]))
+      if (result?.errorCode === 'folderAccess') {
+        await this.refresh()
+        return this.$toast.error(this.$getString('MessageDownloadChooseFolder', [this.lostFolderName(item)]))
+      }
       if (result?.errorCode === 'notFound') return this.$store.commit('globals/removeItemDownload', item.id)
       if (result?.errorCode === 'storageUnavailable') return this.$toast.error(this.$strings.LabelDownloadStorageUnavailable)
       if (result?.errorCode === 'held') return this.$toast.error(this.$strings.MessageDownloadHeld)
       if (result?.errorCode) return this.$toast.error(this.$strings.MessageDownloadBusy)
     },
     async chooseFolder(item) {
-      const lost = lostFolder(item)
+      const lost = lostFolder(item) || item.localFolder
       // The picker re-grants access; the download continues only into the folder it was started in
       const folder = await AbsFileSystem.selectFolder({ mediaType: item.mediaType })
+      if (folder?.errorCode === 'canceled') return
       if (!folder || folder.error) {
         if (folder?.error) this.$toast.error(folder.error)
         return
       }
       if (lost && folder.id !== lost.id) return this.$toast.error(this.$getString('MessageDownloadWrongFolder', [lost.name]))
-      await this.retry(item)
+      // Document IDs alone are not unique across providers. Never redirect this download to a
+      // different tree, even when that provider happens to return the same document ID.
+      if (folder.contentUrl !== item.localFolder.contentUrl) return this.$toast.error(this.$getString('MessageDownloadWrongFolder', [lost.name]))
+      // selectFolder uses the existing persisted-grant path. Renewal is not consent to retry.
+      await this.refresh()
     }
   },
   mounted() {

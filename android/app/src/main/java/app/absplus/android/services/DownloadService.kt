@@ -11,27 +11,46 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import app.absplus.android.MainActivity
 import app.absplus.android.R
 import app.absplus.android.models.DownloadItemPart
+import app.absplus.android.plugins.AbsLogger
 
 /** Android-owned foreground lifecycle for transfers that must outlive the WebView and Activity. */
 class DownloadService : Service() {
+  // Set once Android refused or ended the foreground service; this instance only stops
+  @Volatile private var stopping = false
+
   override fun onCreate() {
     super.onCreate()
     ensureChannel(this)
-    startForegroundWithType(DownloadServiceHost.notificationStrings(this).preparing)
-    DownloadServiceHost.attachService(this)
+    if (startForegroundWithType(DownloadServiceHost.notificationStrings(this).preparing)) {
+      DownloadServiceHost.attachService(this)
+    }
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
       ACTION_CANCEL -> DownloadServiceHost.cancelAll(this)
       else -> {
-        startForegroundWithType(DownloadServiceHost.notificationStrings(this).preparing)
+        // Not sticky when refused: Android would restart the service only to be refused again
+        if (stopping || !startForegroundWithType(DownloadServiceHost.notificationStrings(this).preparing)) {
+          return START_NOT_STICKY
+        }
         DownloadServiceHost.startWork(this)
       }
     }
-    return START_STICKY
+    return if (stopping) START_NOT_STICKY else START_STICKY
+  }
+
+  // Android 15+ limits dataSync foreground services: stop within seconds; transfers pause and resume later
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    AbsLogger.info(TAG, "Downloads reached the foreground service time limit; pausing them")
+    stopBySystem()
+  }
+
+  override fun onTimeout(startId: Int) {
+    onTimeout(startId, 0)
   }
 
   override fun onDestroy() {
@@ -42,6 +61,7 @@ class DownloadService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   fun onPartUpdate(part: DownloadItemPart) {
+    if (stopping) return
     val strings = DownloadServiceHost.notificationStrings(this)
     val text =
             if (part.waitingForSpace) strings.waitingForStorage
@@ -58,13 +78,28 @@ class DownloadService : Service() {
     }
   }
 
-  private fun startForegroundWithType(text: String) {
+  private fun startForegroundWithType(text: String): Boolean {
     val notification = notification(text)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-    } else {
-      startForeground(NOTIFICATION_ID, notification)
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+      } else {
+        startForeground(NOTIFICATION_ID, notification)
+      }
+      return true
+    } catch (e: RuntimeException) {
+      // Android 15+ refuses dataSync once its daily time limit is used up, until the app is in the foreground again
+      AbsLogger.error(TAG, "Download service could not enter the foreground (${e.javaClass.simpleName}: ${e.message}); pausing downloads")
+      stopBySystem()
+      return false
     }
+  }
+
+  private fun stopBySystem() {
+    stopping = true
+    DownloadServiceHost.pauseBySystem(this)
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    stopSelf()
   }
 
   private fun notification(text: String, progress: Int = 0, determinate: Boolean = false): Notification {
@@ -86,6 +121,8 @@ class DownloadService : Service() {
   companion object {
     const val CHANNEL_ID = "downloads"
     private const val NOTIFICATION_ID = 11
+    private const val PAUSED_NOTIFICATION_ID = 13
+    private const val TAG = "DownloadService"
     private const val ACTION_CANCEL = "app.absplus.android.download.CANCEL"
     fun intent(context: Context) = Intent(context, DownloadService::class.java)
 
@@ -97,6 +134,28 @@ class DownloadService : Service() {
                       CHANNEL_ID,
                       DownloadServiceHost.notificationStrings(context).downloads,
                       NotificationManager.IMPORTANCE_LOW))
+    }
+
+    fun showPausedBySystem(context: Context) {
+      val strings = DownloadServiceHost.notificationStrings(context)
+      val open = PendingIntent.getActivity(
+              context, 0,
+              Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+      val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+              .setSmallIcon(R.drawable.icon)
+              .setContentTitle(strings.downloads)
+              .setContentText(strings.pausedBySystem)
+              .setStyle(NotificationCompat.BigTextStyle().bigText(strings.pausedBySystem))
+              .setContentIntent(open)
+              .setAutoCancel(true)
+              .build()
+      // Without the notification permission Android drops it; the paused downloads stay queued either way
+      (context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(PAUSED_NOTIFICATION_ID, notification)
+    }
+
+    fun hidePausedBySystem(context: Context) {
+      (context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(PAUSED_NOTIFICATION_ID)
     }
   }
 }
