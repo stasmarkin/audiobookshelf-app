@@ -2,6 +2,7 @@ package app.absplus.android.device
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.anggrayudi.storage.file.*
@@ -58,12 +59,18 @@ class FolderScanner(private val ctx: Context) {
               }
       // Android 10 DownloadsProvider may not reconstruct a DocumentFile for an audio URI even
       // though the URI remains readable. Keep the URI as the authoritative local-file location.
+      // The document may have another name than planned (its own alternative name when the planned one was taken, or
+      // one the provider chose): record the name and path it actually has.
+      val actualName = displayName(uri)?.takeIf { it.isNotBlank() } ?: part.filename
+      val actualPath =
+              if (actualName == part.filename) part.finalDestinationPath
+              else File(part.finalDestinationPath).parentFile?.let { File(it, actualName).path } ?: part.finalDestinationPath
       return LocalFile(
               DeviceManager.getBase64Id(contentUrl),
-              part.filename,
+              actualName,
               contentUrl,
               part.localFolderName,
-              part.finalDestinationPath,
+              actualPath,
               mimeTypeFor(part),
               size
       )
@@ -87,6 +94,16 @@ class FolderScanner(private val ctx: Context) {
             document.length()
     )
   }
+
+  // The document's own name, asked of its provider (a DocumentFile built from a tree document URI names the tree instead)
+  private fun displayName(uri: Uri): String? =
+          try {
+            ctx.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { c ->
+              if (c.moveToFirst()) c.getString(0) else null
+            }
+          } catch (e: Exception) {
+            null
+          }
 
   private fun newLocalLibraryItem(
           id: String,
@@ -239,11 +256,13 @@ class FolderScanner(private val ctx: Context) {
     val result = DownloadItemScanResult(localItem, null)
     // A relinked item keeps its own local progress, re-pointed to the corrected server item, instead of
     // being overwritten by that item's server progress (it may hold listening not yet synced anywhere)
-    val savedProgress = if (keepLocalProgress) DeviceManager.dbManager.getLocalMediaProgress(localItem.id) else null
+    val retainedEvictionHistory = localItem.isInvalid && item.mediaType == "book" &&
+            localItem.serverConnectionConfigId == item.serverConnectionConfigId && localItem.serverUserId == item.serverUserId
+    val savedProgress = if (keepLocalProgress || retainedEvictionHistory) DeviceManager.dbManager.getLocalMediaProgress(localItem.id) else null
     if (savedProgress != null) {
       result.localMediaProgress =
               repointLocalProgress(savedProgress, item.libraryItemId, item.serverConnectionConfigId, item.serverAddress, item.serverUserId)
-      DeviceManager.dbManager.saveLocalMediaProgress(savedProgress)
+      DeviceManager.dbManager.saveLocalMediaProgressLocked(savedProgress)
       // Sent on the next reconcile with the corrected server item if newer than its progress there
       SyncEngine.importPaperProgress(listOf(savedProgress))
     } else item.userMediaProgress?.let { progress ->
@@ -270,7 +289,12 @@ class FolderScanner(private val ctx: Context) {
                       item.libraryItemId,
                       item.episodeId
               )
-      DeviceManager.dbManager.saveLocalMediaProgress(result.localMediaProgress!!)
+      DeviceManager.dbManager.saveLocalMediaProgressLocked(result.localMediaProgress!!)
+    }
+    // A fresh completed transfer can reactivate an evicted record without replacing its identity.
+    // Presence from a partial scan alone does not establish download completion.
+    if (resolved.all { it.second != null } && item.downloadItemParts.all { it.completed && it.moved && !it.failed }) {
+      localItem.isInvalid = false
     }
     DeviceManager.dbManager.saveLocalLibraryItem(localItem)
     if (savedProgress == null) {

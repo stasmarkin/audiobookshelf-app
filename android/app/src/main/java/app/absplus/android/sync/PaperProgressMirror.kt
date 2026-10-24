@@ -8,6 +8,7 @@ import app.absplus.android.data.Podcast
 import app.absplus.android.db.userdata.MediaProgressEntity
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
+import app.absplus.android.managers.LocalItemLocks
 import app.absplus.android.media.MediaEventManager
 
 /** Where accepted progress of a downloaded copy is also written during phase 1 (Paper stays readable on rollback). */
@@ -75,30 +76,35 @@ object PaperProgressMirror : ProgressMirror {
     val copies = copies()
     for (row in rows) {
       val (item, localEpisodeId) = copyOf(copies, row) ?: continue
-      DeviceManager.dbManager.removeLocalMediaProgress(localProgressId(item, localEpisodeId))
+      DeviceManager.dbManager.removeLocalMediaProgressLocked(localProgressId(item, localEpisodeId))
     }
   }
 
   private fun mirror(row: MediaProgressEntity, item: LocalLibraryItem, localEpisodeId: String?, fields: Collection<String>?,
-                     unlessNewer: Boolean): Unit = synchronized(DbManager.localMediaProgressLock) {
-    val db = DeviceManager.dbManager
-    val id = localProgressId(item, localEpisodeId)
-    val existing = db.getLocalMediaProgress(id)
-    if (unlessNewer && existing != null && existing.lastUpdate > row.lastUpdate) return
-    val progress = if (existing == null) newProgress(id, item, localEpisodeId, row) else existing.also { lmp ->
-      fun has(field: String) = fields == null || field in fields
-      // A row created by an action alone has no duration yet; the copy knows it
-      if (has("duration") && row.duration > 0) lmp.duration = row.duration
-      if (has("progress")) lmp.progress = row.progress
-      if (has("currentTime")) lmp.currentTime = row.currentTime
-      if (has("isFinished")) lmp.isFinished = row.isFinished
-      if (has("finishedAt")) lmp.finishedAt = row.finishedAt
-      if (has("ebookLocation")) lmp.ebookLocation = row.ebookLocation
-      if (has("ebookProgress")) lmp.ebookProgress = row.ebookProgress
-      if (fields == null) lmp.startedAt = row.startedAt
-      lmp.lastUpdate = row.lastUpdate
+                     unlessNewer: Boolean): Unit = LocalItemLocks.withItem(item.id) {
+    // The copies were read before the lock: an auto delete may have removed this one since, and its progress with it.
+    // Checked before the progress lock, which the player's thread also takes
+    if (copies().none { it.id == item.id }) return@withItem
+    synchronized(DbManager.localMediaProgressLock) {
+      val db = DeviceManager.dbManager
+      val id = localProgressId(item, localEpisodeId)
+      val existing = db.getLocalMediaProgress(id)
+      if (unlessNewer && existing != null && existing.lastUpdate > row.lastUpdate) return@withItem
+      val progress = if (existing == null) newProgress(id, item, localEpisodeId, row) else existing.also { lmp ->
+        fun has(field: String) = fields == null || field in fields
+        // A row created by an action alone has no duration yet; the copy knows it
+        if (has("duration") && row.duration > 0) lmp.duration = row.duration
+        if (has("progress")) lmp.progress = row.progress
+        if (has("currentTime")) lmp.currentTime = row.currentTime
+        if (has("isFinished")) lmp.isFinished = row.isFinished
+        if (has("finishedAt")) lmp.finishedAt = row.finishedAt
+        if (has("ebookLocation")) lmp.ebookLocation = row.ebookLocation
+        if (has("ebookProgress")) lmp.ebookProgress = row.ebookProgress
+        if (fields == null) lmp.startedAt = row.startedAt
+        lmp.lastUpdate = row.lastUpdate
+      }
+      db.saveLocalMediaProgress(progress)
     }
-    db.saveLocalMediaProgress(progress)
   }
 
   /**
