@@ -6,6 +6,8 @@ import app.absplus.android.device.DeviceManager
 import app.absplus.android.models.DownloadItem
 import app.absplus.android.models.DownloadItemPart
 import app.absplus.android.server.ApiHandler
+import app.absplus.android.managers.AutoDeleteManager
+import app.absplus.android.managers.AutoDeleteScheduler
 import app.absplus.android.managers.AutoDownloadManager
 import app.absplus.android.managers.AutoDownloadStore
 import app.absplus.android.managers.DownloadItemManager
@@ -51,16 +53,21 @@ class AbsDownloader : Plugin() {
     }
   })
 
+  private var onDeletedListener: (() -> Unit)? = null
+
   override fun load() {
     mainActivity = (activity as MainActivity)
     apiHandler = ApiHandler(mainActivity)
     downloadItemManager = DownloadServiceHost.ensure(mainActivity)
     DownloadServiceHost.attachBridge(mainActivity, clientEventEmitter)
+    onDeletedListener = { notifyListeners("onLocalItemsChanged", JSObject()) }
+    AutoDeleteManager.onDeleted = onDeletedListener
 
     @OptIn(DelicateCoroutinesApi::class)
     GlobalScope.launch(Dispatchers.IO) {
       try {
         AutoDownloadScheduler.reschedule(mainActivity)
+        AutoDeleteScheduler.reschedule(mainActivity)
       } catch (e: Exception) {
         AbsLogger.error(tag, "Failed to schedule auto download: ${e.message}")
       }
@@ -68,6 +75,8 @@ class AbsDownloader : Plugin() {
   }
 
   override fun handleOnDestroy() {
+    // A newer instance of the plugin may have registered its own already
+    if (AutoDeleteManager.onDeleted === onDeletedListener) AutoDeleteManager.onDeleted = null
     DownloadServiceHost.detachBridge()
     super.handleOnDestroy()
   }
@@ -82,7 +91,8 @@ class AbsDownloader : Plugin() {
             call.getString("downloads") ?: "Downloads",
             call.getString("cancel") ?: "Cancel",
             call.getString("moveToSd") ?: DownloadServiceHost.DEFAULT_MOVE_TO_SD,
-            call.getString("moveToInternal") ?: DownloadServiceHost.DEFAULT_MOVE_TO_INTERNAL)
+            call.getString("moveToInternal") ?: DownloadServiceHost.DEFAULT_MOVE_TO_INTERNAL,
+            call.getString("pausedBySystem") ?: DownloadServiceHost.DEFAULT_PAUSED_BY_SYSTEM)
     call.resolve()
   }
 
@@ -94,6 +104,7 @@ class AbsDownloader : Plugin() {
       statuses.forEach { status ->
         array.put(JSObject(jacksonMapper.writeValueAsString(status.item))
                 .put("waitingFor", status.waitingFor ?: JSONObject.NULL)
+                .put("folderAccessLost", status.folderAccessLost)
                 .put("isAuto", status.isAuto))
       }
       call.resolve(JSObject().put("items", array))
@@ -229,11 +240,29 @@ class AbsDownloader : Plugin() {
       try {
         // The app is in foreground now, so work a background worker could not start can run
         DownloadServiceHost.startServiceIfIdle(mainActivity)
-        val status = AutoDownloadManager.startCheck(mainActivity, AutoDownloadManager.Trigger.APP)
+        val status = AutoDownloadManager.startCheck(mainActivity, AutoDownloadManager.Trigger.APP, call.getBoolean("skipCleanup", false) == true)
         call.resolve(JSObject().put("status", status.jsValue))
       } catch (e: Exception) {
         AbsLogger.error(tag, "checkAutoDownloads failed (${e.javaClass.simpleName}: ${e.message})")
         call.reject(e.message ?: "checkAutoDownloads failed")
+      }
+    }
+  }
+
+  // Free space comes from getDownloadStorageStatus (the storage downloads go to); only what that lacks is here
+  @OptIn(DelicateCoroutinesApi::class)
+  @PluginMethod
+  fun getDownloadsStorage(call: PluginCall) {
+    GlobalScope.launch(Dispatchers.IO) {
+      try {
+        call.resolve(
+          JSObject()
+            .put("usedBytes", AutoDeleteManager.usedBytes(mainActivity))
+            .put("skippedForLimit", AutoDeleteManager.getSkippedForLimit(mainActivity))
+        )
+      } catch (e: Exception) {
+        AbsLogger.error(tag, "getDownloadsStorage failed (${e.javaClass.simpleName}: ${e.message})")
+        call.reject(e.message ?: "getDownloadsStorage failed")
       }
     }
   }

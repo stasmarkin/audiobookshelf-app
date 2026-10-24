@@ -111,6 +111,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     var hasNetworkConnectivity = false // Not 100% reliable has internet
     var isSwitchingPlayer = false // Used when switching between cast player and exoplayer
     private const val RESUME_WAKE_MS = 60_000L
+
+    // The running service, for background work (auto delete) that must not remove what is playing or queued
+    @Volatile var live: PlayerNotificationService? = null
   }
 
   private val tag = "PlayerNotificationServ"
@@ -165,7 +168,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   // Display name only: the id stays, so Android renames the existing channel and keeps its settings
   private var channelName = "Audiobookshelf+ Playback"
 
-  var currentPlaybackSession: PlaybackSession? = null
+  @Volatile var currentPlaybackSession: PlaybackSession? = null
   private var initialPlaybackRate: Float? = null
 
   private val metadataScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -205,7 +208,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           val expectedTracks: Int? = null
   )
   // Persisted on every change so a widget/headset Play can rebuild the queue after process death
-  var playlistQueue: List<PlaylistQueueItem> = emptyList()
+  @Volatile var playlistQueue: List<PlaylistQueueItem> = emptyList()
     set(value) {
       field = value
       PlaybackRestoreStore.saveQueue(this, field, playlistQueueIndex)
@@ -407,6 +410,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       audioNoisyReceiver = null
     }
 
+    if (live === this) live = null
     DLog.d(tag, "onDestroy")
     DLog.marker("Playback service destroyed")
     DLog.i(RESTORE_TAG, "Player service destroyed | hadSession=${currentPlaybackSession != null} | resumable=${PlaybackRestoreStore.isResumable(this)} | queue=${playlistQueue.size}")
@@ -465,6 +469,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
   override fun onCreate() {
     super.onCreate()
     ctx = this
+    live = this
 
     // Initialize Paper (also starts persistent diagnostics in a fresh process)
     DbManager.initialize(ctx)
@@ -2424,9 +2429,9 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (timeToSeek < 0) {
       DLog.w(tag, "seekPlayer invalid time $timeToSeek - setting to 0")
       timeToSeek = 0L
-    } else if (timeToSeek > getDuration()) {
+    } else if (timeToSeek >= getDuration()) {
       DLog.w(tag, "seekPlayer invalid time $timeToSeek - setting to MAX - 2000")
-      timeToSeek = getDuration() - 2000L
+      timeToSeek = (getDuration() - 2000L).coerceAtLeast(0L)
     }
     if (awaiting.isAwaiting) awaiting.onUserSeek(timeToSeek / 1000.0)
 
@@ -2611,6 +2616,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           mutableListOf(
                   "app.absplus.android",
                   "app.absplus.android.debug",
+                  "app.absplus.android.contributor",
                   ANDROID_AUTO_PKG_NAME,
                   ANDROID_AUTO_SIMULATOR_PKG_NAME,
                   ANDROID_WEARABLE_PKG_NAME,
