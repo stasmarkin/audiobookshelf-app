@@ -73,10 +73,12 @@ export default {
   },
   mounted() {
     this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$on('local-library-items-changed', this.init)
     this.init()
   },
   beforeDestroy() {
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$off('local-library-items-changed', this.init)
   }
 }
 </script>
