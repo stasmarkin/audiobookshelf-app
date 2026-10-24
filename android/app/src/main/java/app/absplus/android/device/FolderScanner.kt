@@ -297,7 +297,8 @@ class FolderScanner(private val ctx: Context) {
       localItem.isInvalid = false
     }
     DeviceManager.dbManager.saveLocalLibraryItem(localItem)
-    if (savedProgress == null) {
+    // An evicted copy's kept history is the same item's progress, so the server's snapshot still competes with it
+    if (savedProgress == null || retainedEvictionHistory) {
       // The snapshot above is from when the download was requested; userdata.db may know newer progress. After the
       // copy is saved: the write finds the copy to mirror into.
       val snapshot = item.userMediaProgress?.let(::serverProgressOf)
