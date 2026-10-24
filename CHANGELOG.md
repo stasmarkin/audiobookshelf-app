@@ -179,6 +179,9 @@ Merged into `plus`, not yet in a published release.
   catalog copy syncs with the server as when the app is open (until 10 minutes after Android Auto's last request), so
   new books appear in the car without opening the phone; this widens the rule that the catalog syncs only with the app
   in the foreground.
+- **No buffer bar for downloads** (contributed by Stanislav Markin): the player's seek bars no longer draw the buffered
+  stretch ahead of the position when a downloaded book or episode plays from the device, where it looked like
+  streaming. Streams draw what the player has buffered, as before.
 
 ## v0.20.0 — Automatic deletion, safer history and progress, long jumps
 
