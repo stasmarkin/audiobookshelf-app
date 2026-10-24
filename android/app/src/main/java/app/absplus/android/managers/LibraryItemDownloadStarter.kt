@@ -7,6 +7,8 @@ import app.absplus.android.device.AndroidVolumeProbe
 import app.absplus.android.device.AppStorage
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.device.DownloadStorageSetting
+import app.absplus.android.device.FolderAccess
+import app.absplus.android.device.VolumeProbe
 import app.absplus.android.models.DownloadItem
 import app.absplus.android.models.DownloadItemPart
 import app.absplus.android.plugins.AbsLogger
@@ -17,6 +19,7 @@ object LibraryItemDownloadStarter {
   private const val tag = "AbsDownloader"
   const val STORAGE_UNAVAILABLE_MESSAGE = "SD card not available"
   const val FOLDER_NOT_FOUND_MESSAGE = "Local Folder Not Found"
+  const val EPISODE_REFUSAL = "Episode has no downloadable audio file"
   const val ANOTHER_SERVER_MESSAGE = "This item is already downloaded from another server. Remove that download first."
 
   fun startPodcastEpisodeDownload(context: Context, libraryItem: LibraryItem, episode: PodcastEpisode, callback: (String?) -> Unit) {
@@ -25,6 +28,17 @@ object LibraryItemDownloadStarter {
       return
     }
     startLibraryItemDownload(context, libraryItem, null, episode, callback)
+  }
+
+  /**
+   * Why the episode could not be downloaded whatever the storage (incomplete server metadata would name the destination
+   * after the item folder itself or request file "null"), or null. Checked before anything is queued, written or freed.
+   */
+  fun episodeRefusal(episode: PodcastEpisode?): String? {
+    val audioTrack = episode?.audioTrack
+    val filename = getFilenameFromRelPath(audioTrack?.relPath ?: "")
+    return if (episode == null || audioTrack == null || episode.audioFile?.ino.isNullOrBlank() || filename.isBlank() ||
+            filename == "." || filename == "..") EPISODE_REFUSAL else null
   }
 
   private fun downloadedFromAnotherServer(libraryItemId: String): Boolean {
@@ -74,6 +88,35 @@ object LibraryItemDownloadStarter {
     DownloadServiceHost.enqueueResolved(context, "local_${libraryItem.id}", { buildDownloadItem(context, libraryItem, explicitFolderId, episode) }, callback)
   }
 
+  private fun resolveDestination(libraryItemId: String, mediaType: String, explicitFolderId: String?, probe: VolumeProbe): FolderResolution {
+    val existing = DeviceManager.dbManager.getLocalLibraryItemByLId(libraryItemId)
+    val queuedFolderId = DownloadServiceHost.queuedFolderId(libraryItemId)
+    val setting = DownloadStorageSetting.parse(DeviceManager.deviceData.deviceSettings?.downloadStorage)
+    return DownloadFolderResolver.resolveFolder(mediaType, explicitFolderId, existing, queuedFolderId, setting, probe) {
+      DeviceManager.dbManager.getLocalFolder(it)
+    }
+  }
+
+  /**
+   * Why a download of the item would not start now (the message the starter would answer with), or null. Advisory:
+   * nothing is queued, created or registered, so callers can check before they free space for it.
+   */
+  fun destinationRefusal(context: Context, libraryItem: LibraryItem, episode: PodcastEpisode?): String? {
+    if (libraryItem.mediaType == "podcast") episodeRefusal(episode)?.let { return it }
+    val probe = AndroidVolumeProbe(context)
+    val folder = when (val resolution = resolveDestination(libraryItem.id, libraryItem.mediaType, null, probe)) {
+      is FolderResolution.NotFound -> return FOLDER_NOT_FOUND_MESSAGE
+      is FolderResolution.Unavailable -> return STORAGE_UNAVAILABLE_MESSAGE
+      is FolderResolution.Create -> resolution.folder
+      is FolderResolution.Existing -> resolution.folder
+    }
+    if (AppStorage.isAppStorage(folder.id) && downloadedFromAnotherServer(libraryItem.id)) return ANOTHER_SERVER_MESSAGE
+    val usable =
+            if (AppStorage.isAppStorage(folder.id)) AppStorage.downloadsRoot(folder, probe) != null && AppStorage.isAvailable(folder, probe)
+            else FolderAccess.canWrite(context, folder, probe)
+    return if (usable) null else STORAGE_UNAVAILABLE_MESSAGE
+  }
+
   /** Runs under the item's lock, so the folder choice and the queued item see the same local item. */
   private fun buildDownloadItem(
           context: Context,
@@ -81,13 +124,8 @@ object LibraryItemDownloadStarter {
           explicitFolderId: String?,
           episode: PodcastEpisode?
   ): Pair<DownloadItem?, String?> {
-    val existing = DeviceManager.dbManager.getLocalLibraryItemByLId(libraryItem.id)
-    val queuedFolderId = DownloadServiceHost.queuedFolderId(libraryItem.id)
-    val setting = DownloadStorageSetting.parse(DeviceManager.deviceData.deviceSettings?.downloadStorage)
     val probe = AndroidVolumeProbe(context)
-    val resolution = DownloadFolderResolver.resolveFolder(libraryItem.mediaType, explicitFolderId, existing, queuedFolderId, setting, probe) {
-      DeviceManager.dbManager.getLocalFolder(it)
-    }
+    val resolution = resolveDestination(libraryItem.id, libraryItem.mediaType, explicitFolderId, probe)
     val localFolder = when (resolution) {
       is FolderResolution.NotFound -> return null to FOLDER_NOT_FOUND_MESSAGE
       is FolderResolution.Unavailable -> {
@@ -188,13 +226,8 @@ object LibraryItemDownloadStarter {
 
       val audioTrack = episode?.audioTrack
       val audioFileIno = episode?.audioFile?.ino
-      // Incomplete metadata would name the destination after the item folder itself (empty filename) or request
-      // file "null"; refuse before anything is queued or written
-      val episodeFilename = getFilenameFromRelPath(audioTrack?.relPath ?: "")
-      if (episode == null || audioTrack == null || audioFileIno.isNullOrBlank() || episodeFilename.isBlank() ||
-              episodeFilename == "." || episodeFilename == "..") {
-        return null to "Episode has no downloadable audio file"
-      }
+      // Refuse before anything is queued or written
+      episodeRefusal(episode)?.let { return null to it }
       val fileSize = audioTrack?.metadata?.size ?: 0
 
       AbsLogger.info(tag, "Queueing podcast episode download")
