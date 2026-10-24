@@ -82,6 +82,12 @@ class PlaybackSourceResolverTest {
     assertSame(other, (resolver(copy, other, cardOut = setOf("local_1")).resolve("a", "li1", null) as PlaybackSource.Local).item)
   }
 
+  @Test fun anEvictedCopyStreamsAndALocalIdStillReportsIt() {
+    val evicted = book("local_1", "li1").apply { isInvalid = true }
+    assertTrue("auto delete removed its files: stream", resolver(evicted).resolve("a", "li1", null) is PlaybackSource.Stream)
+    assertTrue("its own id has nothing to stream", resolver(evicted).resolve(null, "local_1", null) is PlaybackSource.LocalBroken)
+  }
+
   @Test fun downloadedBookIsAlwaysLocal() {
     val copy = book("local_1", "li1")
     val source = resolver(copy).resolve("a", "li1", null)

@@ -7,58 +7,6 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
-- **Android Auto without a reachable server** (issue #33, Discussion #30): the Android Auto menu now opens at once
-  with Downloads, instead of waiting for the server checks. With a server that was unreachable or stalled, the menu used
-  to appear only after the connection attempts gave up (about 3 s per saved server, or about 30 s when the server
-  answered its ping but then stalled). Downloaded books and podcast episodes can be opened and played right away.
-  Continue, Recent and Libraries are added as soon as the server has answered. Fully offline it was already immediate.
-- **Catalog copy keeps podcast episodes (schema 2):** updating keeps the offline catalog. Going back to a version
-  before this one empties the offline catalog until the next sync with the server; downloads, progress and bookmarks
-  are not affected.
-- **Playlists offline (all five catalog tabs now open offline):** the Playlists tab, a playlist's page and the
-  "Add to playlist" list read the same catalog copy, so they open without the server with your last synced
-  playlists, books and podcast episodes in the playlist's order. Play and the add-to-queue button of a playlist work
-  offline too: downloaded books and episodes play from the phone and an item that is not downloaded waits for the
-  server. Only downloads made with the current account and server are used. Playlists made, changed or deleted in
-  the web client follow on the phone within a few seconds while the app is connected, also on an open playlist page,
-  and the Playlists tab appears or disappears with them. Creating a playlist and adding or removing items need the
-  server: offline these buttons stay visible, disabled and marked "Requires the server". The "Add to playlist" list
-  now shows every playlist of the library, also beyond the first page. Until a library's playlists have been copied
-  once, they read the server as before; offline the tab says the catalog isn't downloaded yet.
-- **Collections offline:** the Collections tab and a collection's page read the same catalog copy, so they open
-  without the server with the last synced collections, each book in the collection's order (as arranged in the web
-  client). Play and the add-to-queue button of a collection work offline too: downloaded books play from the phone
-  and a book that is not downloaded waits for the server. A collection reordered, renamed, changed or deleted in the
-  web client follows on the phone within a few seconds while the app is connected, also on an open collection page;
-  a deleted collection goes back to the Collections tab. Books you can't access are left out, and a collection with
-  none left is hidden, as on the server. Offline, covers of books that are not downloaded show the title and author
-  placeholder. Until a library's collections have been copied once, both read the server as before; offline the tab
-  says the catalog isn't downloaded yet.
-- **Authors offline:** the Authors tab reads the same catalog copy, so it opens without the server with the last
-  synced authors and their book counts, sorted by name (the server listed them in no set order). Tapping an author
-  opens the Library tab filtered to their books, offline too, also for an author added on the server since the
-  last full sync. Offline, or when a photo fails to load, author photos show the placeholder. New, renamed, merged
-  and removed authors and changed book counts follow the server while the app is connected. Until a library's
-  authors have been copied once, the tab reads the server as before; offline it says the catalog isn't downloaded
-  yet.
-- **Series offline:** the Series tab and a series' page read the same catalog copy, so they open without the server
-  with the last synced series, their books in series order and, with "Collapse Series" on in the series page menu,
-  the books of other series folded into one card as on the server. Play and the add-to-queue button of a series work
-  offline too: downloaded books play from the phone and a book that is not downloaded waits for the server. Fixed:
-  offline, the series Play prompt ("Download or stream") counted the downloaded books as missing. A series that no
-  longer exists now goes back to the Series tab instead of an error page. Until a library's series have been copied
-  once, both read the server as before.
-- **Library tab offline:** the app now keeps a copy of each library's catalog (libraries, books, series and the
-  filter lists) on the phone and the Library tab reads it, so it opens without the server, also on a cold start in
-  airplane mode, with the last synced state and the same filters, sorting and collapsed series as online. The copy is
-  filled in the background after each full sync with the server (on start, on reconnect, on Sync now; the app-bar
-  indicator shows "Syncing catalog" meanwhile), only rewrites what changed, and follows changes made on the server
-  while the app is connected. Until a library has been copied once, the tab reads the server as before; offline it
-  says the catalog isn't downloaded yet. Offline, books without a downloaded copy are dimmed, marked "Not available
-  offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
-  limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
-  the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
-  the server (offline the tab says so).
 - **Server unreachable is no longer "connected":** when the server goes down while Wi-Fi stays up, the app notices
   within seconds (the live connection drops, the app checks the server's `/ping`; up to about a minute when the whole
   server machine is switched off and the connection just goes silent) and the indicator in the app bar
@@ -114,6 +62,106 @@ Merged into `plus`, not yet in a published release.
   at the same position. A book starts where it was last left on this phone, also after a seek while paused offline.
   Rolling back to the previous version is safe: a queue saved by this version streams its entries there, and after a
   restart it is not reattached to a downloaded book's restored session (nothing is lost).
+- **Catalog copy on the device (groundwork for browsing offline):** after each full sync with the server (on start,
+  on reconnect, on Sync now) the app now also copies the catalog of every library (libraries, books, series and the
+  filter lists) into a database on the phone, page by page in the background, and only rewrites what changed since
+  the last copy. Nothing changes on screen yet: the tabs still read the server as before. The first copy of a large
+  library takes a while and some mobile data; later ones only fetch the lists again.
+- **Library tab offline:** the app now keeps a copy of each library's catalog (libraries, books, series and the
+  filter lists) on the phone and the Library tab reads it, so it opens without the server, also on a cold start in
+  airplane mode, with the last synced state and the same filters, sorting and collapsed series as online. The copy is
+  filled in the background after each full sync with the server (on start, on reconnect, on Sync now; the app-bar
+  indicator shows "Syncing catalog" meanwhile), only rewrites what changed, and follows changes made on the server
+  while the app is connected. Until a library has been copied once, the tab reads the server as before; offline it
+  says the catalog isn't downloaded yet. Offline, books without a downloaded copy are dimmed, marked "Not available
+  offline" and have no Play button. The first copy of a large library takes a while and some mobile data. Known
+  limits: covers of books that are not downloaded are placeholders offline; opening such a book offline still needs
+  the server; filtering by an author or narrator whose name contains a comma, and by "supplementary e-book", needs
+  the server (offline the tab says so). The Series, Authors, Collections and Playlists tabs
+  are unchanged.
+- **Series offline:** the Series tab and a series' page read the same catalog copy, so they open without the server
+  with the last synced series, their books in series order and, with "Collapse Series" on in the series page menu,
+  the books of other series folded into one card as on the server. Play and the add-to-queue button of a series work
+  offline too: downloaded books play from the phone and a book that is not downloaded waits for the server. Fixed:
+  offline, the series Play prompt ("Download or stream") counted the downloaded books as missing. A series that no
+  longer exists now goes back to the Series tab instead of an error page. Until a library's series have been copied
+  once, both read the server as before.
+- **Authors offline:** the Authors tab reads the same catalog copy, so it opens without the server with the last
+  synced authors and their book counts, sorted by name (the server listed them in no set order). Tapping an author
+  opens the Library tab filtered to their books, offline too, also for an author added on the server since the
+  last full sync. Offline, or when a photo fails to load, author photos show the placeholder. New, renamed, merged
+  and removed authors and changed book counts follow the server while the app is connected. Until a library's
+  authors have been copied once, the tab reads the server as before; offline it says the catalog isn't downloaded
+  yet.
+- **Collections offline:** the Collections tab and a collection's page read the same catalog copy, so they open
+  without the server with the last synced collections, each book in the collection's order (as arranged in the web
+  client). Play and the add-to-queue button of a collection work offline too: downloaded books play from the phone
+  and a book that is not downloaded waits for the server. A collection reordered, renamed, changed or deleted in the
+  web client follows on the phone within a few seconds while the app is connected, also on an open collection page;
+  a deleted collection goes back to the Collections tab. Books you can't access are left out, and a collection with
+  none left is hidden, as on the server. Offline, covers of books that are not downloaded show the title and author
+  placeholder. Until a library's collections have been copied once, both read the server as before; offline the tab
+  says the catalog isn't downloaded yet.
+- **Playlists offline (all five catalog tabs now open offline):** the Playlists tab, a playlist's page and the
+  "Add to playlist" list read the same catalog copy, so they open without the server with your last synced
+  playlists, books and podcast episodes in the playlist's order. Play and the add-to-queue button of a playlist work
+  offline too: downloaded books and episodes play from the phone and an item that is not downloaded waits for the
+  server. Only downloads made with the current account and server are used. Playlists made, changed or deleted in
+  the web client follow on the phone within a few seconds while the app is connected, also on an open playlist page,
+  and the Playlists tab appears or disappears with them. Creating a playlist and adding or removing items need the
+  server: offline these buttons stay visible, disabled and marked "Requires the server". The "Add to playlist" list
+  now shows every playlist of the library, also beyond the first page. Until a library's playlists have been copied
+  once, they read the server as before; offline the tab says the catalog isn't downloaded yet.
+- **Catalog copy keeps podcast episodes (schema 2):** updating keeps the offline catalog. Going back to a version
+  before this one empties the offline catalog until the next sync with the server; downloads, progress and bookmarks
+  are not affected.
+
+## v0.20.0 — Automatic deletion, safer history and progress, long jumps
+
+Published 2026-10-21.
+
+- **Android 7 and partial-delete messages:** on Android 7 the delete message no longer promises a retry that cannot
+  work there (nothing is deleted and the download stays). If access to the folder is lost after some files were already
+  deleted, the message now says so instead of hiding the partial state; the records are kept either way.
+- **Frontend build check:** `npm run generate` now builds in a private `.nuxt` folder and verifies that the bundle matches
+  the checkout (see `docs/release-process.md`).
+- **New launcher icon** (brushed purple disc): the app icon is now a dry-brush purple disc with the white headphones-and-books emblem and
+  the original outlined plus, replacing the bronze icon (launcher, round, adaptive, monochrome, in-app logo and widget/notification
+  fallback artwork). Release has a purple plus; debug and contributor builds are identical except for a red plus.
+- **Android Auto without a reachable server** (issue #33, Discussion #30): the Android Auto menu now opens at once
+  with Downloads, instead of waiting for the server checks. With a server that was unreachable or stalled, the menu used
+  to appear only after the connection attempts gave up (about 3 s per saved server, or about 30 s when the server
+  answered its ping but then stalled). Downloaded books and podcast episodes can be opened and played right away.
+  Continue, Recent and Libraries are added as soon as the server has answered. Fully offline it was already immediate.
+- **Listening-history safety:** startup storage checks keep audiobook and podcast identities, listening progress,
+  completion history and bookmarks when files or storage are unavailable. Automatic eviction removes downloaded bytes
+  while retaining those records. Re-downloading an evicted book keeps its identity and existing local progress.
+- **Managed download folders and recovery:** folder selection explains that Audiobookshelf+ manages the selected
+  folder. SAF publication refuses unsafe collisions and does not automatically delete provider documents. Failed
+  downloads with lost folder access offer Choose folder, followed by an explicit Retry.
+- **Paused seeks:** an explicit seek while paused is saved without requiring playback to resume. When the next item
+  starts (a playlist, series or podcast continuing, Android Auto, media buttons or the widget), the player's seek to that
+  item's start is no longer saved into the previous item, which kept its finished state and position.
+- **Downloads into a taken file name:** a download whose name is already used in the selected folder (for example by
+  files left from a download whose record was lost) is saved under its own alternative name instead of failing; nothing
+  that exists is replaced.
+- **Delete messages:** deleting a download that can't be deleted now says why (folder access lost, folder or storage
+  missing, SD card out, a folder where a file should be, a file that couldn't be deleted, some files deleted) instead of
+  "Failed to delete" or "SD card not available". Deleting downloads in a picked folder now works on Android 8 and 9;
+  on Android 7 the app says to use the file manager.
+- **Automatic deletion and download budgets** (contributed by Stanislav Markin, PR #32): eligible finished audiobook
+  downloads can be evicted to reclaim space. The download budget is best-effort; unavailable storage and unsupported
+  SAF deletion are deferred, and listening history is retained. Podcast retention remains a separate policy.
+- **Downloads at the Android 15 time limit** (contributed by Stanislav Markin): Android 15 lets an app's downloads run
+  in the background for 6 hours a day. When that time is used up, downloads now pause instead of the app crashing, and
+  Android restarting the download service no longer crashes it again and again. Paused downloads keep what they have
+  downloaded, stay in the list as "Continues when the app is open", and continue from there when the app is opened. A
+  notification says that Android paused them. Background auto download runs continue in their own windows.
+- **Long jumps** (Settings → Long jump backwards / forwards time): an optional second jump in each direction, from 15
+  seconds to 30 minutes, Off by default. When on, the full player shows it outside the short jump. The notification,
+  headset, widget and Android Auto keep the short jumps. For everyone, the full player's jump keys are now chevrons
+  centered on Play (the short jumps used circular arrows); the collapsed player keeps the arrows.
+  Narrow layouts reserve space for every enabled control, and seek boundaries remain nonnegative for very short media.
 
 ## v0.19.0 — Podcast auto downloads, SD card storage, E-ink and Bluetooth controls
 

@@ -17,8 +17,12 @@ class AbsDownloaderWeb extends WebPlugin {
     return { errorCode: 'notFound' }
   }
 
-  async checkAutoDownloads() {
+  async checkAutoDownloads(_options) {
     return { status: 'disabled' }
+  }
+
+  async getDownloadsStorage() {
+    return { usedBytes: 0, skippedForLimit: 0 }
   }
 
   async getPodcastAutoDownload() {
