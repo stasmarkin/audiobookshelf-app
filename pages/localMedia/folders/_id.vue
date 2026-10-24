@@ -238,6 +238,7 @@ export default {
   },
   async mounted() {
     this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$on('local-library-items-changed', this.init)
     this.init()
     const listener = await AbsFileSystem.addListener('onRescanProgress', this.onRescanProgress)
     // Left the page before the listener was registered
@@ -252,6 +253,7 @@ export default {
   },
   beforeDestroy() {
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$off('local-library-items-changed', this.init)
     this.rescanProgressListener?.remove()
   }
 }

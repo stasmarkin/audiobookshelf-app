@@ -50,6 +50,14 @@ export default {
     '@/plugins/i18n.js'
   ],
 
+  // Private build directory inside the checkout. For static targets `nuxt generate` ignores buildDir and uses
+  // node_modules/.cache/nuxt (cli-generate.js), which a linked node_modules shares between checkouts: the generated store
+  // entry then resolved another checkout's store/index.js. static.cacheDir is the setting that is honored
+  // (see scripts/verify-frontend-source.js).
+  static: {
+    cacheDir: '.nuxt'
+  },
+
   components: true,
 
   modules: ['@nuxtjs/axios'],
