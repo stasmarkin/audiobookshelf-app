@@ -44,13 +44,19 @@ object DeviceManager {
   const val tag = "DeviceManager"
 
   val dbManager: DbManager = DbManager()
+  // Serializes account changes against each automatic file deletion, never the general progress writer.
+  val downloadAuthorizationLock = Any()
+  @Volatile var downloadAuthorizationGeneration: Long = 0L
+    private set
   var deviceData: DeviceData = dbManager.getDeviceData()
+    set(value) { synchronized(downloadAuthorizationLock) { downloadAuthorizationGeneration++; field = value } }
   private val _liveSessionChanges = MutableStateFlow(0L)
   /** Counts writes of [serverConnectionConfig]: the app's sign-in and the native code that sets it on its own. */
   val liveSessionChanges: StateFlow<Long> = _liveSessionChanges.asStateFlow()
+  @Volatile
   var serverConnectionConfig: ServerConnectionConfig? = null
     set(value) {
-      field = value
+      synchronized(downloadAuthorizationLock) { downloadAuthorizationGeneration++; field = value }
       _liveSessionChanges.update { it + 1 }
     }
 
@@ -137,6 +143,17 @@ object DeviceManager {
           dbManager.saveDeviceData(deviceData)
         } catch (e: Exception) {
           Log.e(tag, "Failed to save backfilled download storage setting", e)
+        }
+      }
+    }
+    // Auto delete added: the delay's default is 1 day and 0 is valid, so only "never saved" (null) is backfilled
+    deviceData.deviceSettings?.let {
+      if (it.autoDeleteDelayDays == null) {
+        it.autoDeleteDelayDays = 1
+        try {
+          dbManager.saveDeviceData(deviceData)
+        } catch (e: Exception) {
+          Log.e(tag, "Failed to save backfilled auto delete settings", e)
         }
       }
     }
