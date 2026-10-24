@@ -52,6 +52,7 @@ The debug and release builds of Audiobookshelf+ itself are also distinct package
 | --- | --- |
 | Audiobookshelf+ release | `app.absplus.android` |
 | Audiobookshelf+ debug | `app.absplus.android.debug` |
+| Audiobookshelf+ contributor prereleases (from `v0.20.0-dev.2`) | `app.absplus.android.contributor` |
 
 The same rules as above apply between them: Android treats these as two separate apps.
 - A debug build and a release build can be installed on the same device at the same time.
@@ -89,7 +90,9 @@ An external Audible screenshot may be kept only as a deliberately retained refer
 
 **User content is not app branding.** Cover art from a user's own library may legitimately contain Audible logos or branding. That is user content, not Audiobookshelf+ branding, and the app does not censor or alter it; it is not a rendering defect. But public Audiobookshelf+ screenshots, mockups, documentation imagery, store graphics and promotional composites must avoid showing library items whose cover art visibly carries Audible branding.
 
-In-app logo: the app bar and the server-connect screen show `static/Logo.png`, which is the Audiobookshelf+ icon with the bronze plus badge (the same artwork as `android/app/src/main/res/drawable/icon.png`, from the launcher-icon rebrand). The playback notification channel is named "Audiobookshelf+ Playback"; its id (`audiobookshelf_channel`) is unchanged so Android renames the existing channel and keeps the user's settings for it.
+In-app logo: the app bar and the server-connect screen show `static/Logo.png`, which is the Audiobookshelf+ icon (purple disc, white headphones and books, purple plus; the same artwork as `android/app/src/main/res/drawable/icon.png`, which the widgets and notifications reuse). The playback notification channel is named "Audiobookshelf+ Playback"; its id (`audiobookshelf_channel`) is unchanged so Android renames the existing channel and keeps the user's settings for it.
+
+Launcher icon: a dry-brush purple disc (base `#340892`, wide violet bristle strokes and a lighter sweep along the rim, palette taken from the ADD-OCD ring artwork) with white headphones, three books and a shelf line, and the original rectilinear plus with its thin black outline. The release build has a purple plus; debug and contributor builds use the identical artwork with only the plus fill red (`#F40E10`). The red set lives in `android/app/src/devicon/res` and is added to both the `debug` and `contributor` source sets (the contributor build type is `initWith release`, so it does not inherit `src/debug`). Themed (monochrome) launchers draw only the shape, so they cannot show the purple-versus-red difference; no label is added to compensate. The earlier bronze icon is replaced everywhere it was reused.
 
 Audiobookshelf vs Audiobookshelf+: Audiobookshelf+ names this Android client. Audiobookshelf names the server, the upstream project and its ecosystem, and stays in server wording ("Audiobookshelf server"), upstream links and attribution. Technical identifiers (the `audiobookshelf://oauth` redirect, the OIDC client id, the notification channel id, package names in upstream code) are not renamed.
 
