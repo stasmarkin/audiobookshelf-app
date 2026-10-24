@@ -42,6 +42,8 @@ class DownloadItemManager(
   private val tag = "DownloadItemManager"
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val activeCalls = ConcurrentHashMap<String, InternalDownloadManager.DownloadHandle>()
+  // A paused part restarts as the same object, so callbacks of its cancelled request check they are still current
+  private val transferAttempts = ConcurrentHashMap<String, Any>()
   private val safFolderLocks = ConcurrentHashMap<String, Any>()
   private val scanLocks = ConcurrentHashMap<String, Any>()
   private val reservations = mutableMapOf<String, Long>()
@@ -54,6 +56,7 @@ class DownloadItemManager(
   // Lazy: only token refresh needs it, and building it opens the Android keystore
   private val apiHandler by lazy { ApiHandler(context) }
   private var watcherRunning = false
+  private var transfersSuspended = false
   private val jacksonMapper =
           jacksonObjectMapper()
                   .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature())
@@ -127,15 +130,8 @@ class DownloadItemManager(
   fun pauseBlockedAutoTransfers() {
     if (currentDownloadItemParts.isEmpty() || (!autoTransfersHeld && autoGate.allowedNow())) return
     downloadItemQueue.filter { autoGate.isAuto(it) }.forEach { item ->
-      item.downloadItemParts.filter { it in currentDownloadItemParts && !it.completed && !it.isMoving }.forEach { part ->
-        activeCalls.remove(part.id)?.cancel()
-        currentDownloadItemParts.remove(part)
-        reservations.remove(part.destinationPath)
-        part.downloadId = null
-        part.bytesDownloaded = File(part.destinationPath).takeIf { it.exists() }?.length() ?: 0L
-        AbsLogger.info(tag, "Paused auto download ${part.filename}: ${if (autoTransfersHeld) "the background window ended" else "auto download conditions are not met"}")
-        persist(item, force = true)
-        clientEventEmitter.onDownloadItemPartUpdate(part)
+      runningTransfers(item).forEach {
+        pauseTransfer(item, it, if (autoTransfersHeld) "the background window ended" else "auto download conditions are not met")
       }
     }
   }
@@ -158,8 +154,9 @@ class DownloadItemManager(
 
   /**
    * Why a queued item is not transferring, for the Downloads screen: "sdCard" (its finished files wait for the SD card
-   * to be saved), or for an auto download "network", "wifi", "charging" (the auto download conditions) or
-   * "background" (the background window ended; it continues in the next one or when the app is open); else null.
+   * to be saved), "background" for any download while Android paused the download service, or for an auto download
+   * "network", "wifi", "charging" (the auto download conditions) or "background" (the background window ended; it
+   * continues in the next one or when the app is open); else null.
    */
   @Synchronized
   fun waitingReason(item: DownloadItem): String? {
@@ -167,13 +164,50 @@ class DownloadItemManager(
     val waiting = item.downloadItemParts.any {
       !it.moved && !it.completed && !it.failed && !it.isMoving && it !in currentDownloadItemParts
     }
-    if (!waiting || !autoGate.isAuto(item)) return null
-    return autoGate.blockedReason() ?: if (autoTransfersHeld) "background" else null
+    if (!waiting) return null
+    val auto = autoGate.isAuto(item)
+    // An auto download's own condition comes first; Android's pause of the service lifts when the app is open
+    val blocked = if (auto) autoGate.blockedReason() else null
+    return blocked ?: if (transfersSuspended || (auto && autoTransfersHeld)) "background" else null
   }
 
   /** Whether the auto download feature queued this item (Downloads screen label). */
   @Synchronized
   fun isAutoOwned(item: DownloadItem): Boolean = autoGate.isAuto(item)
+
+  /**
+   * Android withdrew the foreground service (Android 15+ dataSync time limit): running transfers stop with their
+   * bytes kept and none starts until [resumeTransfers]. Nothing fails, so the queue and auto download state stay.
+   */
+  @Synchronized
+  fun suspendTransfers() {
+    transfersSuspended = true
+    downloadItemQueue.forEach { item ->
+      runningTransfers(item).forEach { pauseTransfer(item, it, "Android paused the download service") }
+    }
+  }
+
+  @Synchronized
+  fun resumeTransfers() {
+    transfersSuspended = false
+    resumeWork()
+  }
+
+  // A part that already failed stays for the watcher, whose failOrRetry counts the attempt
+  private fun runningTransfers(item: DownloadItem): List<DownloadItemPart> =
+          item.downloadItemParts.filter { it in currentDownloadItemParts && !it.completed && !it.failed && !it.isMoving }
+
+  private fun pauseTransfer(item: DownloadItem, part: DownloadItemPart, reason: String) {
+    transferAttempts.remove(part.id)
+    activeCalls.remove(part.id)?.cancel()
+    currentDownloadItemParts.remove(part)
+    reservations.remove(part.destinationPath)
+    part.downloadId = null
+    part.bytesDownloaded = File(part.destinationPath).takeIf { it.exists() }?.length() ?: 0L
+    AbsLogger.info(tag, "Paused download ${part.filename}: $reason")
+    persist(item, force = true)
+    clientEventEmitter.onDownloadItemPartUpdate(part)
+  }
 
   @Synchronized
   fun restoreQueue() {
@@ -412,6 +446,20 @@ class DownloadItemManager(
     return true
   }
 
+  /** Whether a retry would start the item's transfers again: nothing of it is running or being saved. */
+  @Synchronized
+  fun canRetryDownloadItem(downloadItemId: String): Boolean {
+    val item = downloadItemQueue.find { it.id == downloadItemId } ?: return false
+    return DownloadControls.canRetry(item) { it in currentDownloadItemParts }
+  }
+
+  /** Whether credentials can be safely chosen for every unfinished file; a retry without them only ends in a hold. Changes nothing. */
+  @Synchronized
+  fun hasDownloadAuthorization(downloadItemId: String): Boolean {
+    val item = downloadItemQueue.find { it.id == downloadItemId } ?: return false
+    return item.downloadItemParts.none { !it.moved && downloadToken(it, item) == null }
+  }
+
   @Synchronized
   fun isStorageUnavailable(downloadItemId: String): Boolean {
     val item = downloadItemQueue.find { it.id == downloadItemId } ?: return false
@@ -446,6 +494,7 @@ class DownloadItemManager(
     }
     item.downloadItemParts.forEach { part ->
       // Callbacks of a cancelled transfer ignore parts that are no longer active
+      transferAttempts.remove(part.id)
       activeCalls.remove(part.id)?.cancel()
       currentDownloadItemParts.remove(part)
       reservations.remove(part.destinationPath)
@@ -554,7 +603,7 @@ class DownloadItemManager(
       slots = MAX_SIMULTANEOUS_DOWNLOADS - currentDownloadItemParts.size
       if (slots <= 0) return@forEach
       // Staged parts above may finish (no network); new transfers of a blocked auto item wait, untouched
-      if ((!allowed || autoTransfersHeld) && autoGate.isAuto(item)) return@forEach
+      if (transfersSuspended || ((!allowed || autoTransfersHeld) && autoGate.isAuto(item))) return@forEach
       item.getNextDownloadItemParts(slots).forEach { part ->
         // A same-named file in the device folder is only reused when no other download owns it (R29-N02)
         val existingFile = findSharedStorageFile(part)?.takeIf {
@@ -605,6 +654,9 @@ class DownloadItemManager(
     part.waitingForSpace = false
     part.lastUpdateTime = System.currentTimeMillis()
     currentDownloadItemParts.add(part)
+    val attempt = Any()
+    transferAttempts[part.id] = attempt
+    fun superseded() = part !in currentDownloadItemParts || transferAttempts[part.id] !== attempt
     persist(item, force = true)
     AbsLogger.info(tag, "Starting download for ${part.filename}")
     val handle =
@@ -614,7 +666,7 @@ class DownloadItemManager(
                             object : InternalProgressCallback {
                               override fun onSizeResolved(totalBytes: Long) {
                                 synchronized(this@DownloadItemManager) {
-                                  if (part !in currentDownloadItemParts || totalBytes < 0L) return
+                                  if (superseded() || totalBytes < 0L) return
                                   if (part.fileSize == totalBytes) return
                                   AbsLogger.info(
                                           tag,
@@ -629,7 +681,7 @@ class DownloadItemManager(
 
                               override fun onProgress(totalBytesWritten: Long, progress: Long) {
                                 synchronized(this@DownloadItemManager) {
-                                  if (part !in currentDownloadItemParts) return
+                                  if (superseded()) return
                                   part.bytesDownloaded = totalBytesWritten
                                   part.progress = progress
                                   part.lastUpdateTime = System.currentTimeMillis()
@@ -639,7 +691,7 @@ class DownloadItemManager(
 
                               override fun onComplete(failed: Boolean) {
                                 synchronized(this@DownloadItemManager) {
-                                  if (part !in currentDownloadItemParts) return
+                                  if (superseded()) return
                                   part.failed = failed
                                   part.completed = !failed
                                   part.lastUpdateTime = System.currentTimeMillis()
@@ -650,14 +702,14 @@ class DownloadItemManager(
 
                               override fun onAuthError() {
                                 synchronized(this@DownloadItemManager) {
-                                  if (part !in currentDownloadItemParts) return
+                                  if (superseded()) return
                                   handleAuthError(item, part)
                                 }
                               }
 
                               override fun onValidator(validator: String?) {
                                 synchronized(this@DownloadItemManager) {
-                                  if (part !in currentDownloadItemParts) return
+                                  if (superseded()) return
                                   part.resumeValidator = validator
                                   persist(item, force = true)
                                 }
@@ -710,7 +762,9 @@ class DownloadItemManager(
         pauseBlockedAutoTransfers()
         synchronized(this@DownloadItemManager) {
           checkUpdateDownloadQueue()
-          if (!hasWork()) {
+          // Suspended work waits for resumeTransfers, which restarts the watcher
+          val idle = transfersSuspended && currentDownloadItemParts.isEmpty() && finalizingItems.isEmpty()
+          if (idle || !hasWork()) {
             watcherRunning = false
             notifyQueueChanged()
             return@launch
@@ -937,6 +991,10 @@ class DownloadItemManager(
 
   private fun moveDownloadedFile(item: DownloadItem, part: DownloadItemPart) {
     if (part.moved || part.isMoving) return
+    if (part.localFolderUrl != item.localFolder.contentUrl || part.localFolderId != item.localFolder.id) {
+      failFinalization(item, part, "Download destination does not match the selected folder")
+      return
+    }
     if (!hasFolderAccess(item)) {
       failPermissionLost(item, part)
       return
@@ -952,69 +1010,30 @@ class DownloadItemManager(
                 throw IllegalStateException("Insufficient storage for SAF copy")
         val folderKey = "${root.uri}/${part.finalDestinationSubfolder}"
         val folderLock = safFolderLocks.computeIfAbsent(folderKey) { Any() }
-        val folder =
-                synchronized(folderLock) { getOrCreateFolder(root, part.finalDestinationSubfolder) }
-                        ?: throw IllegalStateException("Could not create SAF destination folder")
-        val temporaryName = ".${part.filename}.${part.id.hashCode()}.part"
-        folder.findFile(temporaryName)?.delete()
-        val temporary =
-                folder.createFile(mimeTypeFor(part), temporaryName)
-                        ?: throw IllegalStateException("Could not create SAF temporary file")
         val staging = File(part.destinationPath)
-        FileInputStream(staging).use { input ->
-          context.contentResolver.openOutputStream(temporary.uri, "w")?.use { input.copyTo(it) }
-                  ?: throw IllegalStateException("Could not open SAF output stream")
+        check(part.completed && (part.fileSize <= 0L || staging.length() == part.fileSize)) {
+          "Download staging is incomplete"
         }
-        if (temporary.length() != staging.length())
-                throw IllegalStateException("SAF copy size mismatch")
-        // R29-N02: the ownership decision, the replacement and the rename are one step per destination folder
         val destination = synchronized(folderLock) {
-          val backupName = ".${part.filename}.abs-backup"
-          // A backup left by an interrupted finalization may be the only copy: restore it, or keep it aside
-          folder.findFile(backupName)?.let { left ->
-            if (findDocumentByFilename(folder, part) == null) {
-              if (!left.renameTo(part.filename))
-                      throw IllegalStateException("Could not restore the previous copy of this download location")
-            } else if (!left.renameTo(".${part.filename}.abs-preserved-${System.currentTimeMillis()}"))
-                    throw IllegalStateException("Could not set aside an earlier backup of this download location")
-          }
-          val existing = findDocumentByFilename(folder, part)
           val owner = DownloadDestinationGuard.ownerOf(item, part)
           val others = synchronized(this@DownloadItemManager) { finalizationOwners(item, part, part.finalDestinationPath) }
-          val verdict = DownloadDestinationGuard.verdict(owner, others, existing != null)
-          // Another download's file, or a file in the user's folder nobody accounts for: never delete it
-          if (verdict == DownloadDestinationGuard.Verdict.OTHER_OWNER || verdict == DownloadDestinationGuard.Verdict.UNKNOWN_FILE) {
-            temporary.delete()
-            null
-          } else {
-            // The same owner's previous copy is kept as a backup until the new file is in place
-            if (existing != null && !existing.renameTo(backupName))
-                    throw IllegalStateException("Could not protect existing file")
-            if (!temporary.renameTo(part.filename)) {
-              if (existing != null && !existing.renameTo(part.filename))
-                      AbsLogger.error(tag, "Could not restore ${part.filename}; the previous copy is kept as $backupName")
-              throw IllegalStateException("Could not finalize SAF temporary file")
-            }
-            val finalized = findDocumentByFilename(folder, part)
-                    ?: throw IllegalStateException("Could not reopen finalized SAF file")
-            if (existing != null && !existing.delete()) AbsLogger.error(tag, "Could not remove the previous copy $backupName")
-            finalized
+          // A name another download owns on record, or one taken in the folder, is never replaced: this download gets
+          // its own stable alternative name instead (the user's or an older download's files stay as they are)
+          val alternates = DownloadDestinationGuard.alternateFilename(part.filename, owner).let { alt ->
+            listOf(alt) + (2..MAX_ALTERNATE_NAMES).map { DownloadDestinationGuard.numberedFilename(alt, it) }
           }
+          val preferred = if (others.all { DownloadDestinationGuard.sameOwner(owner, it) }) part.filename else alternates.first()
+          SafDownloadPublisher(context).publish(root, part.finalDestinationSubfolder, preferred, mimeTypeFor(part), staging,
+                  alternates.filter { it != preferred })
         }
-        if (destination == null) {
-          synchronized(this@DownloadItemManager) {
-            markTerminalFailure(item, part, "Download location is used by another file; nothing was replaced")
-          }
-          return@launch
-        }
-        if (destination.length() != staging.length())
-                throw IllegalStateException("SAF final size mismatch")
-        if (!staging.delete()) AbsLogger.error(tag, "Could not remove staging file ${staging.name}")
-        part.completedDestinationUri = destination.uri.toString()
+        part.completedDestinationUri = destination.toString()
+        // Persist the actual returned identity before completing or discarding private staging.
+        persist(item, force = true)
         AbsLogger.info(tag, "Move completed for ${part.filename} (selected device folder)")
         completePart(item, part)
+        if (!staging.delete()) AbsLogger.error(tag, "Could not remove private download staging")
       } catch (e: Exception) {
-        failFinalization(item, part, "SAF copy failed: ${e.message}")
+        failFinalization(item, part, "Could not save download: ${e.message}. Staging was kept. Check the selected folder in the system file manager, then Retry; reselect it if access was lost.")
       }
     }
   }
@@ -1024,7 +1043,7 @@ class DownloadItemManager(
     AbsLogger.error(tag, message)
     part.isMoving = false
     part.failed = true
-    failOrRetry(item, part, message)
+    markTerminalFailure(item, part, message)
   }
 
   @Synchronized
@@ -1054,6 +1073,14 @@ class DownloadItemManager(
               waitForCard = true
               AbsLogger.info(tag, "Download ${item.id} is complete; finalizing waits for the SD card")
               return@scanDownloadItem
+            }
+            // Before the item leaves the queue (which protects it): progress copied from the server with the files predates this
+            scanResult?.localLibraryItem?.let { lli ->
+              try {
+                AutoDeleteManager.recordDownloaded(lli)
+              } catch (e: Exception) {
+                AbsLogger.error(tag, "Could not record the download time of ${item.id}: ${e.message}")
+              }
             }
             val event =
                     JSObject().apply {
@@ -1120,6 +1147,7 @@ class DownloadItemManager(
 
   @Synchronized
   private fun removeActivePart(part: DownloadItemPart) {
+    transferAttempts.remove(part.id)
     activeCalls.remove(part.id)
     currentDownloadItemParts.remove(part)
   }
@@ -1141,24 +1169,15 @@ class DownloadItemManager(
     scope.cancel()
   }
 
-  private fun getOrCreateFolder(root: DocumentFile, relativePath: String): DocumentFile? {
-    var current = root
-    relativePath.split('/').filter { it.isNotBlank() }.forEach { segment ->
-      if (segment == "." || segment == "..") return null
-      current = current.findFile(segment) ?: current.createDirectory(segment) ?: return null
-    }
-    return current
-  }
-
   private fun findSharedStorageFile(part: DownloadItemPart): DocumentFile? {
     if (part.isAppStorage) return null
-    val root = DocumentFile.fromTreeUri(context, Uri.parse(part.localFolderUrl)) ?: return null
-    var folder = root
-    part.finalDestinationSubfolder.split('/').filter { it.isNotBlank() }.forEach { segment ->
-      if (segment == "." || segment == "..") return null
-      folder = folder.findFile(segment) ?: return null
-    }
-    val file = findDocumentByFilename(folder, part) ?: return null
+    // A display name and length cannot identify a successfully published download.
+    // Only this persisted part's actual, previously verified document may be re-observed.
+    val uri = part.completedDestinationUri?.let(Uri::parse) ?: return null
+    val tree = Uri.parse(part.localFolderUrl)
+    if (uri.authority != tree.authority || !android.provider.DocumentsContract.isTreeUri(uri) ||
+            android.provider.DocumentsContract.getTreeDocumentId(uri) != android.provider.DocumentsContract.getTreeDocumentId(tree)) return null
+    val file = DocumentFile.fromSingleUri(context, uri) ?: return null
     if (!file.isFile) return null
     if (part.fileSize > 0L && file.length() != part.fileSize) return null
     if (part.fileSize <= 0L && file.length() <= 0L) return null
@@ -1295,6 +1314,8 @@ class DownloadItemManager(
   private companion object {
     const val APP_MANAGED_DOWNLOAD_ID = -1L
     const val MAX_SIMULTANEOUS_DOWNLOADS = 3
+    // A taken download name gets the owner's alternative name, then numbered variants of it, up to this many names
+    const val MAX_ALTERNATE_NAMES = 9
     const val WATCH_INTERVAL_MS = 1_000L
     const val STALL_TIMEOUT_MS = 60_000L
     const val MAX_RETRIES = 5

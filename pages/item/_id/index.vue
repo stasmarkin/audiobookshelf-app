@@ -255,7 +255,7 @@ export default {
     },
     hasLocal() {
       // Server library item has matching local library item
-      return this.isLocal || this.libraryItem.localLibraryItem
+      return this.isLocal || (this.libraryItem.localLibraryItem && !this.libraryItem.localLibraryItem.isInvalid)
     },
     localLibraryItem() {
       if (this.isLocal) return this.libraryItem
@@ -743,6 +743,17 @@ export default {
         this.$set(this.libraryItem, 'localLibraryItem', item)
       }
     },
+    async reloadLocalLibraryItem() {
+      if (this.isLocal) {
+        // The page shows the local item itself, so when it is gone there is nothing left to show
+        const stillThere = await this.$db.getLocalLibraryItem(this.libraryItem.id)
+        if (!stillThere) this.$router.replace('/downloads')
+        else this.libraryItem = stillThere
+        return
+      }
+      const localLibraryItem = await this.$db.getLocalLibraryItemByLId(this.libraryItemId)
+      this.$set(this.libraryItem, 'localLibraryItem', localLibraryItem || null)
+    },
     libraryChanged(libraryId) {
       if (this.libraryItem.libraryId !== libraryId) {
         this.$router.replace('/bookshelf')
@@ -787,6 +798,7 @@ export default {
       window.addEventListener('resize', this.windowResized)
       this.$eventBus.$on('library-changed', this.libraryChanged)
       this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
+      this.$eventBus.$on('local-library-items-changed', this.reloadLocalLibraryItem)
       this.$socket.$on('item_updated', this.itemUpdated)
       this.$socket.$on('rss_feed_open', this.rssFeedOpen)
       this.$socket.$on('rss_feed_closed', this.rssFeedClosed)
@@ -842,6 +854,7 @@ export default {
     window.removeEventListener('resize', this.windowResized)
     this.$eventBus.$off('library-changed', this.libraryChanged)
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$off('local-library-items-changed', this.reloadLocalLibraryItem)
     this.$socket.$off('item_updated', this.itemUpdated)
     this.$socket.$off('rss_feed_open', this.rssFeedOpen)
     this.$socket.$off('rss_feed_closed', this.rssFeedClosed)

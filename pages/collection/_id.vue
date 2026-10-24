@@ -117,6 +117,16 @@ export default {
     }
   },
   methods: {
+    // Downloads may have been removed (or added) in the background: re-match every book and drop the gone ones
+    async refreshLocalItems() {
+      const books = this.collection.books || []
+      if (!books.length) return
+      const locals = (await this.$db.getLocalLibraryItems('book')) || []
+      books.forEach((book) => {
+        const match = locals.find((lli) => lli.libraryItemId === book.id || (book.ino && lli.ino && lli.ino === book.ino))
+        this.$set(book, 'localLibraryItem', match || null)
+      })
+    },
     async playClick() {
       if (this.playerIsStartingPlayback) return
       await this.$hapticsImpact()
@@ -196,9 +206,11 @@ export default {
   },
   mounted() {
     this.$eventBus.$on('library-changed', this.libraryChanged)
+    this.$eventBus.$on('local-library-items-changed', this.refreshLocalItems)
   },
   beforeDestroy() {
     this.$eventBus.$off('library-changed', this.libraryChanged)
+    this.$eventBus.$off('local-library-items-changed', this.refreshLocalItems)
   }
 }
 </script>
