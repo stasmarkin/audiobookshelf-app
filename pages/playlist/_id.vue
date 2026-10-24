@@ -55,6 +55,7 @@ async function readPlaylist({ $absData, $db }, id, activeServerConfigId) {
     const ino = item.libraryItem?.ino
     const copy = localLibraryItems.find((lli) => {
       if (activeServerConfigId && lli.serverConnectionConfigId !== activeServerConfigId) return false
+      if (lli.isInvalid) return false
       return lli.libraryItemId === item.libraryItemId || (ino && lli.ino && lli.ino === ino)
     })
     if (!copy) return
