@@ -29,6 +29,12 @@ class FakeDocumentTreeProvider : ContentProvider() {
     @Volatile var failNextRenameTo: String? = null
     val renames = mutableListOf<String>()
     val deletes = mutableListOf<String>()
+    var childQueryFailure: String? = null
+    var createResultId: String? = null
+    var alternateFinalName: String? = null
+    var corruptOnRead = false
+    /** Document ids whose deleteDocument fails (one file of several, for a partial delete). */
+    val failDeleteOf = mutableSetOf<String>()
 
     fun reset(dir: File) {
       base = dir
@@ -37,6 +43,11 @@ class FakeDocumentTreeProvider : ContentProvider() {
       failNextRenameTo = null
       renames.clear()
       deletes.clear()
+      childQueryFailure = null
+      createResultId = null
+      alternateFinalName = null
+      corruptOnRead = false
+      failDeleteOf.clear()
     }
   }
 
@@ -70,10 +81,16 @@ class FakeDocumentTreeProvider : ContentProvider() {
 
   override fun onCreate() = true
 
-  override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
+  override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? {
     val wanted = projection ?: columns
     val cursor = MatrixCursor(wanted)
     val children = uri.pathSegments.lastOrNull() == "children"
+    if (children) when (childQueryFailure) {
+      "exception" -> throw SecurityException("synthetic query failure")
+      "null" -> return null
+      "loading" -> cursor.extras = Bundle().apply { putBoolean(DocumentsContract.EXTRA_LOADING, true) }
+      "error" -> cursor.extras = Bundle().apply { putString(DocumentsContract.EXTRA_ERROR, "synthetic provider failure") }
+    }
     val documentId = DocumentsContract.getDocumentId(uri)
     val file = fileOf(documentId)
     if (children) file.listFiles()?.sortedBy { it.name }?.forEach { row(cursor, it, wanted) }
@@ -86,6 +103,7 @@ class FakeDocumentTreeProvider : ContentProvider() {
     val documentId = DocumentsContract.getDocumentId(uri)
     return when (method) {
       "android:createDocument" -> {
+        createResultId?.let { return Bundle().apply { putParcelable("uri", withTree(uri, it)) } }
         val name = extras.getString(Document.COLUMN_DISPLAY_NAME)!!
         val file = File(fileOf(documentId), name)
         if (extras.getString(Document.COLUMN_MIME_TYPE) == Document.MIME_TYPE_DIR) file.mkdirs() else file.createNewFile()
@@ -97,22 +115,39 @@ class FakeDocumentTreeProvider : ContentProvider() {
         if (failRename) throw IllegalStateException("simulated rename failure")
         if (failNextRenameTo == name) { failNextRenameTo = null; throw IllegalStateException("simulated rename failure") }
         val file = fileOf(documentId)
-        val target = File(file.parentFile, name)
+        val target = File(file.parentFile, alternateFinalName ?: name)
         if (target.exists() || !file.renameTo(target)) throw IllegalStateException("rename failed")
         Bundle().apply { putParcelable("uri", withTree(uri, idOf(target))) }
       }
       "android:deleteDocument" -> {
         deletes += documentId
-        if (failDelete) throw IllegalStateException("simulated delete failure")
+        if (failDelete || documentId in failDeleteOf) throw IllegalStateException("simulated delete failure")
         if (!fileOf(documentId).deleteRecursively()) throw IllegalStateException("delete failed")
         Bundle()
+      }
+      // As DocumentsProvider answers them for Android's storage provider (isChildDocument: Android 10+;
+      // findDocumentPath: Android 8+, the path from the tree's root document when asked through a tree URI)
+      "android:isChildDocument" -> {
+        @Suppress("DEPRECATION") val target = extras.getParcelable<Uri>("android.content.extra.TARGET_URI")!!
+        val child = DocumentsContract.getDocumentId(target)
+        Bundle().apply { putBoolean("result", child != documentId && child.startsWith("$documentId/")) }
+      }
+      "android:findDocumentPath" -> {
+        val treeId = DocumentsContract.getTreeDocumentId(uri)
+        if (!fileOf(documentId).exists() || (documentId != treeId && !documentId.startsWith("$treeId/"))) throw java.io.FileNotFoundException(documentId)
+        val path = mutableListOf(treeId)
+        documentId.removePrefix(treeId).split("/").filter { it.isNotEmpty() }.forEach { path += path.last() + "/" + it }
+        Bundle().apply { putParcelable("result", DocumentsContract.Path(null, path)) }
       }
       else -> throw UnsupportedOperationException(method)
     }
   }
 
-  override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
-          ParcelFileDescriptor.open(fileOf(DocumentsContract.getDocumentId(uri)), ParcelFileDescriptor.parseMode(mode))
+  override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+    val file = fileOf(DocumentsContract.getDocumentId(uri))
+    if (mode == "r" && corruptOnRead && file.isFile) file.writeBytes(ByteArray(file.length().toInt()) { 42 })
+    return ParcelFileDescriptor.open(file, ParcelFileDescriptor.parseMode(mode))
+  }
 
   override fun getType(uri: Uri): String = mimeOf(fileOf(DocumentsContract.getDocumentId(uri)))
   override fun insert(uri: Uri, values: ContentValues?): Uri? = null

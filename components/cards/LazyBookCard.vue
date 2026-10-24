@@ -451,7 +451,7 @@ export default {
     },
     setLocalLibraryItem(localLibraryItem) {
       // Server books may have a local library item
-      this.localLibraryItem = localLibraryItem
+      this.localLibraryItem = localLibraryItem?.isInvalid ? null : localLibraryItem
     },
     async play() {
       if (this.playerIsStartingPlayback || !this.queueSource) return
