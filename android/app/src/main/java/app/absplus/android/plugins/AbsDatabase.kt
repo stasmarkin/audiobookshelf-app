@@ -628,6 +628,8 @@ internal fun finishLocalProgress(localLibraryItemId: String, localEpisodeId: Str
 
 private fun finishLocalProgressUnderLock(localLibraryItemId: String, localEpisodeId: String?, isFinished: Boolean): JSObject {
   val localMediaProgressId = if (localEpisodeId.isNullOrEmpty()) localLibraryItemId else "$localLibraryItemId-$localEpisodeId"
+  // An item deleted while this waited for its lock is reported as gone; its progress is not saved as an orphan
+  if (DeviceManager.dbManager.getLocalLibraryItem(localLibraryItemId) == null) return JSObject("{\"error\":\"Library Item not found\"}")
   var localMediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId)
 
   if (localMediaProgress == null) {
