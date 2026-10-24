@@ -24,6 +24,7 @@ export default {
   data() {
     return {
       lastAutoDownloadCheckAt: 0,
+      lastCleanupAt: 0,
       inittingLibraries: false,
       hasMounted: false,
       initialSessionsSynced: false,
@@ -345,12 +346,20 @@ export default {
         this.$eventBus.$emit('device-focus-update', false)
       }
     },
+    // Auto delete removed downloads in the background; pages holding local items reload them
+    async localItemsChanged() {
+      await this.$store.dispatch('globals/loadLocalMediaProgress')
+      this.$eventBus.$emit('local-library-items-changed')
+    },
     async checkAutoDownloads(reason) {
       if (this.$platform !== 'android') return
       if (Date.now() - this.lastAutoDownloadCheckAt < AUTO_DOWNLOAD_CHECK_MIN_INTERVAL_MS) return
+      // The cleanup is throttled on its own; a recent one never holds back the download part of the check
+      const skipCleanup = Date.now() - this.lastCleanupAt < AUTO_DOWNLOAD_CHECK_MIN_INTERVAL_MS
       try {
-        const result = await AbsDownloader.checkAutoDownloads()
+        const result = await AbsDownloader.checkAutoDownloads({ skipCleanup })
         if (result?.status === 'started') this.lastAutoDownloadCheckAt = Date.now()
+        if (!skipCleanup && (result?.status === 'started' || result?.status === 'cleaned')) this.lastCleanupAt = Date.now()
         console.log(`[default] checkAutoDownloads (${reason}): ${result?.status}`)
       } catch (error) {
         console.error(`[default] checkAutoDownloads (${reason}) failed`, error)
@@ -365,6 +374,9 @@ export default {
   async mounted() {
     this.$eventBus.$on('change-lang', this.changeLanguage)
     document.addEventListener('visibilitychange', this.visibilityChanged)
+    if (this.$platform === 'android') {
+      this.localItemsListener = await AbsDownloader.addListener('onLocalItemsChanged', () => this.localItemsChanged())
+    }
 
     this.$socket.on('user_updated', this.userUpdated)
     this.$socket.on('user_media_progress_updated', this.userMediaProgressUpdated)
@@ -413,6 +425,7 @@ export default {
     this.flushUserForNative()
     this.$eventBus.$off('change-lang', this.changeLanguage)
     document.removeEventListener('visibilitychange', this.visibilityChanged)
+    this.localItemsListener?.remove()
     this.$socket.off('user_updated', this.userUpdated)
     this.$socket.off('user_media_progress_updated', this.userMediaProgressUpdated)
   }

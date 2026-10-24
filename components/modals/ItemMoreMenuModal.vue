@@ -8,6 +8,7 @@
 </template>
 
 <script>
+import { deleteFailureMessage } from '@/utils/deleteResult'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem } from '@/plugins/capacitor'
 import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
@@ -422,7 +423,7 @@ export default {
             this.libraryItem.localLibraryItem = res
             this.$delete(this.episode, 'localEpisode')
           }
-        } else this.$toast.error('Failed to delete')
+        } else this.$toast.error(deleteFailureMessage(res, this.$strings))
       }
     },
     async deleteLocalItem() {
@@ -446,8 +447,7 @@ export default {
             // Remove localLibraryItem
             this.$delete(this.libraryItem, 'localLibraryItem')
           }
-        } else if (res?.reason === 'storageUnavailable') this.$toast.error(this.$strings.LabelDownloadStorageUnavailable)
-        else this.$toast.error('Failed to delete')
+        } else this.$toast.error(deleteFailureMessage(res, this.$strings))
       }
     },
     clickRSSFeed() {

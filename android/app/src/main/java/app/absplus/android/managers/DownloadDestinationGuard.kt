@@ -95,6 +95,12 @@ object DownloadDestinationGuard {
     return if (dot > 0) "${filename.substring(0, dot)}.$tag${filename.substring(dot)}" else "$filename.$tag"
   }
 
+  /** The [n]th variant of an alternative name ("name.tag-2.mp3"), for when that name is taken in the folder too. */
+  fun numberedFilename(filename: String, n: Int): String {
+    val dot = filename.lastIndexOf('.')
+    return if (dot > 0) "${filename.substring(0, dot)}-$n${filename.substring(dot)}" else "$filename-$n"
+  }
+
   /** The file a recorded podcast episode of this owner already uses in [folder], so a re-download keeps its name. */
   fun recordedEpisodeFile(owner: Owner, folder: String, locals: List<LocalLibraryItem>): String? {
     if (!owner.resource.startsWith("episode:")) return null

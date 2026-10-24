@@ -85,6 +85,34 @@ class ExternalNavigationRoutesTest {
     session.chapters = listOf(BookChapter(1, 0.0, 60.0, "One"), BookChapter(2, 60.0, 120.0, "Two"), BookChapter(3, 120.0, 180.0, "Three"))
   }
 
+  @Test fun longForwardJumpOnVeryShortMediaNeverProducesANegativePosition() {
+    session.audioTracks.single().duration = 1.0
+    position = 500
+    service.seekForward(1_800_000)
+    assertEquals(0L, position)
+  }
+
+  @Test fun longBackwardJumpClampsAtStartAndDoesNotChangeShortIncrements() {
+    settings.longJumpBackwardsTime = 1800
+    settings.longJumpForwardTime = 900
+    settings.jumpBackwardsTime = 15
+    settings.jumpForwardTime = 20
+    service.seekBackward(1_800_000)
+    assertEquals(0L, position)
+    service.notificationControls(service.currentPlayer).seekForward()
+    assertEquals(20_000L, position)
+    service.notificationControls(service.currentPlayer).seekBack()
+    assertEquals(5_000L, position)
+  }
+
+  @Test fun anExactEndJumpUsesTheSameGuardAsAnOvershoot() {
+    position = 150_000
+    service.seekForward(30_000)
+    assertEquals(178_000L, position)
+    service.seekForward(1_800_000)
+    assertEquals(178_000L, position)
+  }
+
   private fun twoFiles() {
     session.audioTracks[0].duration = 90.0
     session.audioTracks.add(AudioTrack(2, 90.0, 90.0, "Second", "", "audio/wav", null, true, "file-2", 2))
