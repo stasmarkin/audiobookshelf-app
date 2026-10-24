@@ -246,11 +246,13 @@ export default {
   mounted() {
     this.loadedServerConfigId = this.$store.state.activeServerConfigId
     this.$eventBus.$on('library-changed', this.libraryChanged)
+    this.$eventBus.$on('local-library-items-changed', this.reload)
     this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
   },
   beforeDestroy() {
     this.isDestroyed = true
     this.$eventBus.$off('library-changed', this.libraryChanged)
+    this.$eventBus.$off('local-library-items-changed', this.reload)
     if (this.stopDataChanged) this.stopDataChanged()
     this.stopDataChanged = null
     if (this.refreshDebouncer) this.refreshDebouncer.cancel()

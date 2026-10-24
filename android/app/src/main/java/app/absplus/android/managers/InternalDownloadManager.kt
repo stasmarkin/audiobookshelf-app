@@ -38,15 +38,23 @@ class InternalDownloadManager(
   private class ActiveDownloadHandle : DownloadHandle {
     private val cancelled = AtomicBoolean(false)
     private val activeCall = AtomicReference<Call?>()
+    private val fileLock = Any()
 
     fun setCall(call: Call) {
       activeCall.set(call)
       if (cancelled.get()) call.cancel()
     }
 
+    // Waits for a staging change in progress: a paused part may restart on the same file right after this returns
     override fun cancel() {
-      cancelled.set(true)
+      synchronized(fileLock) { cancelled.set(true) }
       activeCall.get()?.cancel()
+    }
+
+    /** Changes the staging file only while not cancelled; never call back into the download manager from [change]. */
+    fun <T> changeFile(change: () -> T): T = synchronized(fileLock) {
+      if (cancelled.get()) throw IOException("Download cancelled")
+      change()
     }
   }
   /**
@@ -113,7 +121,7 @@ class InternalDownloadManager(
                         progressCallback.onProgress(existingBytes, 100L)
                         AbsLogger.info(tag, "Download completed for ${destinationFile.name} ($existingBytes bytes)")
                         progressCallback.onComplete(false)
-                      } else if (allowRestart && destinationFile.delete()) {
+                      } else if (allowRestart && handle.changeFile { destinationFile.delete() }) {
                         AbsLogger.info(tag, "Restarting stale range from byte zero for ${destinationFile.name}")
                         startRequest(url, token, handle, allowRestart = false)
                       } else {
@@ -125,7 +133,7 @@ class InternalDownloadManager(
                     val append = existingBytes > 0L && response.code == 206 && resumable(response, existingBytes, validator)
                     if (existingBytes > 0L && response.code == 206 && !append) {
                       // A partial answer for another offset, size or version of the file: never appended to these bytes
-                      if (allowRestart && destinationFile.delete()) {
+                      if (allowRestart && handle.changeFile { destinationFile.delete() }) {
                         AbsLogger.info(tag, "Resume of ${destinationFile.name} does not match the staged bytes; restarting from byte zero")
                         startRequest(url, token, handle, allowRestart = false)
                       } else {
@@ -147,9 +155,6 @@ class InternalDownloadManager(
                       progressCallback.onComplete(true)
                       return
                     }
-                    // A full answer starts a new staged copy: remember what identifies it, for a later resume
-                    if (!append) progressCallback.onValidator(validatorOf(response))
-
                     val startingBytes = if (append) existingBytes else 0L
                     val responseLength = response.body!!.contentLength()
                     val serverSize =
@@ -159,7 +164,10 @@ class InternalDownloadManager(
                     val totalLength =
                             serverSize ?: if (expectedSize > 0L) expectedSize else 0L
 
-                    FileOutputStream(destinationFile, append).use { output ->
+                    handle.changeFile { FileOutputStream(destinationFile, append) }.use { output ->
+                      // A full answer started a new staged copy (the file is truncated now): remember what identifies it,
+                      // for a later resume
+                      if (!append) progressCallback.onValidator(validatorOf(response))
                       response.body!!.byteStream().use { input ->
                         val buffer = ByteArray(CHUNK_SIZE)
                         var totalBytes = startingBytes
@@ -168,7 +176,7 @@ class InternalDownloadManager(
                           if (read < 0) break
                           if (!hasAvailableSpace())
                                   throw IOException("Download paused to preserve free storage")
-                          output.write(buffer, 0, read)
+                          handle.changeFile { output.write(buffer, 0, read) }
                           totalBytes += read
                           val progress =
                                   if (totalLength > 0L) (totalBytes * 100L) / totalLength else 0L

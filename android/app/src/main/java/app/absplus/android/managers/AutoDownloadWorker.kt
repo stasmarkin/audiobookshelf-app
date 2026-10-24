@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ListenableWorker
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -66,14 +67,31 @@ class AutoDownloadWorker(context: Context, params: WorkerParameters) :
   private val tag = "AutoDownloadWorker"
 
   override suspend fun doWork(): Result {
-    try {
-      val status = AutoDownloadManager.check(applicationContext, AutoDownloadManager.Trigger.WORKER)
-      AbsLogger.info(tag, "Auto download check finished with status ${status.jsValue}")
+    val status = try {
+      AutoDownloadManager.check(applicationContext, AutoDownloadManager.Trigger.WORKER).also {
+        AbsLogger.info(tag, "Auto download check finished with status ${it.jsValue}")
+      }
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
       AbsLogger.error(tag, "Auto download check failed: ${e.message}")
+      null
     }
-    return Result.success()
+    return periodicCheckResult(status, runAttemptCount)
   }
+}
+
+/** How many times a periodic check that could not run (BUSY or failed) is retried before waiting for its next period. */
+internal const val PERIODIC_CHECK_MAX_RETRIES = 3
+
+/**
+ * The WorkManager answer for a periodic auto download or cleanup check (R32-M02). BUSY means the other check holds the
+ * shared lock and this one did nothing, and a failure did nothing reliable either: both are retried with WorkManager's
+ * backoff (a few times) instead of being reported as a successful run, which would skip the check until the next period.
+ */
+internal fun periodicCheckResult(status: AutoDownloadManager.Status?, attempt: Int): ListenableWorker.Result = when {
+  status == null || status in setOf(AutoDownloadManager.Status.BUSY, AutoDownloadManager.Status.DEFERRED, AutoDownloadManager.Status.FAILED) ->
+    if (attempt < PERIODIC_CHECK_MAX_RETRIES) ListenableWorker.Result.retry() else ListenableWorker.Result.failure()
+  status == AutoDownloadManager.Status.NO_SERVER -> ListenableWorker.Result.failure()
+  else -> ListenableWorker.Result.success()
 }
