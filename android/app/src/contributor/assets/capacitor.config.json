@@ -1,0 +1,14 @@
+{
+  "appId": "app.absplus.android.contributor",
+  "appName": "Audiobookshelf+ Contributor",
+  "webDir": "dist",
+  "loggingBehavior": "none",
+  "android": {
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": false },
+    "StatusBar": { "backgroundColor": "#232323", "style": "DARK" }
+  },
+  "server": { "androidScheme": "http" }
+}

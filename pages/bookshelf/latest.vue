@@ -42,6 +42,7 @@ export default {
       this.localLibraryItems.forEach((li) => {
         // Replicas of two accounts on one server share episode ids: only the active server's copies count
         if (activeServerConfigId && li.serverConnectionConfigId !== activeServerConfigId) return
+        if (li.isInvalid) return
         if (li.media.episodes?.length) {
           li.media.episodes.map((ep) => {
             ep.localLibraryItemId = li.id
@@ -132,10 +133,12 @@ export default {
     this.loadLocalPodcastLibraryItems()
     this.$eventBus.$on('library-changed', this.libraryChanged)
     this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$on('local-library-items-changed', this.loadLocalPodcastLibraryItems)
   },
   beforeDestroy() {
     this.$eventBus.$off('library-changed', this.libraryChanged)
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
+    this.$eventBus.$off('local-library-items-changed', this.loadLocalPodcastLibraryItems)
     if (this.stopDataChanged) this.stopDataChanged()
     this.stopDataChanged = null
     if (this.refreshDebouncer) this.refreshDebouncer.cancel()
