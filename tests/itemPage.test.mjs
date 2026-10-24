@@ -555,3 +555,18 @@ test('a notice that names other items does not re-read the page', async () => {
   assert.deepEqual(await page.runTimers(), [1000], 'without item ids: as before')
   assert.equal(page.reads.length, before + 2)
 })
+
+test('a download that lands while the local copies are read is not undone by that read', async () => {
+  const book = minifiedBook()
+  const page = await itemPage({ answers: [replicaAnswer(book)] })
+  await page.mount()
+  page.view.$set = (target, key, value) => (target[key] = value)
+  let answer
+  page.view.$db = { ...page.view.$db, getLocalLibraryItems: () => new Promise((resolve) => (answer = resolve)) }
+  const reload = page.view.reloadLocalLibraryItem()
+  const copy = copyOf(book)
+  page.view.newLocalLibraryItem(copy)
+  answer([])
+  await reload
+  assert.equal(page.view.libraryItem.localLibraryItem?.id, copy.id)
+})
