@@ -295,7 +295,7 @@ export default {
     },
     setLocalLibraryItem(localLibraryItem) {
       // Server books may have a local library item
-      this.localLibraryItem = localLibraryItem
+      this.localLibraryItem = localLibraryItem?.isInvalid ? null : localLibraryItem
     },
     clickCard(e) {
       if (this.isSelectionMode) {

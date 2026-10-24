@@ -53,6 +53,7 @@
 </template>
 
 <script>
+import { deleteFailureMessage } from '@/utils/deleteResult'
 import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
@@ -366,7 +367,7 @@ export default {
             this.libraryItem.localLibraryItem = res
             this.$delete(this.episode, 'localEpisode')
           }
-        } else this.$toast.error('Failed to delete')
+        } else this.$toast.error(deleteFailureMessage(res, this.$strings))
       }
     },
     async playClick() {

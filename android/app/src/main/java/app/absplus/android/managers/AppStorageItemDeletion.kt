@@ -2,6 +2,7 @@ package app.absplus.android.managers
 
 import app.absplus.android.data.LocalLibraryItem
 import app.absplus.android.device.AppStorage
+import app.absplus.android.device.NodeKind
 import app.absplus.android.device.SafeTree
 import app.absplus.android.device.StorageIo
 import app.absplus.android.device.VolumeProbe
@@ -24,6 +25,11 @@ object AppStorageItemDeletion {
             folder.parentFile?.let { AppStorage.normalizedPath(it) } != AppStorage.normalizedPath(root)) {
       return Outcome.OUTSIDE_APP_STORAGE
     }
-    return if (SafeTree.delete(io, folder)) Outcome.DELETED else Outcome.FAILED
+    if (!SafeTree.delete(io, folder)) return Outcome.FAILED
+    // The card can go between the check above and the delete, and a folder on a card that is out reads as missing,
+    // which SafeTree counts as deleted. Missing is only a delete while the same card is still there (R32-H03); otherwise
+    // the item and its progress stay and a later delete with the card back finishes the job.
+    if (!AppStorage.isVerified(item.folderId, probe)) return Outcome.STORAGE_UNAVAILABLE
+    return if (io.kind(folder) == NodeKind.MISSING) Outcome.DELETED else Outcome.FAILED
   }
 }

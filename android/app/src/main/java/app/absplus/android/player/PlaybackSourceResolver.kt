@@ -37,7 +37,8 @@ class PlaybackSourceResolver(
   fun resolve(serverConfigId: String?, libraryItemId: String, episodeId: String?, ino: String? = null, expectedTracks: Int? = null): PlaybackSource {
     if (libraryItemId.startsWith("local")) return resolveLocalId(libraryItemId, episodeId)
     if (serverConfigId == null) return PlaybackSource.Stream(libraryItemId, episodeId)
-    val ownCopies = localItems().filter { it.serverConnectionConfigId == serverConfigId && !isPartial(it, episodeId, expectedTracks) }
+    // An evicted copy (auto delete removed its files, its record and history stay) is no copy: the item streams
+    val ownCopies = localItems().filter { it.serverConnectionConfigId == serverConfigId && !it.isInvalid && !isPartial(it, episodeId, expectedTracks) }
     val copies = ownCopies.filter { it.libraryItemId == libraryItemId } +
             ownCopies.filter { !ino.isNullOrEmpty() && it.ino == ino && it.libraryItemId != libraryItemId }
     if (copies.isEmpty()) return PlaybackSource.Stream(libraryItemId, episodeId)
