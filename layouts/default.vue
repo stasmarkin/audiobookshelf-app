@@ -32,10 +32,16 @@ export default {
       disconnectTime: 0,
       socketDisconnectedTime: 0,
       timeLostFocus: 0,
+      routeChanges: 0,
       currentLang: null
     }
   },
   watch: {
+    routeName(name) {
+      this.routeChanges++
+      const { startupTabRestored, tabRecordingSuspended } = this.$store.state.libraries
+      if (startupTabRestored && !tabRecordingSuspended) this.$store.dispatch('libraries/rememberTab', name)
+    },
     networkConnected: {
       handler(newVal) {
         // Reconnecting follows the server (serverState), not the network: a live network says nothing about the server
@@ -130,6 +136,7 @@ export default {
       }
 
       await this.$store.dispatch('user/loadUserSettings')
+      await this.$store.dispatch('libraries/loadViewState')
     },
     async attemptConnection() {
       console.warn('[default] attemptConnection')
@@ -267,14 +274,28 @@ export default {
       }
       this.inittingLibraries = true
       const run = (async () => {
+        // The remembered tab replaces Home only if nothing navigated away while the library loaded
+        const wasHome = this.routeName === 'bookshelf'
+        const routeChangesBefore = this.routeChanges
         const libraryBefore = this.currentLibraryId
+        this.$store.commit('libraries/setStartupRestorePending', true)
         await this.$store.dispatch('libraries/load', { force })
 
         AbsLogger.info({ tag: 'default', message: `initLibraries loading library ${this.currentLibraryName}` })
         // An empty replica before the first sign-in has no library to read yet
-        if (this.currentLibraryId) await this.$store.dispatch('libraries/fetch', notify ? this.currentLibraryId : { libraryId: this.currentLibraryId, onlyIfCurrent: true })
+        const fetched = this.currentLibraryId ? await this.$store.dispatch('libraries/fetch', notify ? this.currentLibraryId : { libraryId: this.currentLibraryId, onlyIfCurrent: true }) : false
         // load switches away from a library that was removed or became inaccessible; pages must follow it
         if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
+        this.$store.commit('libraries/setStartupRestorePending', false)
+        // Without a library a later initLibraries (server back, sign-in) restores the tab
+        if (this.currentLibraryId && !this.$store.state.libraries.startupTabRestored) {
+          if (fetched && wasHome && this.routeName === 'bookshelf' && this.routeChanges === routeChangesBefore) {
+            await this.$store.dispatch('libraries/openRememberedTab')
+          }
+          this.$store.commit('libraries/setStartupTabRestored', true)
+          // After a failed load the app stays on Home only by default; that must not replace the remembered tab
+          if (fetched) this.$store.dispatch('libraries/rememberTab', this.routeName)
+        }
       })()
       this.initLibrariesRun = run
       try {
@@ -400,7 +421,8 @@ export default {
       AbsLogger.info({ tag: 'default', message: `mounted: initializing first load (${this.$platform} v${this.$config.version})` })
       this.$store.commit('setIsFirstLoad', false)
 
-      this.loadSavedSettings()
+      // Before the first libraries/fetch, which saves the sort and filter of the library that owned them
+      await this.loadSavedSettings()
 
       const deviceData = await this.$db.getDeviceData()
       this.$store.commit('setDeviceData', deviceData)

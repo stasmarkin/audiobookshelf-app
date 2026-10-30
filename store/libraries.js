@@ -1,3 +1,5 @@
+import VueRouter from 'vue-router'
+import { bookshelfTabs, planViewSwitch, recordTab, restoreTab } from '@/utils/libraryViewState'
 const { BookCoverAspectRatio } = require('../plugins/constants')
 
 export const state = () => ({
@@ -8,8 +10,24 @@ export const state = () => ({
   issues: 0,
   filterData: null,
   numUserPlaylists: 0,
-  ereaderDevices: []
+  ereaderDevices: [],
+  viewState: { owner: null, libraries: {} },
+  viewStateLoaded: false,
+  switching: false,
+  tabRecordingSuspended: false,
+  // Once per process: the start-up library has opened on its remembered tab (or the chance has passed)
+  startupTabRestored: false,
+  startupRestorePending: false
 })
+
+// Duplicate, cancelled and redirected navigations are expected while pages react to library-changed
+async function replaceRoute(router, path) {
+  try {
+    await router.replace(path)
+  } catch (error) {
+    if (!VueRouter.isNavigationFailure(error)) console.error('[libraries] Navigation failed', path, error)
+  }
+}
 
 export const getters = {
   getCurrentLibrary: state => {
@@ -30,6 +48,9 @@ export const getters = {
   },
   getLibraryIsAudiobooksOnly: (state, getters) => {
     return !!getters.getCurrentLibrarySettings?.audiobooksOnly
+  },
+  getBookshelfTabs: (state, getters, rootState, rootGetters) => {
+    return bookshelfTabs({ mediaType: getters.getCurrentLibraryMediaType, hasPlaylists: !!state.numUserPlaylists, isAdmin: !!rootGetters['user/getIsAdminOrUp'] })
   }
 }
 
@@ -37,7 +58,7 @@ export const actions = {
   // payload: a library id, or { libraryId, onlyIfCurrent } for a background re-read that must not override a library
   // the user picked while it was in flight. Read through $absData: the replica, or the server while it was never
   // reconciled, so it works without a signed-in user (offline, after a refused sign-in)
-  fetch({ state, commit, dispatch, rootGetters }, payload) {
+  fetch({ state, commit, dispatch, rootState, rootGetters }, payload) {
     const { libraryId, onlyIfCurrent = false } = typeof payload === 'object' && payload ? payload : { libraryId: payload }
     if (!rootGetters.getHasActiveServer) {
       console.error('libraries/fetch - No active server')
@@ -46,14 +67,12 @@ export const actions = {
 
     return this.$absData
       .getLibrary({ id: libraryId })
-      .then((data) => {
+      .then(async (data) => {
         if (onlyIfCurrent && state.currentLibraryId !== libraryId) return false
         const library = data.library
         const filterData = data.filterdata
         const issues = data.issues || 0
         const numUserPlaylists = data.numUserPlaylists || 0
-
-        dispatch('user/checkUpdateLibrarySortFilter', library.mediaType, { root: true })
 
         commit('addUpdate', library)
         commit('setLibraryIssues', issues)
@@ -63,6 +82,23 @@ export const actions = {
         // The current library changes here from every place (connection, first library, the picker): native
         // reconciles it first
         this.$absData.setCurrentLibrary({ libraryId }).catch((error) => console.error('Could not set the current library', error))
+        // A library chosen outside start-up (e.g. by opening a book) gets no start-up restore but its tabs are remembered
+        if (!state.startupRestorePending) commit('setStartupTabRestored', true)
+
+        // Library, owner and settings change in the same tick (updateUserSettings commits before its first await), so
+        // neither an overlapping fetch nor a bookshelf reloading on user-settings sees them out of step
+        let settingsApplied = null
+        if (state.viewStateLoaded) {
+          const plan = planViewSwitch(state.viewState, libraryId, rootState.user.settings)
+          if (plan.state !== state.viewState) {
+            commit('setViewState', plan.state)
+            dispatch('saveViewState')
+          }
+          if (plan.settingsUpdate) settingsApplied = dispatch('user/updateUserSettings', plan.settingsUpdate, { root: true })
+        }
+        // Still in the same tick: after the await another fetch may have made a different library current
+        dispatch('user/checkUpdateLibrarySortFilter', library.mediaType, { root: true })
+        await settingsApplied
         return data
       })
       .catch((error) => {
@@ -105,6 +141,47 @@ export const actions = {
         commit('set', [])
         return false
       })
+  },
+  // Switch from the library button or the libraries menu: opens the library on its remembered tab
+  async switchLibrary({ state, getters, commit, dispatch }, libraryId) {
+    if (state.switching) return false
+    commit('setSwitching', true)
+    // Pages redirect on library-changed; those intermediate routes must not be remembered for the new library
+    commit('setTabRecordingSuspended', true)
+    try {
+      if (!(await dispatch('fetch', libraryId))) return false
+      // After the fetch: the available tabs depend on the new library's playlists
+      const target = restoreTab(state.viewState, libraryId, getters.getBookshelfTabs)
+      this.$eventBus.$emit('library-changed', libraryId)
+      this.$localStore.setLastLibraryId(libraryId)
+      await replaceRoute(this.$router, target)
+      commit('setTabRecordingSuspended', false)
+      dispatch('rememberTab', this.$router.currentRoute.name)
+      return true
+    } finally {
+      commit('setTabRecordingSuspended', false)
+      commit('setSwitching', false)
+    }
+  },
+  async openRememberedTab({ state, getters }) {
+    const target = restoreTab(state.viewState, state.currentLibraryId, getters.getBookshelfTabs)
+    if (target !== '/bookshelf') await replaceRoute(this.$router, target)
+  },
+  rememberTab({ state, commit, dispatch }, routeName) {
+    if (!state.viewStateLoaded || !state.currentLibraryId) return
+    const next = recordTab(state.viewState, state.currentLibraryId, routeName)
+    if (!next) return
+    commit('setViewState', next)
+    dispatch('saveViewState')
+  },
+  async loadViewState({ commit }) {
+    commit('setViewState', await this.$localStore.getLibraryViewState())
+    commit('setViewStateLoaded', true)
+  },
+  // Writes only after loading, so an early write can never overwrite the saved memory
+  async saveViewState({ state }) {
+    if (!state.viewStateLoaded) return
+    await this.$localStore.setLibraryViewState(state.viewState)
   }
 }
 
@@ -189,5 +266,23 @@ export const mutations = {
   },
   setEReaderDevices(state, ereaderDevices) {
     state.ereaderDevices = ereaderDevices
+  },
+  setViewState(state, viewState) {
+    state.viewState = viewState
+  },
+  setViewStateLoaded(state, val) {
+    state.viewStateLoaded = val
+  },
+  setSwitching(state, val) {
+    state.switching = val
+  },
+  setTabRecordingSuspended(state, val) {
+    state.tabRecordingSuspended = val
+  },
+  setStartupTabRestored(state, val) {
+    state.startupTabRestored = val
+  },
+  setStartupRestorePending(state, val) {
+    state.startupRestorePending = val
   }
 }

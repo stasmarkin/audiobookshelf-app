@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences'
+import { emptyViewState, parseLibraryViewState } from '@/utils/libraryViewState'
 
 class LocalStorage {
   constructor(vuexStore) {
@@ -123,6 +124,24 @@ class LocalStorage {
     } catch (error) {
       console.error('[LocalStorage] Failed to get last library id', error)
       return false
+    }
+  }
+
+  async setLibraryViewState(state) {
+    try {
+      await Preferences.set({ key: 'libraryViewState', value: JSON.stringify(state) })
+    } catch (error) {
+      console.error('[LocalStorage] Failed to set library view state', error)
+    }
+  }
+
+  async getLibraryViewState() {
+    try {
+      const obj = (await Preferences.get({ key: 'libraryViewState' })) || {}
+      return parseLibraryViewState(obj.value ?? null)
+    } catch (error) {
+      console.error('[LocalStorage] Failed to get library view state', error)
+      return emptyViewState()
     }
   }
 
