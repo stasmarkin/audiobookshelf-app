@@ -1,5 +1,7 @@
 package app.absplus.android.managers
 
+import app.absplus.android.sync.LocalCopyReady
+import app.absplus.android.sync.SyncRuntime
 import android.content.Context
 import android.net.Uri
 import android.os.StatFs
@@ -1094,6 +1096,9 @@ class DownloadItemManager(
                       }
                     }
             clientEventEmitter.onDownloadItemComplete(event)
+            if (scanResult?.localLibraryItem != null) {
+              SyncRuntime.localCopyReady.tryEmit(LocalCopyReady(item.serverConnectionConfigId, item.libraryItemId, item.episodeId))
+            }
             recordAutoOutcome(item, failed = false)
             synchronized(this@DownloadItemManager) {
               downloadItemQueue.remove(item)

@@ -1,0 +1,336 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "05251a636e1d4c27fe092ac32decf9c6",
+    "entities": [
+      {
+        "tableName": "media_progress",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `libraryItemId` TEXT NOT NULL, `episodeId` TEXT NOT NULL, `serverProgressId` TEXT, `duration` REAL NOT NULL, `progress` REAL NOT NULL, `currentTime` REAL NOT NULL, `isFinished` INTEGER NOT NULL, `hideFromContinueListening` INTEGER NOT NULL, `ebookLocation` TEXT, `ebookProgress` REAL, `lastUpdate` INTEGER NOT NULL, `startedAt` INTEGER NOT NULL, `finishedAt` INTEGER, `source` TEXT NOT NULL, `pending` INTEGER NOT NULL, PRIMARY KEY(`serverConfigId`, `libraryItemId`, `episodeId`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryItemId",
+            "columnName": "libraryItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProgressId",
+            "columnName": "serverProgressId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "duration",
+            "columnName": "duration",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progress",
+            "columnName": "progress",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentTime",
+            "columnName": "currentTime",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFinished",
+            "columnName": "isFinished",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hideFromContinueListening",
+            "columnName": "hideFromContinueListening",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ebookLocation",
+            "columnName": "ebookLocation",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ebookProgress",
+            "columnName": "ebookProgress",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "lastUpdate",
+            "columnName": "lastUpdate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finishedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pending",
+            "columnName": "pending",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "libraryItemId",
+            "episodeId"
+          ]
+        }
+      },
+      {
+        "tableName": "bookmarks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `libraryItemId` TEXT NOT NULL, `time` REAL NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `deletedAt` INTEGER, `pending` INTEGER NOT NULL, PRIMARY KEY(`serverConfigId`, `libraryItemId`, `time`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryItemId",
+            "columnName": "libraryItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAt",
+            "columnName": "deletedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pending",
+            "columnName": "pending",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "libraryItemId",
+            "time"
+          ]
+        }
+      },
+      {
+        "tableName": "outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `serverConfigId` TEXT NOT NULL, `kind` TEXT NOT NULL, `itemKey` TEXT NOT NULL, `payload` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `attempts` INTEGER NOT NULL, `lastError` TEXT, `nextAttemptAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemKey",
+            "columnName": "itemKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nextAttemptAt",
+            "columnName": "nextAttemptAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_outbox_serverConfigId_id",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_outbox_serverConfigId_id` ON `${TABLE_NAME}` (`serverConfigId`, `id`)"
+          },
+          {
+            "name": "index_outbox_serverConfigId_itemKey",
+            "unique": false,
+            "columnNames": [
+              "serverConfigId",
+              "itemKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_outbox_serverConfigId_itemKey` ON `${TABLE_NAME}` (`serverConfigId`, `itemKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `lastMeAt` INTEGER, `userJson` TEXT, `schemaVersion` INTEGER NOT NULL, PRIMARY KEY(`serverConfigId`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastMeAt",
+            "columnName": "lastMeAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "userJson",
+            "columnName": "userJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schemaVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId"
+          ]
+        }
+      },
+      {
+        "tableName": "library_sync_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`serverConfigId` TEXT NOT NULL, `libraryId` TEXT NOT NULL, `lastReconcileAt` INTEGER, `lastReconcileOk` INTEGER NOT NULL, `lastError` TEXT, PRIMARY KEY(`serverConfigId`, `libraryId`))",
+        "fields": [
+          {
+            "fieldPath": "serverConfigId",
+            "columnName": "serverConfigId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "libraryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastReconcileAt",
+            "columnName": "lastReconcileAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastReconcileOk",
+            "columnName": "lastReconcileOk",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "serverConfigId",
+            "libraryId"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '05251a636e1d4c27fe092ac32decf9c6')"
+    ]
+  }
+}

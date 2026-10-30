@@ -1,6 +1,6 @@
 <template>
-  <!-- Main container - only shows when playback session exists, applies fullscreen/platform classes -->
-  <div v-if="playbackSession" id="streamContainer" class="fixed top-0 left-0 layout-wrapper right-0 z-50 pointer-events-none" :class="[{ fullscreen: showFullscreen, 'ios-player': $platform === 'ios', 'web-player': $platform === 'web' }, faceplateHooks.classes]" :style="faceplateHooks.vars">
+  <!-- Main container - shows for a playback session or a book a waiting queue is on, applies fullscreen/platform classes -->
+  <div v-if="isPlayerOpen" id="streamContainer" class="fixed top-0 left-0 layout-wrapper right-0 z-50 pointer-events-none" :class="[{ fullscreen: showFullscreen, 'ios-player': $platform === 'ios', 'web-player': $platform === 'web' }, faceplateHooks.classes]" :style="faceplateHooks.vars">
     <!-- Fullscreen overlays: colored background and menu overlays -->
     <div v-if="showFullscreen" class="w-full h-full z-10 absolute top-0 left-0 pointer-events-auto" :style="{ backgroundColor: coverChrome.backdrop }">
       <!-- Background gradient for player -->
@@ -24,7 +24,7 @@
       </div>
 
       <!-- Playback method indicator (Direct/Local/Transcode) -->
-      <p class="playback-method top-4 absolute left-0 right-0 mx-auto text-center uppercase tracking-widest text-opacity-75 z-50" :class="{ 'text-black text-opacity-75': coverChrome.darkForeground }" style="font-size: 10px">{{ isDirectPlayMethod ? $strings.LabelPlaybackDirect : isLocalPlayMethod ? $strings.LabelPlaybackLocal : $strings.LabelPlaybackTranscode }}</p>
+      <p v-if="playbackMethodLabel" class="playback-method top-4 absolute left-0 right-0 mx-auto text-center uppercase tracking-widest text-opacity-75 z-50" :class="{ 'text-black text-opacity-75': coverChrome.darkForeground }" style="font-size: 10px">{{ playbackMethodLabel }}</p>
     </div>
 
     <!-- Overall book progress bar -->
@@ -46,7 +46,7 @@
     <!-- Book cover wrapper  -->
     <div class="cover-wrapper absolute z-30 pointer-events-auto" @click="clickContainer">
       <div class="w-full h-full flex justify-center">
-        <covers-book-cover v-if="libraryItem || localLibraryItemCoverSrc" ref="cover" :library-item="libraryItem" :download-cover="localLibraryItemCoverSrc" :width="bookCoverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" raw @imageLoaded="coverImageLoaded" />
+        <covers-book-cover v-if="coverLibraryItem || coverDownloadSrc" ref="cover" :library-item="coverLibraryItem" :download-cover="coverDownloadSrc" :width="bookCoverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" raw @imageLoaded="coverImageLoaded" />
       </div>
 
       <!-- Sync failed indicator - shows error icon if progress sync failed -->
@@ -60,7 +60,7 @@
       <div ref="titlewrapper" class="overflow-hidden relative">
         <p class="title-text whitespace-nowrap"></p>
       </div>
-      <p class="author-text text-fg text-opacity-75 truncate">{{ authorName }}</p>
+      <p class="author-text text-fg text-opacity-75 truncate">{{ authorLine }}</p>
     </div>
 
     <div id="playerContent" class="playerContainer w-full z-20 absolute bottom-0 left-0 right-0 p-2 pointer-events-auto transition-all" :style="{ backgroundColor: showFullscreen ? '' : coverChrome.backdrop }" @click="clickContainer">
@@ -76,7 +76,7 @@
           </div>
           <!-- Bookmark key: shown for every server book, online or not (the list is the cached user data; a write that
                cannot reach the server reports its own error), so it never drops out of the utility row -->
-          <span v-if="!isPodcast && serverLibraryItemId" class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="{ fill: bookmarks.length }" @click="$emit('showBookmarks')">bookmark</span>
+          <span v-if="!isPodcast && !awaitingDisplay && (serverLibraryItemId || bookmarkable)" class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="{ fill: bookmarks.length }" @click="$emit('showBookmarks')">bookmark</span>
           <!-- hidden for podcasts but still using this as a placeholder -->
           <span v-else class="material-symbols text-3xl text-white text-opacity-0">bookmark</span>
 
@@ -182,7 +182,9 @@ export default {
     },
     sleepTimerRunning: Boolean,
     sleepTimeRemaining: Number,
-    serverLibraryItemId: String
+    serverLibraryItemId: String,
+    // Bookmarks are available although the server ids are not (a downloaded copy of another saved server)
+    bookmarkable: Boolean
   },
   mixins: [jumpLabelMixin],
   data() {
@@ -227,6 +229,7 @@ export default {
       coverRgb: 'rgb(55, 56, 56)',
       coverBgIsLight: false,
       titleMarquee: null,
+      sessionTimes: null,
       isRefreshingUI: false
     }
   },
@@ -255,6 +258,9 @@ export default {
     title(val) {
       if (this.titleMarquee) this.titleMarquee.init(val)
     },
+    awaitingDisplay(display, previous) {
+      this.showAwaitingDisplay(display, previous)
+    },
     // The page content above the collapsed player is sized from its plate height (assets/app.css #content.playerOpen)
     'miniLayout.height': {
       handler(height) {
@@ -276,7 +282,8 @@ export default {
     menuItems() {
       const items = []
       // TODO: Implement on iOS
-      if (this.$platform !== 'ios' && !this.isPodcast && this.mediaId) {
+      // The history is the open session's, not the awaited book's
+      if (this.$platform !== 'ios' && !this.isPodcast && this.mediaId && !this.awaitingDisplay) {
         items.push({
           text: this.$strings.ButtonHistory,
           value: 'history',
@@ -400,7 +407,21 @@ export default {
       return { classes, vars, plates }
     },
     showLoadingState() {
-      return this.isLoading || this.isCheckingServerProgress
+      // While waiting for the server nothing loads, and Play must stay reachable (it retries the server)
+      return !this.awaitingServer && (this.isLoading || this.isCheckingServerProgress)
+    },
+    awaitingServer() {
+      return this.$store.state.playerAwaitingServer
+    },
+    // The book a waiting queue is on (native AwaitingDisplay): shown in place of the open session, if any
+    awaitingDisplay() {
+      return this.$store.state.playerAwaitingDisplay
+    },
+    isPlayerOpen() {
+      return !!(this.playbackSession || this.awaitingDisplay)
+    },
+    authorLine() {
+      return this.awaitingServer ? this.$strings.LabelWaitingForServer : this.authorName
     },
     showCastBtn() {
       return this.$store.state.isCastAvailable
@@ -431,9 +452,20 @@ export default {
       if (localItemCover) return Capacitor.convertFileSrc(localItemCover)
       return null
     },
+    // An awaited book has no server item to load a cover from offline: its copy's cover, else a placeholder naming it
+    coverLibraryItem() {
+      const display = this.awaitingDisplay
+      if (!display) return this.libraryItem
+      return { id: display.libraryItemId, media: { metadata: { title: display.title, authorName: display.author || '' } } }
+    },
+    coverDownloadSrc() {
+      const display = this.awaitingDisplay
+      if (!display) return this.localLibraryItemCoverSrc
+      return display.coverUri ? Capacitor.convertFileSrc(display.coverUri) : null
+    },
     // Which artwork the player shows: its loaded aspect ratio is forgotten only when this changes
     coverIdentity() {
-      return `${this.libraryItem?.id || ''}|${this.localLibraryItemCoverSrc || ''}`
+      return `${this.coverLibraryItem?.id || ''}|${this.coverDownloadSrc || ''}`
     },
     playMethod() {
       return this.playbackSession?.playMethod || 0
@@ -444,7 +476,13 @@ export default {
     isDirectPlayMethod() {
       return this.playMethod == this.$constants.PlayMethod.DIRECTPLAY
     },
+    playbackMethodLabel() {
+      // The open session's method is not the awaited book's, which only the server's answer decides
+      if (this.awaitingDisplay) return ''
+      return this.isDirectPlayMethod ? this.$strings.LabelPlaybackDirect : this.isLocalPlayMethod ? this.$strings.LabelPlaybackLocal : this.$strings.LabelPlaybackTranscode
+    },
     title() {
+      if (this.awaitingDisplay) return this.awaitingDisplay.title
       const mediaItemTitle = this.playbackSession?.displayTitle || this.mediaMetadata?.title || 'Title'
       if (this.currentChapterTitle) {
         if (this.showFullscreen) return this.currentChapterTitle
@@ -453,10 +491,13 @@ export default {
       return mediaItemTitle
     },
     authorName() {
+      if (this.awaitingDisplay) return this.awaitingDisplay.author || ''
       if (this.playbackSession) return this.playbackSession.displayAuthor
       return this.mediaMetadata?.authorName || 'Author'
     },
     chapters() {
+      // The open session's chapters are not the awaited book's
+      if (this.awaitingDisplay) return []
       return this.playbackSession?.chapters || []
     },
     currentChapter() {
@@ -585,7 +626,7 @@ export default {
     },
     clickTitleAndAuthor() {
       if (!this.showFullscreen) return
-      const llid = this.serverLibraryItemId || this.libraryItem?.id || this.localLibraryItem?.id
+      const llid = this.awaitingDisplay?.libraryItemId || this.serverLibraryItemId || this.libraryItem?.id || this.localLibraryItem?.id
       if (llid) {
         this.$router.push(`/item/${llid}`)
         this.showFullscreen = false
@@ -623,13 +664,13 @@ export default {
     },
     async jumpNextChapter() {
       await this.$hapticsImpact()
-      if (this.showLoadingState) return
+      if (this.showLoadingState || this.awaitingDisplay) return
       if (!this.nextChapter) return
       this.seek(this.nextChapter.start)
     },
     async jumpChapterStart() {
       await this.$hapticsImpact()
-      if (this.showLoadingState) return
+      if (this.showLoadingState || this.awaitingDisplay) return
       if (!this.currentChapter) {
         return this.restart()
       }
@@ -660,12 +701,12 @@ export default {
     },
     async jumpBackwards() {
       await this.$hapticsImpact()
-      if (this.showLoadingState) return
+      if (this.showLoadingState || this.awaitingDisplay) return
       AbsAudioPlayer.seekBackward({ value: this.jumpBackwardsTime })
     },
     async jumpForward() {
       await this.$hapticsImpact()
-      if (this.showLoadingState) return
+      if (this.showLoadingState || this.awaitingDisplay) return
       AbsAudioPlayer.seekForward({ value: this.jumpForwardTime })
     },
     async longJumpBackwards() {
@@ -740,7 +781,8 @@ export default {
         console.error('Invalid no played track ref')
         return
       }
-      this.$emit('updateTime', this.currentTime)
+      // Bookmarks belong to the open session, not to the awaited book on the seek row
+      if (!this.awaitingDisplay) this.$emit('updateTime', this.currentTime)
 
       if (this.seekLoading) {
         this.seekLoading = false
@@ -799,7 +841,7 @@ export default {
       }
     },
     seek(time) {
-      if (this.showLoadingState) return
+      if (this.showLoadingState || this.awaitingDisplay) return
       if (this.seekLoading) {
         console.error('Already seek loading', this.seekedTime)
         return
@@ -826,7 +868,7 @@ export default {
       }
     },
     async touchstartCursor(e) {
-      if (!e || !e.touches || !this.$refs.track || !this.showFullscreen || this.playerSettings.lockUi) return
+      if (!e || !e.touches || !this.$refs.track || !this.showFullscreen || this.playerSettings.lockUi || this.awaitingDisplay) return
 
       await this.$hapticsImpact()
       this.isDraggingCursor = true
@@ -839,7 +881,10 @@ export default {
       await this.$hapticsImpact()
       if (this.showLoadingState) return
 
-      this.isPlaying = !!((await AbsAudioPlayer.playPause()) || {}).playing
+      const playing = !!((await AbsAudioPlayer.playPause()) || {}).playing
+      // Nothing plays while a queue waits on a book: Play only has native try the server again
+      if (this.awaitingDisplay) return
+      this.isPlaying = playing
       this.isEnded = false
     },
     setIsCheckingServerProgress(value) {
@@ -1052,8 +1097,11 @@ export default {
     },
     onMetadata(data) {
       console.log('onMetadata', JSON.stringify(data))
-      this.totalDuration = Number(data.duration.toFixed(2))
-      this.currentTime = Number(data.currentTime.toFixed(2))
+      // The seek row shows the awaited book, not the open session native reports
+      if (!this.awaitingDisplay) {
+        this.totalDuration = Number(data.duration.toFixed(2))
+        this.currentTime = Number(data.currentTime.toFixed(2))
+      }
 
       // Done loading
       if (data.playerState !== 'BUFFERING' && data.playerState !== 'IDLE') {
@@ -1096,6 +1144,25 @@ export default {
         this.measureAndUpdateTrackWidth()
       })
     },
+    // The awaited book's position and length on the seek row; the open session's come back when the wait ends
+    showAwaitingDisplay(display, previous) {
+      if (display && !previous) this.sessionTimes = { sessionId: this.playbackSession?.id, currentTime: this.currentTime, totalDuration: this.totalDuration }
+      if (display) {
+        this.totalDuration = Number(display.duration) || 0
+        this.currentTime = Number(display.currentTime) || 0
+      } else if (this.sessionTimes && this.playbackSession && this.sessionTimes.sessionId === this.playbackSession.id) {
+        this.totalDuration = this.sessionTimes.totalDuration
+        this.currentTime = this.sessionTimes.currentTime
+      }
+      if (!display) this.sessionTimes = null
+      this.$nextTick(() => {
+        if (!this.isPlayerOpen) return
+        if (!this.titleMarquee && this.$refs.titlewrapper) this.titleMarquee = new WrappingMarquee(this.$refs.titlewrapper)
+        if (this.titleMarquee) this.titleMarquee.init(this.title)
+        this.measureAndUpdateTrackWidth()
+        this.updateTimestamp()
+      })
+    },
     onPlaybackClosed() {
       this.$diag.debug('AudioPlayer', 'Playback closed by native player')
       this.endPlayback()
@@ -1136,6 +1203,14 @@ export default {
       if (this.$platform !== 'android' || this.playbackSession) return
       try {
         const state = await AbsAudioPlayer.getCurrentPlaybackState()
+        if (!state?.playbackSession && state?.awaitingDisplay) {
+          // A queue waits on a book and nothing else is open: the player shows that book
+          this.$diag.debug('AudioPlayer', 'UI reattached to a queue waiting for the server')
+          this.$store.commit('setPlayerAwaitingServer', !!state.awaitingServer)
+          this.$store.commit('setPlayerAwaitingDisplay', state.awaitingDisplay)
+          this.$eventBus.$emit('native-playback-reattached', state)
+          return
+        }
         if (!state?.playbackSession) this.$diag.debug('AudioPlayer', 'UI started with no native playback session to reattach')
         if (!state?.playbackSession || this.playbackSession) return
         console.log('[AudioPlayer] Reattaching to existing native playback session', state.playbackSession.id)
@@ -1148,6 +1223,8 @@ export default {
         await this.$nextTick()
         this.onMetadata({ duration: Number(state.duration) || 0, currentTime: Number(state.currentTime) || 0, playerState: 'READY' })
         this.onPlayingUpdate({ value: !!state.isPlaying })
+        this.$store.commit('setPlayerAwaitingServer', !!state.awaitingServer)
+        this.$store.commit('setPlayerAwaitingDisplay', state.awaitingDisplay || null)
         if (state.mediaPlayer) this.$store.commit('setMediaPlayer', state.mediaPlayer)
         this.$eventBus.$emit('native-playback-reattached', state)
       } catch (error) {

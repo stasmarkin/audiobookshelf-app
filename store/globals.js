@@ -1,3 +1,10 @@
+import Vue from 'vue'
+import { Capacitor } from '@capacitor/core'
+import { coverSrc } from '@/utils/coverUrl'
+
+// Only the Android shell answers the cover route; iOS and the web dev server keep the server URL
+const isAndroid = () => Capacitor.getPlatform() === 'android'
+
 export const state = () => ({
   isModalOpen: false,
   itemDownloads: [],
@@ -14,7 +21,9 @@ export const state = () => ({
   localFolderSelectData: null,
   hapticFeedback: 'LIGHT',
   showRSSFeedOpenCloseModal: false,
-  rssFeedEntity: null
+  rssFeedEntity: null,
+  // itemId -> how many times native announced its cover as ready; part of the cover route so the <img> asks again
+  coverEpochs: {}
 })
 
 export const getters = {
@@ -37,38 +46,36 @@ export const getters = {
       // Absolute URL covers (should no longer be used)
       if (media.coverPath.startsWith('http:') || media.coverPath.startsWith('https:')) return media.coverPath
 
-      const serverAddress = rootGetters['user/getServerAddress']
-      if (!serverAddress) return placeholder
-
-      const lastUpdate = libraryItem.updatedAt || Date.now()
-
-      if (process.env.NODE_ENV !== 'production') {
-        // Testing
-        // return `http://localhost:3333/api/items/${libraryItem.id}/cover?ts=${lastUpdate}`
-      }
-
-      const url = new URL(`${serverAddress}/api/items/${libraryItem.id}/cover`)
-      const urlQuery = new URLSearchParams()
-      urlQuery.append('ts', lastUpdate)
-      if (raw) urlQuery.append('raw', '1')
-      if (rootGetters.getDoesServerImagesRequireToken) {
-        urlQuery.append('token', rootGetters['user/getToken'])
-      }
-      return `${url}?${urlQuery}`
+      return (
+        coverSrc({
+          itemId: libraryItem.id,
+          updatedAt: libraryItem.updatedAt || null,
+          raw,
+          native: isAndroid(),
+          serverAddress: rootGetters['user/getServerAddress'],
+          token: rootGetters['user/getToken'],
+          tokenRequired: rootGetters.getDoesServerImagesRequireToken,
+          epoch: state.coverEpochs[libraryItem.id] || 0
+        }) || placeholder
+      )
     },
   getLibraryItemCoverSrcById:
     (state, getters, rootState, rootGetters) =>
-    (libraryItemId, placeholder = null) => {
+    (libraryItemId, placeholder = null, { wait = false } = {}) => {
       if (!placeholder) placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
       if (!libraryItemId) return placeholder
-      const serverAddress = rootGetters['user/getServerAddress']
-      if (!serverAddress) return placeholder
-
-      const url = new URL(`${serverAddress}/api/items/${libraryItemId}/cover`)
-      if (rootGetters.getDoesServerImagesRequireToken) {
-        return `${url}?token=${rootGetters['user/getToken']}`
-      }
-      return url.toString()
+      return (
+        coverSrc({
+          itemId: libraryItemId,
+          native: isAndroid(),
+          serverAddress: rootGetters['user/getServerAddress'],
+          token: rootGetters['user/getToken'],
+          tokenRequired: rootGetters.getDoesServerImagesRequireToken,
+          versioned: false,
+          epoch: state.coverEpochs[libraryItemId] || 0,
+          wait
+        }) || placeholder
+      )
     },
   getLocalMediaProgressById:
     (state) =>
@@ -96,6 +103,9 @@ export const actions = {
 }
 
 export const mutations = {
+  bumpCoverEpochs(state, itemIds) {
+    for (const itemId of itemIds) Vue.set(state.coverEpochs, itemId, (state.coverEpochs[itemId] || 0) + 1)
+  },
   setIsModalOpen(state, val) {
     state.isModalOpen = val
   },

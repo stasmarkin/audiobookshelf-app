@@ -1,22 +1,31 @@
 <template>
   <div class="flex h-full px-1 overflow-hidden">
-    <covers-book-cover class="card-artwork" :library-item="libraryItem" :width="coverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
+    <covers-book-cover class="card-artwork" :class="{ 'opacity-50': notAvailableOffline }" :library-item="libraryItem" :width="coverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
     <div class="grow px-2 audiobookSearchCardContent">
       <p class="truncate text-sm">{{ title }}</p>
       <p v-if="subtitle" class="truncate text-xs text-gray-300">{{ subtitle }}</p>
       <p class="text-xs text-gray-200 truncate">{{ $getString('LabelByAuthor', [authorName]) }}</p>
+      <p v-if="notAvailableOffline" class="not-offline-badge text-xs text-warning truncate">{{ $strings.LabelNotAvailableOffline }}</p>
     </div>
   </div>
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   props: {
     libraryItem: {
       type: Object,
       default: () => {}
     },
-    search: String
+    search: String,
+    /** The downloaded copy of this server item on the active server, if any. */
+    localLibraryItem: {
+      type: Object,
+      default: null
+    }
   },
   data() {
     return {}
@@ -50,6 +59,10 @@ export default {
     authorName() {
       if (this.isPodcast) return this.mediaMetadata.author
       return this.mediaMetadata.authorName
+    },
+    /** Offline, a server item without a downloaded copy cannot be played (its page opens from the replica). */
+    notAvailableOffline() {
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem)
     }
   },
   methods: {},
