@@ -3,7 +3,7 @@
 # Builds the debug variant (app.absplus.android.debug, installs alongside the production app), re-signs it
 # with the persistent debug/test key so each new test build installs over the previous one, and uploads it
 # as a short-lived Actions artifact. Never uses the production release key. See docs/debug-test-builds.md.
-# On demand only: run it for the branch that is ready for a phone test (validation runs in "Build APK" on every push).
+# On demand only: run it for the branch that is ready for a phone test (validation runs in "Build APK" on pull requests and on demand).
 name: Debug Test APK (development only)
 
 on:
