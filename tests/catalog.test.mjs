@@ -407,3 +407,23 @@ test('a server error after a switch reads the new server, not the old replica', 
   fail(new Error('502'))
   assert.deepEqual(plain((await read).results), [{ id: 'native-b' }])
 })
+
+test("offline, before the sign-in, the account memory is the cached user's on the active server", async () => {
+  const util = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/libraryViewState.js')).toString('base64')}`)
+  const source = (await read('../store/libraries.js')).replace(/^import .*$/gm, '').replace(/^export const (\w+) =/gm, 'globalThis.$1 =')
+  const sandbox = { console, require: () => ({ BookCoverAspectRatio: {} }), ...util }
+  vm.runInNewContext(source, sandbox)
+  const remembered = { owner: 'l1', libraries: { l1: { tab: 'bookshelf-series' } } }
+  const activate = (user) => {
+    const state = { viewStateLoaded: true, viewScope: 'cfg|u1', viewScopes: { 'cfg|u1': remembered }, viewState: remembered, legacyViewState: null }
+    const setters = { setViewScopes: 'viewScopes', setViewScope: 'viewScope', setViewState: 'viewState' }
+    const ctx = { state, rootState: { activeServerConfigId: 'cfg', deviceData: {}, user: { serverConnectionConfig: null, settings: {}, ...user } }, dispatch() {}, commit: (type, value) => setters[type] && (state[setters[type]] = value) }
+    sandbox.actions.activateViewScope.call({ $localStore: {} }, ctx)
+    return state
+  }
+  const offline = activate({ user: null, cachedUser: { id: 'u1' } })
+  assert.equal(offline.viewScope, 'cfg|u1', 'the memory stays the active one')
+  assert.deepEqual(plain(offline.viewState), remembered, 'with its tabs')
+  assert.equal(activate({ user: { id: 'u2' }, cachedUser: { id: 'u1' } }).viewScope, 'cfg|u2', 'the live user decides once signed in')
+  assert.equal(activate({ user: null, cachedUser: null }).viewScope, null, 'no known account: no memory')
+})
