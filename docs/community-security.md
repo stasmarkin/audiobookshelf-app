@@ -98,11 +98,9 @@ separate reviewed change:
 
 Production signing is local according to `release-process.md`; this setup does not
 read, move, rotate, or change signing credentials. Existing automatic PR workflows
-use `pull_request` with read-only permissions. Since 2026-10-14 `Build APK` also has a
-separate `debug-apk` job that reads the debug/test signing secrets; it runs only for
-pushes to `plus` in this repository (never pull requests or forks), after `main`
-passed, and executes no repository code (docs/debug-test-builds.md). Production
-signing secrets are not referenced by any workflow. There is no privileged
+use `pull_request` with read-only permissions. From 2026-10-14 until the Actions cost reduction, `Build APK` also had a separate
+`debug-apk` job for pushes to `plus`; it was removed, so `Build APK` no longer reads any
+signing secret. Production signing secrets are not referenced by any workflow. There is no privileged
 `pull_request_target` or `workflow_run` execution path.
 
 The existing manually dispatched debug APK workflow uses separate test-signing
