@@ -287,8 +287,8 @@ export default {
         // load switches away from a library that was removed or became inaccessible; pages must follow it
         if (notify || this.currentLibraryId !== libraryBefore) this.$eventBus.$emit('library-changed')
         this.$store.commit('libraries/setStartupRestorePending', false)
-        // Without a library a later initLibraries (server back, sign-in) restores the tab
-        if (this.currentLibraryId && !this.$store.state.libraries.startupTabRestored) {
+        // Without a library or a known account a later initLibraries (server back, sign-in) restores the tab
+        if (this.currentLibraryId && this.$store.state.libraries.viewScope && !this.$store.state.libraries.startupTabRestored) {
           if (fetched && wasHome && this.routeName === 'bookshelf' && this.routeChanges === routeChangesBefore) {
             await this.$store.dispatch('libraries/openRememberedTab')
           }
@@ -301,6 +301,7 @@ export default {
       try {
         await run
       } finally {
+        this.$store.commit('libraries/setStartupRestorePending', false)
         this.inittingLibraries = false
       }
     },
