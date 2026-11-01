@@ -52,9 +52,7 @@ export default {
       await this.$hapticsImpact()
       this.show = false
       if (lib.id === this.currentLibraryId) return
-      await this.$store.dispatch('libraries/fetch', lib.id)
-      this.$eventBus.$emit('library-changed', lib.id)
-      this.$localStore.setLastLibraryId(lib.id)
+      await this.$store.dispatch('libraries/switchLibrary', lib.id)
     }
   },
   mounted() {}
