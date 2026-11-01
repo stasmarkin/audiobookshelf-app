@@ -8,6 +8,8 @@ import vm from 'node:vm'
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 const clock = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/playerClock.js')).toString('base64')}`)
+const bufferedTrack = await import(`data:text/javascript;base64,${Buffer.from(await read('../utils/bufferedTrack.js')).toString('base64')}`)
+const { PlayMethod } = await import(`data:text/javascript;base64,${Buffer.from(await read('../plugins/constants.js')).toString('base64')}`)
 const { coarseTime, coarseClock, sleepRemainingLabel, createPainter } = clock
 
 test('coarseTime: whole steps from an origin, never before it', () => {
@@ -79,7 +81,7 @@ async function loadPlayer() {
     .match(/<script>([\s\S]*?)<\/script>/)[1]
     .replace(/^import .*$/gm, '')
     .replace('export default', 'globalThis.component =')
-  const sandbox = { ...clock, AbsAudioPlayer: { seek: () => {}, setPlaybackSpeed: () => {} }, Capacitor: {}, Dialog: {}, jumpLabelMixin: {}, console: { log() {}, error() {}, warn() {} } }
+  const sandbox = { ...clock, ...bufferedTrack, AbsAudioPlayer: { seek: () => {}, setPlaybackSpeed: () => {} }, Capacitor: {}, Dialog: {}, jumpLabelMixin: {}, console: { log() {}, error() {}, warn() {} } }
   vm.runInNewContext(script, sandbox)
   return sandbox.component
 }
@@ -118,13 +120,14 @@ const secondsToTimestamp = (seconds) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
 }
 
-function makePlayer(component, { everyMinute, rate = 1, chapters = null, scaled = true, duration = 36000 }) {
+function makePlayer(component, { everyMinute, rate = 1, chapters = null, scaled = true, duration = 36000, playMethod = PlayMethod.DIRECTPLAY }) {
   const counts = {}
   const ctx = { ...component.data.call({}) }
   ctx.playerSettings.updateEveryMinute = everyMinute
   ctx.playerSettings.useChapterTrack = !!chapters
   ctx.playerSettings.scaleElapsedTimeBySpeed = scaled
-  ctx.playbackSession = chapters ? { chapters } : null
+  ctx.playbackSession = { playMethod, ...(chapters ? { chapters } : {}) }
+  ctx.$constants = { PlayMethod }
   ctx.$eventBus = { $emit() {} }
   ctx.totalDuration = duration
   ctx.currentPlaybackRate = rate
@@ -283,6 +286,31 @@ test('AudioPlayer, once a minute: the buffered bar steps by a fixed minute of me
     ctx.bufferedTime = 179
     ctx.timeupdate()
     assert.equal(ctx.$refs.bufferedTrack.style.width, `${(120 / 36000) * 100}%`, `${rate}x`)
+  }
+})
+
+test('AudioPlayer: a local file draws no buffered bar, a stream draws what the player buffered', async () => {
+  const component = await loadPlayer()
+  const chapters = [{ start: 0, end: 600 }, { start: 600, end: 36000 }]
+  for (const everyMinute of [false, true]) {
+    for (const withChapters of [false, true]) {
+      const label = `everyMinute=${everyMinute} chapters=${withChapters}`
+      const local = makePlayer(component, { everyMinute, chapters: withChapters ? chapters : null, playMethod: PlayMethod.LOCAL })
+      local.ctx.$refs.totalBufferedTrack = countingElement(local.counts, 'totalBufferedTrack')
+      local.ctx.currentTime = 700
+      local.ctx.bufferedTime = 783
+      local.ctx.timeupdate()
+      assert.equal(local.ctx.$refs.bufferedTrack.style.width, '0%', `local ${label}`)
+      if (withChapters) assert.equal(local.ctx.$refs.totalBufferedTrack.style.width, '0%', `local total track ${label}`)
+
+      const stream = makePlayer(component, { everyMinute, chapters: withChapters ? chapters : null })
+      stream.ctx.$refs.totalBufferedTrack = countingElement(stream.counts, 'totalBufferedTrack')
+      stream.ctx.currentTime = 700
+      stream.ctx.bufferedTime = 783
+      stream.ctx.timeupdate()
+      assert.notEqual(stream.ctx.$refs.bufferedTrack.style.width, '0%', `stream ${label}`)
+      if (withChapters) assert.notEqual(stream.ctx.$refs.totalBufferedTrack.style.width, '0%', `stream total track ${label}`)
+    }
   }
 })
 

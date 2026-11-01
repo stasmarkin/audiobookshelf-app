@@ -1,10 +1,16 @@
 name: Verify all i18n files are alphabetized
 
 on:
-  push:
   pull_request:
     paths:
       - strings/** # Should only check if any strings changed
+      - .github/workflows/i18n-check.yml
+  workflow_dispatch:
+
+# A newer push to the same pull request cancels the superseded run
+concurrency:
+  group: i18n-check-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

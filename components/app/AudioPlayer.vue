@@ -167,6 +167,7 @@ import coverPresentation from '@/theme/coverPresentation'
 import playerLayout from '@/theme/playerLayout'
 import WrappingMarquee from '@/assets/WrappingMarquee.js'
 import { COARSE_STEP_S, coarseTime, coarseClock, sleepRemainingLabel, createPainter } from '@/utils/playerClock'
+import { drawnBufferedTime } from '@/utils/bufferedTrack'
 import jumpLabelMixin from '@/mixins/jumpLabel'
 
 const setText = (el, value) => (el.innerText = value)
@@ -766,7 +767,7 @@ export default {
       const currentTimeToUse = at === undefined ? this.drawnTime : this.drawTime(at, chapter)
       const onChapterTrack = this.playerSettings.useChapterTrack && chapter
       // The buffered bar is a fixed media-time step: it does not depend on the playback speed
-      const bufferedTime = this.coarseDrawing ? coarseTime(this.bufferedTime, COARSE_STEP_S, onChapterTrack ? Number(chapter.start) : 0) : this.bufferedTime
+      const bufferedTime = drawnBufferedTime(this.isLocalPlayMethod, this.coarseDrawing ? coarseTime(this.bufferedTime, COARSE_STEP_S, onChapterTrack ? Number(chapter.start) : 0) : this.bufferedTime)
       let percentDone = currentTimeToUse / this.totalDuration
       const totalPercentDone = percentDone
       let bufferedPercent = bufferedTime / this.totalDuration

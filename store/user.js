@@ -167,6 +167,7 @@ export const actions = {
     this.$localStore.removeLastLibraryId()
     commit('logout')
     commit('libraries/setCurrentLibrary', null, { root: true })
+    commit('libraries/setStartupTabRestored', false, { root: true })
     await AbsLogger.info({ tag: 'user', message: `Logged out from server ${state.serverConnectionConfig?.name || 'Not connected'}` })
   },
   /**
