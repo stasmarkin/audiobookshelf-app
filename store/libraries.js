@@ -195,7 +195,8 @@ export const actions = {
   // tick that it applies a library's view.
   activateViewScope({ state, commit, dispatch, rootState }) {
     if (!state.viewStateLoaded) return
-    const scope = viewScopeKey(rootState.user.serverConnectionConfig?.id, rootState.user.user?.id)
+    // Offline (before the sign-in, after a refused one) the account is the active server's cached user
+    const scope = viewScopeKey(rootState.user.serverConnectionConfig?.id || rootState.activeServerConfigId, (rootState.user.user || rootState.user.cachedUser)?.id)
     if (scope === state.viewScope) return
     // The legacy memory goes to an account only when it is the only saved connection on this device
     const claimLegacy = !!scope && !!state.legacyViewState && rootState.deviceData?.serverConnectionConfigs?.length === 1
