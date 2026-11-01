@@ -1,25 +1,9 @@
-# Inherited iOS simulator build. Audiobookshelf+ is an Android product and the iOS project is not maintained here,
-# so this runs only when something that can affect the native iOS build changes (the iOS project, the dependencies
-# and their native plugins, the Capacitor configuration, or this workflow), and on demand. The shared web app is
-# built and tested on every push by "Build APK".
+# Inherited iOS simulator build. Audiobookshelf+ is an Android product and the iOS project is not maintained here, so this
+# runs only on demand (workflow_dispatch). The shared web app is built and tested by "Build APK".
 name: Build iOS
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'ios/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'capacitor.config.json'
-      - '.github/workflows/build-ios.yml'
-  pull_request:
-    paths:
-      - 'ios/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'capacitor.config.json'
-      - '.github/workflows/build-ios.yml'
 
 permissions:
   contents: read
