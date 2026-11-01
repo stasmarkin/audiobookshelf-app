@@ -557,11 +557,8 @@ export default {
         return
       }
 
-      if (this.hasFilter) {
-        this.clearFilter()
-      } else {
-        this.resetEntities()
-      }
+      // The filter is not cleared here: libraries/fetch has already applied the new library's saved one
+      this.resetEntities()
     },
     /** A catalog or progress change native reports that this shelf shows: its loaded pages are read again. */
     dataChanged(change) {
