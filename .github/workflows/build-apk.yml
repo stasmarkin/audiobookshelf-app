@@ -1,26 +1,31 @@
-# Android validation: JS tests, web build, debug build and Kotlin JVM/Robolectric tests on every push and pull request.
-# Pushes to plus in this repository (never pull requests or forks) also publish the debug APK of that run as a 14-day
-# artifact, re-signed with the persistent debug/test key so it updates an existing debug install in place
-# (docs/debug-test-builds.md). Other branches: "Debug Test APK (development only)" on demand. Distributable APKs are
-# built and signed as described in docs/release-process.md; this workflow never touches production signing.
+# Android validation: JS tests, web build, debug build and Kotlin JVM/Robolectric tests.
+# Runs on pull requests (not on pushes, so a merge is not validated a second time) and on demand
+# (workflow_dispatch: pick the branch or tag, e.g. before a release). Newer pushes to the same pull request cancel the
+# superseded run. It builds and tests only; it never touches signing. An installable debug APK comes from "Debug Test
+# APK (development only)" on demand (docs/debug-test-builds.md). Distributable APKs are built and signed as described in
+# docs/release-process.md.
 name: Build APK
 
 on:
-  push:
-    paths-ignore:
-      - 'ios/**'
-      - 'readme.md'
   pull_request:
     paths-ignore:
       - 'ios/**'
       - 'readme.md'
+      - 'CHANGELOG.md'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pull requests: a newer push cancels the superseded run. On-demand runs are never cancelled by another run.
+concurrency:
+  group: build-apk-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   main:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: checkout sources
         uses: actions/checkout@v5
@@ -57,18 +62,6 @@ jobs:
       - name: run Kotlin unit tests (JVM + Robolectric)
         run: ./android/gradlew testDebugUnitTest -p android --no-daemon
 
-      # Pushes to plus in this repository only, after every gate above passed (steps without a status check are skipped
-      # once a step fails): hand this run's debug APK to the debug-apk job. Not for installing (throwaway CI key, 1 day).
-      - name: hand over debug APK for signing (plus only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/plus' && github.repository == 'ADD-OCD/audiobookshelfplus-app'
-        uses: actions/upload-artifact@v6
-        with:
-          name: ci-intermediate-not-for-install-run${{ github.run_id }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 1
-          if-no-files-found: error
-          compression-level: 0
-
       - name: upload unit test reports
         if: failure()
         uses: actions/upload-artifact@v6
@@ -79,96 +72,3 @@ jobs:
             android/app/build/test-results/
           if-no-files-found: ignore
           retention-days: 7
-
-  # Re-signs the debug APK of a successful plus push with the debug/test key and publishes it. A separate job on purpose:
-  # the signing secrets never share a runner with npm or Gradle code (dependency install scripts and build plugins run in
-  # main), and they never reach pull requests or forks. Runs only when every gate in main passed.
-  debug-apk:
-    name: debug APK artifact (plus only)
-    needs: main
-    if: github.event_name == 'push' && github.ref == 'refs/heads/plus' && github.repository == 'ADD-OCD/audiobookshelfplus-app'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      # build.gradle only (versionName/versionCode); nothing from the repository is executed in this job
-      - name: checkout build.gradle
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-          sparse-checkout: android/app/build.gradle
-          sparse-checkout-cone-mode: false
-
-      - name: download this run's debug APK
-        uses: actions/download-artifact@v6
-        with:
-          name: ci-intermediate-not-for-install-run${{ github.run_id }}
-          path: ${{ runner.temp }}/unsigned
-
-      - name: sign and verify debug APK
-        id: debug_apk
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ABSPLUS_DEBUG_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ABSPLUS_DEBUG_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ABSPLUS_DEBUG_KEY_ALIAS }}
-          DEBUG_PACKAGE: app.absplus.android.debug
-          # Certificate of the persistent debug/test key (public fingerprint, same pin as debug-test-apk.yml)
-          EXPECTED_CERT_SHA256: 0e22f17fc1da110460bef1729a80a1e045c9977968450c00fceedf6d61796c0a
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
-            echo "::error::Debug/test signing secrets are missing; refusing to fall back to a throwaway key"; exit 1
-          fi
-          build_tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          src="$RUNNER_TEMP/unsigned/app-debug.apk"
-          [ -f "$src" ] || { echo "::error::No debug APK from this run"; exit 1; }
-          version_name="$(sed -n 's/^ *versionName "\(.*\)"$/\1/p' android/app/build.gradle)"
-          version_code="$(sed -n 's/^ *versionCode \([0-9]*\)$/\1/p' android/app/build.gradle)"
-          [ -n "$version_name" ] && [ -n "$version_code" ] || { echo "::error::Could not read versionName/versionCode"; exit 1; }
-          short_sha="${GITHUB_SHA::8}"
-          apk_name="AudiobookshelfPlus-${version_name}-debug-${short_sha}.apk"
-          artifact_name="AudiobookshelfPlus-debug-${short_sha}-run${GITHUB_RUN_ID}"
-
-          keystore="$RUNNER_TEMP/debug-test-signing.p12"
-          trap 'rm -f "$keystore"' EXIT
-          umask 077
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
-          signed="$RUNNER_TEMP/debug-apk-signed.apk"
-          "$build_tools/apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD --out "$signed" "$src"
-          rm -f "$keystore"
-
-          certs="$("$build_tools/apksigner" verify --verbose --print-certs "$signed")"
-          echo "$certs" | grep -E '^Verified using|^Number of signers|certificate (DN|SHA-256)'
-          [ "$(echo "$certs" | sed -n 's/^Number of signers: //p')" = "1" ] || { echo "::error::Expected exactly one signer"; exit 1; }
-          cert="$(echo "$certs" | sed -n 's/^.*certificate SHA-256 digest: \([0-9a-f]*\)$/\1/p' | sort -u)"
-          [ "$cert" = "$EXPECTED_CERT_SHA256" ] || { echo "::error::Signed with an unexpected certificate"; exit 1; }
-          badging="$("$build_tools/aapt2" dump badging "$signed")"
-          badging="${badging%%$'\n'*}"
-          package="$(echo "$badging" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
-          apk_code="$(echo "$badging" | sed -n "s/.* versionCode='\([0-9]*\)'.*/\1/p")"
-          [ "$package" = "$DEBUG_PACKAGE" ] || { echo "::error::Unexpected package $package"; exit 1; }
-          [ "$apk_code" = "$version_code" ] || { echo "::error::APK versionCode $apk_code differs from build.gradle $version_code"; exit 1; }
-
-          out="$RUNNER_TEMP/debug-apk"
-          mkdir -p "$out"
-          cp "$signed" "$out/$apk_name"
-          apk_sha256="$(sha256sum "$out/$apk_name" | cut -d' ' -f1)"
-          printf '%s\n' "DEVELOPMENT DEBUG BUILD - not a release" "file: $apk_name" "branch: $GITHUB_REF_NAME" \
-            "commit: $GITHUB_SHA" "versionName: $version_name (shown as $version_name-debug)" "versionCode: $version_code" \
-            "package: $package (installs alongside app.absplus.android)" "apk sha256: $apk_sha256" \
-            "signing certificate sha256: $cert" "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            "workflow run: $RUN_URL (attempt $GITHUB_RUN_ATTEMPT)" > "$out/build-info.txt"
-          cat "$out/build-info.txt"
-          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
-          { echo '### Debug APK (development build, not a release)'; echo '```'; cat "$out/build-info.txt"; echo '```'
-            echo "Artifact \`$artifact_name\` (14 days): unzip it and install the APK. It updates an existing $package install."; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: upload debug APK
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ steps.debug_apk.outputs.artifact_name }}
-          path: ${{ runner.temp }}/debug-apk/
-          retention-days: 14
-          if-no-files-found: error
-          compression-level: 0

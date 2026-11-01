@@ -466,11 +466,8 @@ export default {
         return
       }
 
-      if (this.hasFilter) {
-        this.clearFilter()
-      } else {
-        this.resetEntities()
-      }
+      // The filter is not cleared here: libraries/fetch has already applied the new library's saved one
+      this.resetEntities()
     },
     libraryItemAdded(libraryItem) {
       console.log('libraryItem added', libraryItem)
