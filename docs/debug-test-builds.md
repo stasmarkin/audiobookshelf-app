@@ -15,30 +15,16 @@ The label is the dispatch input, or else the first word of the branch name (`fea
 
 ## How it runs
 
-On demand only (`workflow_dispatch`), for the branch that is ready for a phone test. Every push is already validated by the Build APK workflow (JS tests, debug build, Kotlin tests); this workflow only produces the installable test APK, so it does not run, or keep artifacts, for pushes nobody tests on a phone.
+On demand only (`workflow_dispatch`), for the branch that is ready for a phone test. Pull requests (and on-demand runs) are validated by the Build APK workflow (JS tests, debug build, Kotlin tests); this workflow only produces the installable test APK, so it does not run, or keep artifacts, for pushes nobody tests on a phone.
 
 - From GitHub: **Actions** → **Debug Test APK (development only)** → **Run workflow**, pick the branch, optionally enter a label.
 - From a computer: `gh workflow run debug-test-apk.yml -R ADD-OCD/audiobookshelfplus-app --ref <branch>` (optionally `-f label=<label>`).
 
 It runs only for branches of this repository. There is no `pull_request` trigger, so code from forks never reaches the signing secrets.
 
-## Automatic debug APK from `plus` (Build APK)
+## No automatic debug APK
 
-Every push to `plus` in this repository also publishes its debug APK from the **Build APK** workflow (`.github/workflows/build-apk.yml`), so the current `plus` build is always downloadable without a dispatch.
-
-|           |                                                                                                                                                    |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Package   | `app.absplus.android.debug`, signed with the same debug/test key as above, so it updates an existing debug install in place                        |
-| File      | `AudiobookshelfPlus-<versionName>-debug-<commit>.apk` (first 8 characters of the commit), e.g. `AudiobookshelfPlus-0.14.2-beta-debug-16a1a2f5.apk` |
-| Artifact  | `AudiobookshelfPlus-debug-<commit>-run<run id>`, containing the APK and `build-info.txt` (as above, plus the run attempt)                          |
-| Retention | 14 days                                                                                                                                            |
-
-- The APK is signed and uploaded only after every gate in that run passed (JS tests, web build, debug build, Kotlin tests). A failed run uploads nothing, and the file always comes from that run's own build.
-- Pull requests (including forks), other branches and forks' own pushes never sign or upload: the hand-over step and the signing job both check `push`, `refs/heads/plus` and this repository. Pull requests from forks never receive repository secrets anyway.
-- Signing runs in a separate job (`debug-apk`) that receives only the built APK. The signing secrets never share a runner with npm or Gradle code, which runs in the validation job. The hand-over artifact `ci-intermediate-not-for-install-run<id>` (CI's throwaway debug key, 1 day) is not for installing.
-- The run fails instead of uploading if the signer is not exactly the pinned test certificate, the package is not `app.absplus.android.debug`, or the APK's versionCode differs from `android/app/build.gradle`.
-
-To download it: **Actions** → **Build APK** → the newest successful run on `plus` → **Artifacts** → `AudiobookshelfPlus-debug-…`, then follow "On the phone" below.
+Pushes to `plus` no longer publish a debug APK (this saved Actions time and artifact storage). To get the current `plus` build, run **Debug Test APK (development only)** on the `plus` branch as described above. Earlier `AudiobookshelfPlus-debug-<commit>-run<id>` artifacts from Build APK expire after 14 days.
 
 ## On the phone
 
@@ -55,7 +41,7 @@ If a debug app signed with a different key is already installed (for example one
 
 Test APKs are disposable. They are not an archive of development builds, and nothing should depend on an old one: any commit can be rebuilt with the same key by running the workflow again.
 
-- Debug Test APK artifacts expire after 5 days, enough for a phone test session and a retest; the Build APK `plus` artifacts after 14 days.
+- Debug Test APK artifacts expire after 5 days, enough for a phone test session and a retest.
 - **At phase close** (once a phase is accepted and integrated, or abandoned), delete that phase's remaining test APK artifacts instead of waiting for them to expire: **Actions** → the run → **Artifacts** → delete, or `gh api -X DELETE repos/ADD-OCD/audiobookshelfplus-app/actions/artifacts/<id>`. Keep the workflow and the three signing secrets; they are what create the next test APK.
 - Only development test artifacts are cleaned this way. Never delete GitHub Releases, release assets or tags as part of it.
 
