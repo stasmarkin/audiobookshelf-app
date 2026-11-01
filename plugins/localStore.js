@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences'
+import { emptyViewState, parseLibraryViewMemory, parseLibraryViewState } from '@/utils/libraryViewState'
 
 class LocalStorage {
   constructor(vuexStore) {
@@ -123,6 +124,45 @@ class LocalStorage {
     } catch (error) {
       console.error('[LocalStorage] Failed to get last library id', error)
       return false
+    }
+  }
+
+  // Per-account memory (utils/libraryViewState.js): the value is already serialized by serializeLibraryViewScopes
+  async setLibraryViewScopes(value) {
+    try {
+      await Preferences.set({ key: 'libraryViewScopes', value })
+    } catch (error) {
+      console.error('[LocalStorage] Failed to set library view scopes', error)
+    }
+  }
+
+  // { scopes, active }: the memory of every account and the account the live sort/filter last belonged to
+  async getLibraryViewScopes() {
+    try {
+      const obj = (await Preferences.get({ key: 'libraryViewScopes' })) || {}
+      return parseLibraryViewMemory(obj.value ?? null)
+    } catch (error) {
+      console.error('[LocalStorage] Failed to get library view scopes', error)
+      return { scopes: {}, active: null }
+    }
+  }
+
+  // The first build with the feature saved one unscoped memory; it is only read, to be handed to one account
+  async getLegacyLibraryViewState() {
+    try {
+      const obj = (await Preferences.get({ key: 'libraryViewState' })) || {}
+      return parseLibraryViewState(obj.value ?? null)
+    } catch (error) {
+      console.error('[LocalStorage] Failed to get legacy library view state', error)
+      return emptyViewState()
+    }
+  }
+
+  async removeLegacyLibraryViewState() {
+    try {
+      await Preferences.remove({ key: 'libraryViewState' })
+    } catch (error) {
+      console.error('[LocalStorage] Failed to remove legacy library view state', error)
     }
   }
 
