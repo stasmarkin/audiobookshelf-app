@@ -127,6 +127,11 @@ class AbsAudioPlayerWeb extends WebPlugin {
   }
 
   // PluginMethod
+  async endCurrentItem() {
+    return this.closePlayback()
+  }
+
+  // PluginMethod
   seek({ value }) {
     this.startTime = value
     this.playWhenReady = this.playerPlaying

@@ -438,6 +438,14 @@ class AbsAudioPlayer : Plugin() {
     }
   }
 
+  // Resolves after the left item's final progress sync, so the caller can write its progress next (mark finished)
+  @PluginMethod
+  fun endCurrentItem(call: PluginCall) {
+    Handler(Looper.getMainLooper()).post {
+      playerNotificationService.endCurrentItem { call.resolve() }
+    }
+  }
+
   @PluginMethod
   fun setSleepTimer(call: PluginCall) {
     val time:Long = call.getString("time", "360000")!!.toLong()

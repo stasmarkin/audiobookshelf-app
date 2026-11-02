@@ -56,7 +56,8 @@
 import { deleteFailureMessage } from '@/utils/deleteResult'
 import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
-import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { AbsAudioPlayer, AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { endPlaybackOf } from '@/utils/finishPlaying'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 
@@ -532,9 +533,14 @@ export default {
     },
     async toggleFinished() {
       await this.$hapticsImpact()
+      const isFinished = !this.userIsFinished
+
+      if (isFinished) {
+        const ids = { libraryItemId: this.libraryItemId, episodeId: this.episode.id, localLibraryItemId: this.localLibraryItemId, localEpisodeId: this.localEpisodeId }
+        await endPlaybackOf(this.$store.state.currentPlaybackSession, ids, () => AbsAudioPlayer.endCurrentItem())
+      }
 
       if (this.isLocal || this.localEpisode) {
-        const isFinished = !this.userIsFinished
         const localLibraryItemId = this.localLibraryItemId
         const localEpisodeId = this.localEpisodeId
         const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId, localEpisodeId, isFinished })
@@ -551,7 +557,7 @@ export default {
         }
       } else {
         const updatePayload = {
-          isFinished: !this.userIsFinished
+          isFinished
         }
         this.$nativeHttp.patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload).catch((error) => {
           console.error('Failed', error)

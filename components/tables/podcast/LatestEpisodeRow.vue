@@ -69,7 +69,8 @@
 </template>
 
 <script>
-import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { AbsAudioPlayer, AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { endPlaybackOf } from '@/utils/finishPlaying'
 import CellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 
@@ -279,10 +280,19 @@ export default {
     },
     async toggleFinished() {
       await this.$hapticsImpact()
+      const isFinished = !this.userIsFinished
 
       this.isProcessingReadUpdate = true
+      if (isFinished) {
+        const ids = {
+          libraryItemId: this.libraryItemId,
+          episodeId: this.episode.id,
+          localLibraryItemId: this.isLocal ? this.libraryItemId : this.localLibraryItemId,
+          localEpisodeId: this.isLocal ? this.episode.id : this.localEpisode?.id
+        }
+        await endPlaybackOf(this.$store.state.currentPlaybackSession, ids, () => AbsAudioPlayer.endCurrentItem())
+      }
       if (this.isLocal || this.localEpisode) {
-        const isFinished = !this.userIsFinished
         const localLibraryItemId = this.isLocal ? this.libraryItemId : this.localLibraryItemId
         const localEpisodeId = this.isLocal ? this.episode.id : this.localEpisode.id
         const payload = await this.$db.updateLocalMediaProgressFinished({
@@ -303,7 +313,7 @@ export default {
         this.isProcessingReadUpdate = false
       } else {
         const updatePayload = {
-          isFinished: !this.userIsFinished
+          isFinished
         }
         this.$nativeHttp
           .patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload)

@@ -10,7 +10,8 @@
 <script>
 import { deleteFailureMessage } from '@/utils/deleteResult'
 import { Dialog } from '@capacitor/dialog'
-import { AbsFileSystem } from '@/plugins/capacitor'
+import { AbsAudioPlayer, AbsFileSystem } from '@/plugins/capacitor'
+import { endPlaybackOf } from '@/utils/finishPlaying'
 
 export default {
   props: {
@@ -333,9 +334,10 @@ export default {
     },
     async toggleFinished() {
       await this.$hapticsImpact()
+      const isFinished = !this.userIsFinished
 
       // Show confirm if item has progress since it will reset
-      if (this.userItemProgress && this.userItemProgress.progress > 0 && !this.userIsFinished) {
+      if (this.userItemProgress && this.userItemProgress.progress > 0 && isFinished) {
         const { value } = await Dialog.confirm({
           title: this.$strings.HeaderConfirm,
           message: this.$strings.MessageConfirmMarkAsFinished
@@ -344,8 +346,11 @@ export default {
       }
 
       this.$emit('update:processing', true)
+      if (isFinished) {
+        const ids = { libraryItemId: this.serverLibraryItemId, localLibraryItemId: this.localLibraryItemId }
+        await endPlaybackOf(this.$store.state.currentPlaybackSession, ids, () => AbsAudioPlayer.endCurrentItem())
+      }
       if (this.isLocal) {
-        const isFinished = !this.userIsFinished
         const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId: this.localLibraryItemId, isFinished })
         console.log('toggleFinished payload', JSON.stringify(payload))
         if (payload?.error) {
@@ -359,7 +364,7 @@ export default {
         }
       } else {
         const updatePayload = {
-          isFinished: !this.userIsFinished
+          isFinished
         }
         await this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}`, updatePayload).catch((error) => {
           console.error('Failed', error)
@@ -370,10 +375,14 @@ export default {
     },
     async toggleEpisodeFinished() {
       await this.$hapticsImpact()
+      const isFinished = !this.userIsFinished
 
       this.$emit('update:processing', true)
+      if (isFinished) {
+        const ids = { libraryItemId: this.serverLibraryItemId, episodeId: this.serverEpisodeId, localLibraryItemId: this.localLibraryItemId, localEpisodeId: this.localEpisodeId }
+        await endPlaybackOf(this.$store.state.currentPlaybackSession, ids, () => AbsAudioPlayer.endCurrentItem())
+      }
       if (this.isLocal || this.localEpisode) {
-        const isFinished = !this.userIsFinished
         const localLibraryItemId = this.localLibraryItemId
         const localEpisodeId = this.localEpisodeId
         const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId, localEpisodeId, isFinished })
@@ -390,7 +399,7 @@ export default {
         }
       } else {
         const updatePayload = {
-          isFinished: !this.userIsFinished
+          isFinished
         }
         await this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}/${this.serverEpisodeId}`, updatePayload).catch((error) => {
           console.error('Failed', error)
