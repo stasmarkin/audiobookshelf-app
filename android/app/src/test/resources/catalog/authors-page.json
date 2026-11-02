@@ -1,0 +1,70 @@
+{
+ "results": [
+  {
+   "id": "au-2",
+   "asin": null,
+   "name": "Bob Brown",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "lib1",
+   "addedAt": 1792076683001,
+   "updatedAt": 1792076683001,
+   "numBooks": 3,
+   "lastFirst": "Brown, Bob"
+  },
+  {
+   "id": "au-3",
+   "asin": "B000APEZR4",
+   "name": "alice Adams",
+   "description": "Short stories.",
+   "imagePath": "/metadata/authors/au-3.jpg",
+   "libraryId": "lib1",
+   "addedAt": 1792076683002,
+   "updatedAt": 1792076690500,
+   "numBooks": 1,
+   "lastFirst": "Adams, alice"
+  },
+  {
+   "id": "au-5",
+   "asin": null,
+   "name": "Sam Lee",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "lib1",
+   "addedAt": 1792076683003,
+   "updatedAt": 1792076683003,
+   "numBooks": 2,
+   "lastFirst": "Lee, Sam"
+  },
+  {
+   "id": "au-1",
+   "asin": null,
+   "name": "Sam Lee",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "lib1",
+   "addedAt": 1792076683004,
+   "updatedAt": 1792076683004,
+   "numBooks": 0,
+   "lastFirst": "Lee, Sam"
+  },
+  {
+   "id": "au-4",
+   "asin": null,
+   "name": "Лев Толстой",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "lib1",
+   "addedAt": 1792076683005,
+   "updatedAt": 1792076683005,
+   "numBooks": 4,
+   "lastFirst": "Толстой, Лев"
+  }
+ ],
+ "total": 5,
+ "limit": 100,
+ "page": 0,
+ "sortBy": "addedAt",
+ "sortDesc": false,
+ "minified": false
+}

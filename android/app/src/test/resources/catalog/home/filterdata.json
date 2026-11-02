@@ -1,0 +1,89 @@
+{
+ "narrators": [
+  "Bob",
+  "Doe, Jane",
+  "Nar Alpha",
+  "Nar Beta"
+ ],
+ "authors": [
+  {
+   "id": "fcec6d18-8982-4329-9581-6ef8a2fa648c",
+   "name": "Ann Archer"
+  },
+  {
+   "id": "65bd7e8c-8849-4a74-aa7f-ec6f7a29f9c4",
+   "name": "Bob Builder"
+  },
+  {
+   "id": "47769b3e-5116-4c10-96f2-dff9beab13f2",
+   "name": "Cy Clone"
+  },
+  {
+   "id": "23324794-b27d-4b48-bdbb-9ebde6b879f0",
+   "name": "Dana Dell"
+  },
+  {
+   "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9",
+   "name": "Eve Echo"
+  },
+  {
+   "id": "7764e4e6-f812-4064-87b7-1de42a0d6b8b",
+   "name": "Дмитрий Тестов"
+  }
+ ],
+ "genres": [
+  "Fantasy",
+  "Mystery",
+  "Sci-Fi",
+  "Сказка"
+ ],
+ "tags": [
+  "favorite",
+  "to-read"
+ ],
+ "series": [
+  {
+   "id": "dab8e9ba-ca32-4c5c-a5d7-2f15aa722213",
+   "name": "Alpha Saga"
+  },
+  {
+   "id": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+   "name": "Beta Cycle"
+  },
+  {
+   "id": "b371fe1f-753a-428b-a1da-93856d132809",
+   "name": "Delta Pair"
+  },
+  {
+   "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+   "name": "Epsilon Duo"
+  },
+  {
+   "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+   "name": "Eta Unread"
+  },
+  {
+   "id": "83b3f6a5-8b59-4c09-ac33-fdd6b853bba2",
+   "name": "Gamma Line"
+  },
+  {
+   "id": "c0e994d8-c878-46e9-80fa-ecb24d689194",
+   "name": "Hidden Arc"
+  },
+  {
+   "id": "c37008b8-75ef-4167-a4e0-38955cafc7e0",
+   "name": "Zeta Single"
+  }
+ ],
+ "languages": [
+  "en"
+ ],
+ "publishers": [],
+ "publishedDecades": [],
+ "bookCount": 26,
+ "authorCount": 6,
+ "seriesCount": 8,
+ "podcastCount": 0,
+ "numIssues": 0,
+ "loadedAt": 1792185848312
+}

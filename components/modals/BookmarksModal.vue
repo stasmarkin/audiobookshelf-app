@@ -23,10 +23,10 @@
           </div>
         </div>
         <div class="bookmarks-list w-full h-full" v-else>
-          <template v-for="bookmark in bookmarks">
+          <template v-for="bookmark in shownBookmarks">
             <modals-bookmarks-bookmark-item :key="bookmark.id" :highlight="currentTime === bookmark.time" :bookmark="bookmark" :playback-rate="_playbackRate" @click="clickBookmark" @edit="editBookmark" @delete="deleteBookmark" />
           </template>
-          <div v-if="!bookmarks.length" class="flex h-32 items-center justify-center">
+          <div v-if="!shownBookmarks.length" class="flex h-32 items-center justify-center">
             <p class="text-xl">{{ $strings.MessageNoBookmarks }}</p>
           </div>
         </div>
@@ -58,13 +58,20 @@ export default {
       type: Number,
       default: 1
     },
-    libraryItemId: String
+    libraryItemId: String,
+    // The server of the downloaded copy that is playing, when it is not the active one; null writes for the active server
+    serverConfigId: {
+      type: String,
+      default: null
+    }
   },
   data() {
     return {
       selectedBookmark: null,
       showBookmarkTitleInput: false,
-      newBookmarkTitle: ''
+      newBookmarkTitle: '',
+      copyBookmarks: [],
+      stopListening: null
     }
   },
   watch: {
@@ -72,7 +79,14 @@ export default {
       if (newVal) {
         this.showBookmarkTitleInput = false
         this.newBookmarkTitle = ''
+        this.loadCopyBookmarks()
       }
+    },
+    serverConfigId() {
+      this.loadCopyBookmarks()
+    },
+    libraryItemId() {
+      this.loadCopyBookmarks()
     }
   },
   computed: {
@@ -84,8 +98,15 @@ export default {
         this.$emit('input', val)
       }
     },
+    // A downloaded copy of another saved server: its bookmarks are not the active server's list in the store
+    foreignServer() {
+      return !!this.serverConfigId && this.serverConfigId !== this.$store.state.activeServerConfigId
+    },
+    shownBookmarks() {
+      return this.foreignServer ? this.copyBookmarks : this.bookmarks
+    },
     canCreateBookmark() {
-      return !this.bookmarks.find((bm) => bm.time === this.currentTime)
+      return !this.shownBookmarks.find((bm) => bm.time === this.currentTime)
     },
     _playbackRate() {
       if (!this.playbackRate || isNaN(this.playbackRate)) return 1
@@ -93,6 +114,17 @@ export default {
     }
   },
   methods: {
+    async loadCopyBookmarks() {
+      if (!this.foreignServer) return
+      const serverConfigId = this.serverConfigId
+      const libraryItemId = this.libraryItemId
+      const list = await this.$absData.getBookmarks({ serverConfigId }).catch((error) => {
+        console.error('[BookmarksModal] Could not read bookmarks', error)
+        return null
+      })
+      if (!list || serverConfigId !== this.serverConfigId || libraryItemId !== this.libraryItemId) return
+      this.copyBookmarks = list.filter((bm) => bm.libraryItemId === libraryItemId)
+    },
     bookmarkPlaceholder() {
       // using a method prevents caching the date
       return this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
@@ -110,25 +142,20 @@ export default {
       })
       if (!value) return
 
-      this.$nativeHttp
-        .delete(`/api/me/item/${this.libraryItemId}/bookmark/${bm.time}`)
-        .then(() => {
-          this.$store.commit('user/deleteBookmark', { libraryItemId: this.libraryItemId, time: bm.time })
-        })
-        .catch((error) => {
-          this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
-          console.error(error)
-        })
+      // Saved on the device and sent when the server is reachable; the list follows through $absData.onDataChanged
+      this.$absData.removeBookmark({ libraryItemId: this.libraryItemId, time: bm.time, serverConfigId: this.serverConfigId }).catch((error) => {
+        this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
+        console.error(error)
+      })
     },
     async clickBookmark(bm) {
       await this.$hapticsImpact()
       this.$emit('select', bm)
     },
     submitUpdateBookmark(updatedBookmark) {
-      this.$nativeHttp
-        .patch(`/api/me/item/${this.libraryItemId}/bookmark`, updatedBookmark)
-        .then((bookmark) => {
-          this.$store.commit('user/updateBookmark', bookmark)
+      this.$absData
+        .renameBookmark({ libraryItemId: this.libraryItemId, time: updatedBookmark.time, title: updatedBookmark.title, serverConfigId: this.serverConfigId })
+        .then(() => {
           this.showBookmarkTitleInput = false
         })
         .catch((error) => {
@@ -144,8 +171,8 @@ export default {
         title: this.newBookmarkTitle,
         time: Math.floor(this.currentTime)
       }
-      this.$nativeHttp
-        .post(`/api/me/item/${this.libraryItemId}/bookmark`, bookmark)
+      this.$absData
+        .addBookmark({ libraryItemId: this.libraryItemId, ...bookmark, serverConfigId: this.serverConfigId })
         .then(() => {
           this.$toast.success('Bookmark added')
         })
@@ -177,6 +204,13 @@ export default {
       }
     }
   },
-  mounted() {}
+  mounted() {
+    this.stopListening = this.$absData.onDataChanged((change) => {
+      if (change?.scope === 'bookmarks') this.loadCopyBookmarks()
+    })
+  },
+  beforeDestroy() {
+    if (this.stopListening) this.stopListening()
+  }
 }
 </script>

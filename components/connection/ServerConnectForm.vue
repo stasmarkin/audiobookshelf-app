@@ -900,6 +900,11 @@ export default {
       this.$store.commit('user/setUser', user)
       this.$store.commit('user/setAccessToken', serverConnectionConfig.token)
       this.$store.commit('user/setServerConnectionConfig', serverConnectionConfig)
+      // Native keeps the bookmarks; after a sign-in or a server switch the store must show this server's list
+      this.$absData
+        .applyServerEvent({ event: 'user_updated', payload: user, serverConfigId: serverConnectionConfig.id })
+        .then(() => this.$absData.reloadBookmarks())
+        .catch((error) => console.error('[ServerConnectForm] Could not hand the user to native', error))
 
       this.$socket.connect(this.serverConfig.address, this.serverConfig.token)
       this.$router.replace('/bookshelf')

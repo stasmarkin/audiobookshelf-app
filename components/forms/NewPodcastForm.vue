@@ -19,15 +19,18 @@
     <div class="flex items-center py-4 px-2">
       <ui-checkbox v-model="podcast.autoDownloadEpisodes" :label="$strings.LabelAutoDownloadEpisodes" checkbox-bg="primary" border-color="gray-600" label-class="pl-2 text-sm font-semibold" />
       <div class="flex-grow" />
-      <ui-btn color="success" @click="submit">{{ $strings.ButtonSubmit }}</ui-btn>
+      <ui-btn color="success" :disabled="!isServerOnline" @click="submit">{{ $strings.ButtonSubmit }}</ui-btn>
     </div>
+    <p v-if="isServerAway" class="requires-server-label text-xs text-fg-muted text-right px-2">{{ requiresServerLabel() }}</p>
   </div>
 </template>
 
 <script>
 import Path from 'path'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     processing: Boolean,
     podcastData: {
@@ -116,6 +119,7 @@ export default {
       this.fullPath = Path.join(this.selectedFolderPath, this.$sanitizeFilename(this.podcast.title))
     },
     submit() {
+      if (!this.isServerOnline) return
       const podcastPayload = {
         path: this.fullPath,
         folderId: this.selectedFolderId,

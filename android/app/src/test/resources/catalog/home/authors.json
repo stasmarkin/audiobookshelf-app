@@ -1,0 +1,82 @@
+{
+ "results": [
+  {
+   "id": "fcec6d18-8982-4329-9581-6ef8a2fa648c",
+   "asin": null,
+   "name": "Ann Archer",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+   "addedAt": 1792185844354,
+   "updatedAt": 1792185844354,
+   "numBooks": 3,
+   "lastFirst": "Archer, Ann"
+  },
+  {
+   "id": "65bd7e8c-8849-4a74-aa7f-ec6f7a29f9c4",
+   "asin": null,
+   "name": "Bob Builder",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+   "addedAt": 1792185844468,
+   "updatedAt": 1792185844468,
+   "numBooks": 3,
+   "lastFirst": "Builder, Bob"
+  },
+  {
+   "id": "47769b3e-5116-4c10-96f2-dff9beab13f2",
+   "asin": null,
+   "name": "Cy Clone",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+   "addedAt": 1792185844580,
+   "updatedAt": 1792185844580,
+   "numBooks": 4,
+   "lastFirst": "Clone, Cy"
+  },
+  {
+   "id": "23324794-b27d-4b48-bdbb-9ebde6b879f0",
+   "asin": null,
+   "name": "Dana Dell",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+   "addedAt": 1792185844750,
+   "updatedAt": 1792185844750,
+   "numBooks": 3,
+   "lastFirst": "Dell, Dana"
+  },
+  {
+   "id": "7764e4e6-f812-4064-87b7-1de42a0d6b8b",
+   "asin": null,
+   "name": "Дмитрий Тестов",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+   "addedAt": 1792185844888,
+   "updatedAt": 1792185844888,
+   "numBooks": 5,
+   "lastFirst": "Тестов, Дмитрий"
+  },
+  {
+   "id": "a87e8e3f-6772-4b95-9d23-81a8d9751ce9",
+   "asin": null,
+   "name": "Eve Echo",
+   "description": null,
+   "imagePath": null,
+   "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+   "addedAt": 1792185845049,
+   "updatedAt": 1792185845049,
+   "numBooks": 8,
+   "lastFirst": "Echo, Eve"
+  }
+ ],
+ "total": 6,
+ "limit": 100,
+ "page": 0,
+ "sortBy": "addedAt",
+ "sortDesc": false,
+ "minified": false
+}

@@ -58,6 +58,11 @@ class AbsAudioPlayerWeb extends WebPlugin {
   }
 
   // PluginMethod
+  // The web player has no downloads: only a device id is local
+  async resolvePlaybackSource({ libraryItemId }) {
+    return { source: libraryItemId?.startsWith('local') ? 'local' : 'stream' }
+  }
+
   async prepareLibraryItem({ libraryItemId, episodeId, playWhenReady, startTime, playbackRate }) {
     console.log('[AbsAudioPlayer] Prepare library item', libraryItemId)
 

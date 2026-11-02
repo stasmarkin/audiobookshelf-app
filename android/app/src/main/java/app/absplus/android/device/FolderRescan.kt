@@ -251,9 +251,9 @@ fun <F, M, R> runRescan(
 
 /**
  * Re-points a relinked item's local progress to the corrected server item. Only the server link
- * changes: position, finished state and timestamps stay, so nothing listened offline is lost, and
- * the next progress sync reconciles them with the corrected item's server progress (it never moves
- * progress backwards).
+ * changes: position, finished state and timestamps stay, so nothing listened offline is lost; the
+ * scanner then imports it into userdata.db, and the next reconcile sends it if it is newer than the
+ * corrected item's server progress.
  */
 fun repointLocalProgress(
         progress: LocalMediaProgress,

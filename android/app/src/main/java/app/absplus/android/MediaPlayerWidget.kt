@@ -51,8 +51,17 @@ class MediaPlayerWidget : AppWidgetProvider() {
  * @param positionMs / durationMs the known position and length for the progress snapshot, when available
  */
 internal fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, playbackSession: PlaybackSession?, isPlaying: Boolean, showControls: Boolean, positionMs: Long? = null, durationMs: Long? = null) {
-  DLog.i("MediaPlayerWidget", "updateAppWidget ${playbackSession?.displayTitle ?: "No Title"} isPlaying=$isPlaying showControls=$showControls")
+  updateAppWidget(context, appWidgetManager, appWidgetId, widgetStateOf(playbackSession, isPlaying, showControls, positionMs, durationMs))
+}
+
+internal fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, state: WidgetRenderer.State) {
+  DLog.i("MediaPlayerWidget", "updateAppWidget ${state.title ?: "No Title"} isPlaying=${state.isPlaying} showControls=${state.showControls} awaiting=${state.awaiting != null}")
+  WidgetRenderer.update(context, appWidgetManager, appWidgetId, state)
+}
+
+/** The widget's state; without a known position or length, the session's saved ones. */
+internal fun widgetStateOf(playbackSession: PlaybackSession?, isPlaying: Boolean, showControls: Boolean, positionMs: Long? = null, durationMs: Long? = null): WidgetRenderer.State {
   val position = positionMs ?: playbackSession?.let { (it.currentTime * 1000).toLong() }
   val duration = durationMs ?: playbackSession?.let { (it.duration * 1000).toLong() }
-  WidgetRenderer.update(context, appWidgetManager, appWidgetId, WidgetRenderer.State(playbackSession, isPlaying, showControls, position, duration))
+  return WidgetRenderer.State(playbackSession, isPlaying, showControls, position, duration)
 }

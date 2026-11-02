@@ -9,6 +9,8 @@ export const state = () => ({
   playerIsPlaying: false,
   playerIsFullscreen: false,
   playerIsStartingPlayback: false, // When pressing play before native play response
+  playerAwaitingServer: false, // the stream lost its server and native waits for it (paused, player open)
+  playerAwaitingDisplay: null, // the book a waiting queue is on, from the replica (native AwaitingDisplay); shown instead of the session
   playerStartingPlaybackMediaId: null,
   playbackQueue: null, // { sourceType: String, sourceId: String, items: Array, currentIndex: Number }
   playbackQueueGeneration: 0, // bumped by every set/clear, so an older async native queue answer can't replace a newer one
@@ -16,6 +18,9 @@ export const state = () => ({
   isCastAvailable: false,
   attemptingConnection: false,
   socketConnected: false,
+  serverState: 'unknown', // reachability of the active server (native AbsData): unknown | online | offline | unauthorized
+  activeServerConfigId: null, // the saved server serverState is about, kept after logout and while offline
+  syncState: { running: false, pendingCount: 0, lastError: null, lastSyncAt: null, catalogRunning: false }, // native sync of userdata.db and replica.db ($absData)
   networkConnected: false,
   networkConnectionType: null,
   isNetworkUnmetered: true,
@@ -38,7 +43,7 @@ export const getters = {
     return state.currentPlaybackSession?.id || null
   },
   getIsPlayerOpen: (state) => {
-    return !!state.currentPlaybackSession
+    return !!state.currentPlaybackSession || !!state.playerAwaitingDisplay
   },
   getIsCurrentSessionLocal: (state) => {
     return state.currentPlaybackSession?.playMethod == PlayMethod.LOCAL
@@ -112,6 +117,8 @@ export const getters = {
     if (!state.playbackQueue) return null
     return state.playbackQueue.items[state.playbackQueue.currentIndex] || null
   },
+  getIsServerOnline: (state) => state.serverState === 'online',
+  getHasActiveServer: (state) => state.activeServerConfigId != null,
   getPlaybackQueueUpcomingItems: (state) => {
     if (!state.playbackQueue) return []
     return state.playbackQueue.items.slice(state.playbackQueue.currentIndex + 1)
@@ -152,6 +159,11 @@ export const mutations = {
     state.lastItemScrollData = data
   },
   setPlaybackSession(state, playbackSession) {
+    // Native reports the wait per session: a new session or a close ends it
+    if (!playbackSession || playbackSession.id !== state.currentPlaybackSession?.id) {
+      state.playerAwaitingServer = false
+      state.playerAwaitingDisplay = null
+    }
     state.currentPlaybackSession = playbackSession
 
     state.isCasting = playbackSession?.mediaPlayer === 'cast-player'
@@ -164,6 +176,12 @@ export const mutations = {
   },
   setAttemptingConnection(state, val) {
     state.attemptingConnection = val
+  },
+  setPlayerAwaitingServer(state, val) {
+    state.playerAwaitingServer = !!val
+  },
+  setPlayerAwaitingDisplay(state, display) {
+    state.playerAwaitingDisplay = display || null
   },
   setPlayerPlaying(state, val) {
     state.playerIsPlaying = val
@@ -190,6 +208,16 @@ export const mutations = {
   },
   setSocketConnected(state, val) {
     state.socketConnected = val
+  },
+  setServerState(state, val) {
+    state.serverState = val
+  },
+  setActiveServerConfigId(state, val) {
+    state.activeServerConfigId = val
+  },
+  setSyncState(state, val) {
+    if (!val) return
+    state.syncState = { running: !!val.running, pendingCount: val.pendingCount || 0, lastError: val.lastError || null, lastSyncAt: val.lastSyncAt || null, catalogRunning: !!val.catalogRunning }
   },
   setNetworkListenerInit(state, val) {
     state.isNetworkListenerInit = val

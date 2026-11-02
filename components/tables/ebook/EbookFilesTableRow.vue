@@ -2,7 +2,7 @@
   <tr>
     <td class="px-4">{{ file.metadata.filename }} <span v-if="isPrimary" class="material-symbols text-success align-text-bottom text-base">check_circle</span></td>
     <td class="text-xs w-16">
-      <ui-icon-btn icon="auto_stories" outlined borderless icon-font-size="1.125rem" :size="8" @click="readEbook" />
+      <ui-icon-btn icon="auto_stories" outlined borderless icon-font-size="1.125rem" :size="8" :disabled="readDisabled" @click="readEbook" />
     </td>
     <td v-if="contextMenuItems.length" class="text-center">
       <ui-icon-btn icon="more_vert" borderless @click="clickMore" />
@@ -15,6 +15,7 @@ export default {
   props: {
     libraryItemId: String,
     showFullPath: Boolean,
+    readDisabled: Boolean,
     file: {
       type: Object,
       default: () => {}

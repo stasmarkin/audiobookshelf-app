@@ -44,10 +44,16 @@ class PlayerNotificationListener(var playerNotificationService:PlayerNotificatio
         return
       }
 
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        playerNotificationService.startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-      } else {
-        playerNotificationService.startForeground(notificationId, notification)
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          playerNotificationService.startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        } else {
+          playerNotificationService.startForeground(notificationId, notification)
+        }
+      } catch (e: IllegalStateException) {
+        // Android 12+ refuses a service that is not foreground yet from the background; the next post tries again
+        DLog.w(tag, "Cannot start foreground for notification $notificationId: $e")
+        return
       }
       isForegroundService = true
     } else {

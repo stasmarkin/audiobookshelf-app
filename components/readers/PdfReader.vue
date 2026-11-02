@@ -29,6 +29,7 @@
 <script>
 import pdf from '@teckel/vue-pdf'
 import { pdfDocumentParams } from '@/utils/pdfDocumentParams'
+import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
 
 export default {
   components: {
@@ -69,12 +70,8 @@ export default {
     },
     serverLibraryItemId() {
       if (!this.isLocal) return this.libraryItem.id
-      // Check if local library item is connected to the current server
-      if (!this.libraryItem.serverAddress || !this.libraryItem.libraryItemId) return null
-      if (this.$store.getters['user/getServerAddress'] === this.libraryItem.serverAddress) {
-        return this.libraryItem.libraryItemId
-      }
-      return null
+      // A copy of the server that is active now (not by the session address: empty after a cold start offline)
+      return isCopyOfActiveServer(this.libraryItem, this.$store.state.activeServerConfigId) ? this.libraryItem.libraryItemId : null
     },
     pdfWidth() {
       if (this.windowWidth > this.windowHeight) {
@@ -133,23 +130,17 @@ export default {
         ebookProgress: Math.max(0, Math.min(1, (Number(this.page) - 1) / Number(this.numPages)))
       }
 
-      // Update local item
-      if (this.localLibraryItemId) {
-        const localPayload = {
-          localLibraryItemId: this.localLibraryItemId,
-          ...payload
-        }
-        const localResponse = await this.$db.updateLocalEbookProgress(localPayload)
+      // A server item (or a copy linked to one): offline too, and native updates the copy's own progress
+      const target = progressTarget(this.libraryItem)
+      if (target) {
+        await this.$absData.updateEbookProgress({ libraryItemId: target.libraryItemId, serverConfigId: target.serverConfigId, ...payload }).catch((error) => {
+          console.error('PdfReader.updateProgress failed:', error)
+        })
+      } else if (this.localLibraryItemId) {
+        const localResponse = await this.$db.updateLocalEbookProgress({ localLibraryItemId: this.localLibraryItemId, ...payload })
         if (localResponse.localMediaProgress) {
           this.$store.commit('globals/updateLocalMediaProgress', localResponse.localMediaProgress)
         }
-      }
-
-      // Update server item
-      if (this.serverLibraryItemId) {
-        this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}`, payload).catch((error) => {
-          console.error('PdfReader.updateProgress failed:', error)
-        })
       }
     },
     loadedEvt() {
