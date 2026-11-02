@@ -11,6 +11,7 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s)
 const moduleOf = async (path) => import(`data:text/javascript;base64,${Buffer.from(await read(path)).toString('base64')}`)
 const { createDataService } = await moduleOf('../utils/dataService.js')
 const { progressTarget, isCopyOfActiveServer } = await moduleOf('../utils/progressTarget.js')
+const { endPlaybackOf } = await moduleOf('../utils/finishPlaying.js')
 
 const flush = async (n = 20) => {
   for (let i = 0; i < n; i++) await Promise.resolve()
@@ -286,7 +287,7 @@ async function component(path, sandboxExtra, ctxExtra) {
     .match(/<script>([\s\S]*?)<\/script>/)[1]
     .replace(/^import .*$/gm, '')
     .replace('export default', 'globalThis.component =')
-  const sandbox = { progressTarget, isCopyOfActiveServer, requiresServer: {}, Dialog: { confirm: async () => ({ value: true }) }, AbsFileSystem: {}, AbsDownloader: {}, console: { ...console, log() {} }, ...sandboxExtra }
+  const sandbox = { progressTarget, isCopyOfActiveServer, endPlaybackOf, requiresServer: {}, Dialog: { confirm: async () => ({ value: true }) }, AbsAudioPlayer: {}, AbsFileSystem: {}, AbsDownloader: {}, console: { ...console, log() {} }, ...sandboxExtra }
   vm.runInNewContext(script, sandbox)
   const def = sandbox.component
   const calls = []
