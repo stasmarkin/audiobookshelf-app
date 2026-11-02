@@ -78,7 +78,8 @@
 </template>
 
 <script>
-import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { AbsAudioPlayer, AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { endPlaybackOf } from '@/utils/finishPlaying'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 import { WAITING_LABEL_KEYS } from '@/utils/downloadState'
@@ -306,14 +307,23 @@ export default {
     },
     async toggleFinished() {
       await this.$hapticsImpact()
+      const isFinished = !this.userIsFinished
 
       this.isProcessingReadUpdate = true
+      if (isFinished) {
+        const ids = {
+          libraryItemId: this.libraryItemId,
+          episodeId: this.episode.id,
+          localLibraryItemId: this.isLocal ? this.libraryItemId : this.localLibraryItemId,
+          localEpisodeId: this.isLocal ? this.episode.id : this.localEpisode?.id
+        }
+        await endPlaybackOf(this.$store.state.currentPlaybackSession, ids, () => AbsAudioPlayer.endCurrentItem())
+      }
       if (this.progressTarget) {
         // Works offline; native also updates the downloaded copy's own progress
-        await this.$absData.markFinished({ ...this.progressTarget, isFinished: !this.userIsFinished }).catch((error) => console.error('[EpisodeRow] Could not save finished', error))
+        await this.$absData.markFinished({ ...this.progressTarget, isFinished }).catch((error) => console.error('[EpisodeRow] Could not save finished', error))
         this.isProcessingReadUpdate = false
       } else {
-        const isFinished = !this.userIsFinished
         const localLibraryItemId = this.isLocal ? this.libraryItemId : this.localLibraryItemId
         const localEpisodeId = this.isLocal ? this.episode.id : this.localEpisode.id
         const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId, localEpisodeId, isFinished })
