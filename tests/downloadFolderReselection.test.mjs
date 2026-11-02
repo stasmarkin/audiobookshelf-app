@@ -10,11 +10,11 @@ function component(selected) {
   const calls = []
   const script = fs.readFileSync(new URL('../pages/downloading.vue', import.meta.url), 'utf8').split('<script>')[1].split('</script>')[0]
     .split('\n').filter((s) => !s.startsWith('import ')).join('\n').replace('export default', 'globalThis.page =')
-  const context = vm.createContext({ ...states, isAppStorageFolderId: () => false,
+  const context = vm.createContext({ ...states, isAppStorageFolderId: () => false, requiresServer: {},
     AbsFileSystem: { selectFolder: async (args) => { calls.push(['picker', args]); return selected } },
     AbsDownloader: { retryDownload: async () => { calls.push(['retry']); return { errorCode: 'folderAccess' } } } })
   vm.runInContext(script, context)
-  const page = { ...context.page.methods, busyId: null, $strings: {}, $getString: (key) => key,
+  const page = { ...context.page.methods, busyId: null, isServerOnline: true, $strings: {}, $getString: (key) => key,
     $toast: { error: (message) => calls.push(['toast', message]) }, refresh: async () => calls.push(['refresh']) }
   return { page, calls }
 }

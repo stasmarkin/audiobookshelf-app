@@ -50,15 +50,19 @@
       </div>
     </div>
 
-    <div v-show="userIsAdminOrUp" class="flex items-start pt-2 h-20">
-      <ui-btn v-if="currentFeed" color="error" class="w-full h-14" @click="closeFeed">{{ $strings.ButtonCloseFeed }}</ui-btn>
-      <ui-btn v-else color="success" class="w-full h-14" @click="openFeed">{{ $strings.ButtonOpenFeed }}</ui-btn>
+    <div v-show="userIsAdminOrUp" class="pt-2 h-20">
+      <ui-btn v-if="currentFeed" color="error" class="w-full h-14" :disabled="!isServerOnline" @click="closeFeed">{{ $strings.ButtonCloseFeed }}</ui-btn>
+      <ui-btn v-else color="success" class="w-full h-14" :disabled="!isServerOnline" @click="openFeed">{{ $strings.ButtonOpenFeed }}</ui-btn>
+      <p v-if="isServerAway" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
     </div>
   </modals-fullscreen-modal>
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   data() {
     return {
       processing: false,
@@ -129,6 +133,7 @@ export default {
   },
   methods: {
     openFeed() {
+      if (!this.isServerOnline) return
       if (!this.newFeedSlug) {
         this.$toast.error('Must set a feed slug')
         return
@@ -165,6 +170,7 @@ export default {
       this.linkCopied = true
     },
     closeFeed() {
+      if (!this.isServerOnline) return
       this.processing = true
       this.$nativeHttp
         .post(`/api/feeds/${this.currentFeed.id}/close`)

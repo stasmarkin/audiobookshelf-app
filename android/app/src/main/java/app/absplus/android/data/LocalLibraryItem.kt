@@ -95,15 +95,16 @@ class LocalLibraryItem(
     return LocalFile("", null, contentUrl ?: "", "", path, null, 0).exists(ctx)
   }
 
+  /** [startTimeOverride] is the position the caller chose (see chooseStartTime); null takes this copy's Paper progress. */
   @JsonIgnore
-  fun getPlaybackSession(episode:PodcastEpisode?, deviceInfo:DeviceInfo):PlaybackSession {
+  fun getPlaybackSession(episode:PodcastEpisode?, deviceInfo:DeviceInfo, startTimeOverride:Double? = null):PlaybackSession {
     val localEpisodeId = episode?.id
     val sessionId = "${UUID.randomUUID()}"
 
-    // Get current progress for local media
-    val mediaProgressId = if (localEpisodeId.isNullOrEmpty()) id else "$id-$localEpisodeId"
-    val mediaProgress = DeviceManager.dbManager.getLocalMediaProgress(mediaProgressId)
-    val currentTime = if (mediaProgress?.isFinished == true) 0.0 else mediaProgress?.currentTime ?: 0.0
+    val currentTime = startTimeOverride ?: run {
+      val mediaProgress = DeviceManager.dbManager.getLocalMediaProgress(localMediaProgressId(episode))
+      if (mediaProgress?.isFinished == true) 0.0 else mediaProgress?.currentTime ?: 0.0
+    }
 
 
     val mediaMetadata = media.metadata
@@ -122,6 +123,10 @@ class LocalLibraryItem(
     val dateNow = System.currentTimeMillis()
     return PlaybackSession(sessionId,serverUserId,libraryItemId,episode?.serverEpisodeId, mediaType, mediaMetadata, deviceInfo,chapters ?: mutableListOf(), displayTitle, authorName,null,duration,PLAYMETHOD_LOCAL,dateNow,0L,0L, audioTracks,currentTime,null,this,localEpisodeId,serverConnectionConfigId, serverAddress, "exo-player")
   }
+
+  /** The Paper LocalMediaProgress id of this copy (and [episode]). */
+  @JsonIgnore
+  fun localMediaProgressId(episode:PodcastEpisode?): String = if (episode?.id.isNullOrEmpty()) id else "$id-${episode!!.id}"
 
   @JsonIgnore
   fun removeLocalFile(localFileId:String) {

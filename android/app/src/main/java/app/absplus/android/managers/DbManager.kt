@@ -15,6 +15,21 @@ class DbManager {
 
   companion object {
     private var isDbInitialized = false
+    private val playbackSessionLock = Any()
+
+    /** Changes with every write or removal of a local library item, so a reader can keep the list between them. */
+    @Volatile var localLibraryItemsVersion = 0L
+      private set
+
+    /**
+     * Held around a read-compare-write of a downloaded copy's progress (the Paper mirror of userdata.db) and the
+     * player's own write of it, so a check "not newer than mine" cannot be overtaken between the read and the write.
+     */
+    val localMediaProgressLock = Any()
+
+    fun localLibraryItemsChanged() {
+      localLibraryItemsVersion++
+    }
 
     fun initialize(ctx: Context) {
       if (isDbInitialized) return
@@ -89,18 +104,21 @@ class DbManager {
 
   fun removeLocalLibraryItem(localLibraryItemId: String) {
     itemStore.remove(localLibraryItemId)
+    localLibraryItemsChanged()
   }
 
   fun saveLocalLibraryItems(localLibraryItems: List<LocalLibraryItem>) {
     localLibraryItems.forEach { itemStore.save(it) }
+    localLibraryItemsChanged()
   }
 
   fun saveLocalLibraryItem(localLibraryItem: LocalLibraryItem) {
     itemStore.save(localLibraryItem)
+    localLibraryItemsChanged()
   }
 
   fun updateLocalLibraryItem(id: String, transform: (LocalLibraryItem) -> ItemUpdate): ItemUpdate? =
-          itemStore.update(id, transform)
+          itemStore.update(id, transform).also { if (it != null && it !is ItemUpdate.Keep) localLibraryItemsChanged() }
 
   fun saveLocalFolder(localFolder: LocalFolder) {
     Paper.book("localFolders").write(localFolder.id, localFolder)
@@ -311,8 +329,30 @@ class DbManager {
   }
 
   fun savePlaybackSession(playbackSession: PlaybackSession) {
-    Paper.book("playbackSession").write(playbackSession.id, playbackSession)
+    synchronized(playbackSessionLock) { Paper.book("playbackSession").write(playbackSession.id, playbackSession) }
   }
+  fun getPlaybackSession(playbackSessionId: String): PlaybackSession? =
+          Paper.book("playbackSession").read<PlaybackSession>(playbackSessionId)
+  /** Removes the session only if it is still the one that was sent: a later tick or more time is sent next time. */
+  fun removePlaybackSessionIfUnchanged(sent: PlaybackSession): Boolean = synchronized(playbackSessionLock) {
+    val saved = getPlaybackSession(sent.id) ?: return false
+    if (saved.updatedAt != sent.updatedAt || saved.timeListening != sent.timeListening) return false
+    Paper.book("playbackSession").delete(sent.id)
+    true
+  }
+
+  /**
+   * A stream's listening not settled with the server yet, as the offline session it would become; kept apart from
+   * `playbackSession`, which is sent (also by older versions) while that time may still reach the server by `/sync`.
+   */
+  fun saveUnsettledListening(key: String, session: PlaybackSession) {
+    Paper.book("listeningLedger").write(key, session)
+  }
+  fun getUnsettledListening(key: String): PlaybackSession? = Paper.book("listeningLedger").read<PlaybackSession>(key)
+  fun removeUnsettledListening(key: String) {
+    Paper.book("listeningLedger").delete(key)
+  }
+  fun unsettledListeningKeys(): List<String> = Paper.book("listeningLedger").allKeys
   fun removePlaybackSession(playbackSessionId: String) {
     Paper.book("playbackSession").delete(playbackSessionId)
   }

@@ -1,14 +1,74 @@
-// Keep server identity for UI/progress, and translate to device identity only at the bridge.
-export function nativeQueueItems(items) {
-  return items.map((item) => ({
+const isLocalId = (id) => typeof id === 'string' && id.startsWith('local')
+
+// The device copy's ids of a queue item (what older versions handed to native, and what a page that knows the copy plays)
+function deviceQueueItem(item) {
+  return {
     libraryItemId: item.localLibraryItem?.id || item.libraryItemId,
     episodeId: item.localLibraryItem ? item.localEpisode?.id || null : item.episodeId || null
-  }))
+  }
+}
+
+// The queue as native holds it: server ids, so native plays a downloaded copy when there is one and streams otherwise
+// (PlaybackSourceResolver), plus ino and the copy's server to find a copy downloaded through another library. An item
+// without a server id (Local Media) keeps its device ids.
+export function nativeQueueItems(items, activeServerConfigId = null) {
+  return items.map((item) => {
+    const hasServerIds = item.libraryItemId && !isLocalId(item.libraryItemId) && !isLocalId(item.episodeId)
+    if (!hasServerIds) return deviceQueueItem(item)
+    const nativeItem = { libraryItemId: item.libraryItemId, episodeId: item.episodeId || null }
+    const ino = item.libraryItem?.ino || item.localLibraryItem?.ino
+    if (ino) nativeItem.ino = ino
+    const serverConnectionConfigId = item.localLibraryItem?.serverConnectionConfigId || activeServerConfigId
+    if (serverConnectionConfigId) nativeItem.serverConnectionConfigId = serverConnectionConfigId
+    const expectedTracks = expectedTracksOf(item)
+    if (expectedTracks) nativeItem.expectedTracks = expectedTracks
+    return nativeItem
+  })
+}
+
+// The server's track count of a book: native streams a downloaded copy with fewer tracks (a partial download)
+function expectedTracksOf(item) {
+  if (item.episodeId || item.libraryItem?.mediaType === 'podcast') return null
+  return item.expectedTracks || item.libraryItem?.media?.numTracks || item.libraryItem?.media?.tracks?.length || null
+}
+
+// Identity of a native queue entry, for every comparison of queue entries
+export function queueItemKey(nativeItem) {
+  return `${nativeItem.libraryItemId}|${nativeItem.episodeId || ''}`
+}
+
+export function queueItemKeyOf(item) {
+  return queueItemKey(nativeQueueItems([item])[0])
+}
+
+// Whether a native queue entry is this display item: by its native ids, or by the device ids an older version saved
+function nativeItemIs(nativeItem, item) {
+  const key = queueItemKey(nativeItem)
+  return key === queueItemKeyOf(item) || (!!item.localLibraryItem && key === queueItemKey(deviceQueueItem(item)))
+}
+
+export function nativeQueueMatches(nativeItems, items) {
+  return nativeItems.length === items.length && items.every((item, i) => nativeItemIs(nativeItems[i], item))
+}
+
+// JS twin of PlaylistQueueItem.matches (QueueIdentity.kt): the entry names the session's server item or its device
+// copy, or the copy the native resolver found by ino for the same account
+export function queueItemMatchesSession(item, session) {
+  if (!item || !session) return false
+  const copy = session.localLibraryItem
+  const serverItemId = copy?.libraryItemId || session.libraryItemId || null
+  const episodeId = item.episodeId || null
+  if (serverItemId && item.libraryItemId === serverItemId) return episodeId === (session.episodeId || null)
+  if (copy && item.libraryItemId === copy.id) return episodeId === (session.localEpisodeId || null)
+  if (copy && item.ino && item.ino === copy.ino && item.serverConnectionConfigId && item.serverConnectionConfigId === copy.serverConnectionConfigId) {
+    return episodeId === (session.episodeId || null)
+  }
+  return false
 }
 
 // Up Next display for a queue the native player holds without this UI having set it: the UI restarted (reattach), or
 // a widget/headset/notification Play restored the session and its queue while the UI was already open. The saved
-// display copy is used only if it describes exactly the native queue (same IDs, same order, valid index) and, when
+// display copy is used only if it describes exactly the native queue (same items, same order, valid index) and, when
 // the session is known, the native current item is that session's item. Returns { queue } or { reason }.
 export function queueDisplayFromNative(saved, native, session = null) {
   const items = native?.items
@@ -16,24 +76,21 @@ export function queueDisplayFromNative(saved, native, session = null) {
   const index = native.currentIndex
   if (!Number.isInteger(index) || index < 0 || index >= items.length) return { reason: 'invalid-index' }
   if (!saved?.items?.length) return { reason: 'no-saved-display' }
-  const savedIds = nativeQueueItems(saved.items)
-  const same = savedIds.length === items.length && savedIds.every((item, i) => item.libraryItemId === items[i].libraryItemId && item.episodeId === (items[i].episodeId || null))
-  if (!same) return { reason: 'mismatch' }
-  if (session) {
-    const libraryItemId = session.localLibraryItem?.id || session.libraryItemId
-    const episodeId = session.localLibraryItem ? session.localEpisodeId || null : session.episodeId || null
-    if (items[index].libraryItemId !== libraryItemId || (items[index].episodeId || null) !== episodeId) return { reason: 'session-mismatch' }
-  }
+  if (!nativeQueueMatches(items, saved.items)) return { reason: 'mismatch' }
+  if (session && !queueItemMatchesSession(items[index], session)) return { reason: 'session-mismatch' }
   return { queue: { ...saved, currentIndex: index } }
 }
 
+// What a Play from a queue sends: the device copy's ids when the page knows one (as before), the server ids alongside
 export function queueItemPayload(item) {
-  const nativeItem = nativeQueueItems([item])[0]
-  return {
-    ...nativeItem,
+  const payload = {
+    ...deviceQueueItem(item),
     serverLibraryItemId: item.libraryItemId,
     serverEpisodeId: item.episodeId || null
   }
+  const expectedTracks = expectedTracksOf(item)
+  if (expectedTracks) payload.expectedTracks = expectedTracks
+  return payload
 }
 
 // Local progress takes priority when it exists, matching the precedence used elsewhere in this
@@ -60,17 +117,17 @@ export function downloadedBookItems(books, localItems, serverConnectionConfigId)
     const hasCompleteLocalCopy = localLibraryItem && localLibraryItem.media.tracks.length >= expectedTracks
     // Streamable items carry the raw book so the Up Next queue can display a title/cover for
     // them (queueItemDisplay's `item.libraryItem` branch) instead of falling back to "Unknown".
-    return [{ libraryItemId: book.id, episodeId: null, localLibraryItem: hasCompleteLocalCopy ? localLibraryItem : null, libraryItem: hasCompleteLocalCopy ? null : book }]
+    return [{ libraryItemId: book.id, episodeId: null, expectedTracks, localLibraryItem: hasCompleteLocalCopy ? localLibraryItem : null, libraryItem: hasCompleteLocalCopy ? null : book }]
   })
 }
 
-export async function fetchSeriesBooks(http, libraryId, seriesId, encode) {
+// All books of a series in sequence order from the catalog ($absData: the replica, or the server before it was read)
+export async function fetchSeriesBooks(absData, libraryId, seriesId, encode) {
   const books = []
   const ids = new Set()
   const limit = 100
   for (let page = 0; ; page++) {
-    const query = new URLSearchParams({ filter: `series.${encode(seriesId)}`, sort: 'sequence', desc: '0', limit: String(limit), page: String(page), minified: '1' })
-    const payload = await http.get(`/api/libraries/${libraryId}/items?${query}`)
+    const payload = await absData.getLibraryItems({ libraryId, filter: `series.${encode(seriesId)}`, sort: 'sequence', desc: false, limit, page })
     if (!Array.isArray(payload?.results) || !Number.isFinite(payload.total)) throw new Error('Failed to load the complete series')
     for (const book of payload.results) {
       if (ids.has(book.id)) throw new Error('Series changed while loading. Please try again.')
@@ -87,9 +144,11 @@ export async function buildQueueSourceItems(context, source) {
   // up front by the Play-prompt flow to decide whether to prompt without a second fetch here).
   if (source.items) return source.items
   if (source.sourceType === 'series' || source.sourceType === 'collection') {
-    const books = source.sourceType === 'series' ? await fetchSeriesBooks(context.$nativeHttp, source.libraryId, source.sourceId, context.$encode) : source.books
+    const books = source.sourceType === 'series' ? await fetchSeriesBooks(context.$absData, source.libraryId, source.sourceId, context.$encode) : source.books
     const localItems = (await context.$db.getLocalLibraryItems('book')) || []
-    return downloadedBookItems(books, localItems, context.$store.getters['user/getServerConnectionConfigId'])
+    // The saved server's copies: offline there is no signed-in connection to compare with; before native named the
+    // active server, the signed-in one is it
+    return downloadedBookItems(books, localItems, context.$store.state.activeServerConfigId || context.$store.getters['user/getServerConnectionConfigId'])
   }
   throw new Error('Unknown playback queue source')
 }
@@ -103,11 +162,8 @@ export async function resolveQueueSourceAppendItems(context, source, existingIte
     const progress = localProgress || context.$store.getters['user/getUserMediaProgress'](item.libraryItemId, item.episodeId)
     return !progress?.isFinished
   })
-  const existingKeys = new Set(nativeQueueItems(existingItems).map((i) => `${i.libraryItemId}|${i.episodeId || ''}`))
-  return unfinished.filter((item) => {
-    const key = nativeQueueItems([item])[0]
-    return !existingKeys.has(`${key.libraryItemId}|${key.episodeId || ''}`)
-  })
+  const existingKeys = new Set(existingItems.map(queueItemKeyOf))
+  return unfinished.filter((item) => !existingKeys.has(queueItemKeyOf(item)))
 }
 
 // Shapes the active playback session as a queue item, for synthesizing a fresh queue
@@ -149,9 +205,9 @@ export async function resolvePlaybackQueue(context, payload) {
   let currentIndex
   if (payload.libraryItemId) {
     currentIndex = items.findIndex((item) => {
-      const nativeItem = nativeQueueItems([item])[0]
+      const deviceItem = deviceQueueItem(item)
       const serverMatch = item.libraryItemId === (payload.serverLibraryItemId || payload.libraryItemId) && (item.episodeId || null) === (payload.serverEpisodeId || payload.episodeId || null)
-      const localMatch = nativeItem.libraryItemId === payload.libraryItemId && nativeItem.episodeId === (payload.episodeId || null)
+      const localMatch = deviceItem.libraryItemId === payload.libraryItemId && deviceItem.episodeId === (payload.episodeId || null)
       return serverMatch || localMatch
     })
     // Undownloaded books are queue members that stream (see downloadedBookItems), so this only

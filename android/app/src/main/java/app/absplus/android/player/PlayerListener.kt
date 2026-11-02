@@ -16,12 +16,20 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
   companion object {
     var lastPauseTime: Long = 0   //ms
     var lazyIsPlaying: Boolean = false
+    private const val EARLY_END_SECONDS = 30.0
   }
 
   override fun onPlayerError(error: PlaybackException) {
     val errorMessage = error.message ?: "Unknown Error"
-    DLog.e(tag, "onPlayerError $errorMessage")
-    playerNotificationService.handlePlayerPlaybackError(errorMessage) // If was direct playing session, fallback to transcode
+    val cause = error.cause
+    DLog.e(tag, "onPlayerError $errorMessage | code=${error.errorCode} ${error.errorCodeName} | http=${httpStatusOf(error)} | cause=${cause?.javaClass?.name}: ${cause?.message}")
+    // A lost server waits for it; otherwise direct play falls back to transcode
+    playerNotificationService.handlePlayerPlaybackError(error)
+  }
+
+  override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+    // Pauses that bypass the service's pause() (focus loss, audio becoming noisy, a controller on the player itself)
+    if (!playWhenReady) playerNotificationService.onPlayWhenReadyOff()
   }
 
   override fun onPositionDiscontinuity(
@@ -138,6 +146,7 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
         if (lastPauseTime == 0L) {
           lastPauseTime = -1
         }
+        playerNotificationService.onPlaybackReady()
         playerNotificationService.sendClientMetadata(PlayerState.READY)
       }
       if (playerNotificationService.currentPlayer.playbackState == Player.STATE_BUFFERING) {
@@ -146,6 +155,7 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
       }
       if (playerNotificationService.currentPlayer.playbackState == Player.STATE_ENDED) {
         DLog.d(tag, "STATE_ENDED | playlistQueueSize=${playerNotificationService.playlistQueue.size} | playlistQueueIndex=${playerNotificationService.playlistQueueIndex}")
+        logEarlyStreamEnd()
         playerNotificationService.sendClientMetadata(PlayerState.ENDED)
 
         playerNotificationService.handlePlaybackEnded()
@@ -162,6 +172,18 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
     }
     if (events.contains(Player.EVENT_PLAYLIST_METADATA_CHANGED)) {
       DLog.v(tag, "EVENT_PLAYLIST_METADATA_CHANGED ${playerNotificationService.getMediaPlayer()}")
+    }
+  }
+
+  // A stream that "ends" well before its duration would mean a cut connection read as end of file (the queue would skip
+  // ahead). Not expected with the platform HTTP stack, which throws on a short body; logged to catch it on devices.
+  private fun logEarlyStreamEnd() {
+    val session = playerNotificationService.currentPlaybackSession ?: return
+    if (session.isLocal) return
+    val position = playerNotificationService.getCurrentTimeSeconds()
+    val duration = session.getTotalDuration()
+    if (duration - position > EARLY_END_SECONDS) {
+      DLog.w(tag, "STATE_ENDED of a stream ${duration - position}s before its end | position=$position duration=$duration item=${session.libraryItemId}")
     }
   }
 

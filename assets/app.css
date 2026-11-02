@@ -38,8 +38,8 @@ textarea {
   max-height: calc(100% - 64px - var(--mini-player-height, 120px));
 }
 
+/* No fixed height: a shelf grows with its rows, so the sticky catalog-partial note stays pinned over all of them */
 #bookshelf {
-  height: calc(100% - 48px);
   min-height: calc(100% - 48px);
 }
 

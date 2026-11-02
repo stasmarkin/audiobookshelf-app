@@ -1,0 +1,55 @@
+{
+ "id": "ccbae3d4-63eb-4eff-85b2-911093527fa5",
+ "ino": "92257",
+ "oldLibraryItemId": null,
+ "libraryId": "7f998760-f97e-4a66-ae59-625e3335596e",
+ "folderId": "5adcf238-0af9-4498-955a-39dddac6315a",
+ "path": "/audiobooks/Book 07",
+ "relPath": "Book 07",
+ "isFile": false,
+ "mtimeMs": 1792076588780,
+ "ctimeMs": 1792076588780,
+ "birthtimeMs": 1792076588741,
+ "addedAt": 1792076683024,
+ "updatedAt": 1792076690402,
+ "isMissing": false,
+ "isInvalid": false,
+ "mediaType": "book",
+ "media": {
+  "id": "4de90c47-31f4-4fa8-8ba5-4d1416554196",
+  "metadata": {
+   "title": "Мир: начало",
+   "titleIgnorePrefix": "Мир: начало",
+   "subtitle": null,
+   "authorName": "John Smith",
+   "authorNameLF": "Smith, John",
+   "narratorName": "",
+   "seriesName": "Мир #1, Трилогия #3",
+   "genres": [
+    "Фэнтези",
+    "Fantasy"
+   ],
+   "publishedYear": "2001",
+   "publishedDate": null,
+   "publisher": "Pub B",
+   "description": null,
+   "isbn": null,
+   "asin": null,
+   "language": null,
+   "explicit": false,
+   "abridged": false
+  },
+  "coverPath": null,
+  "tags": [
+   "fav",
+   "?ü"
+  ],
+  "numTracks": 1,
+  "numAudioFiles": 1,
+  "numChapters": 0,
+  "duration": 7,
+  "size": 7461
+ },
+ "numFiles": 1,
+ "size": 7461
+}

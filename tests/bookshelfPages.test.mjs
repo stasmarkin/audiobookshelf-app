@@ -68,7 +68,7 @@ test('LazyBookshelf retries a failed page instead of leaving its rows empty', as
   assert.ok(fetch.indexOf('this.pageRetry.failed(page, this.retryPage)', failure) > failure)
   assert.ok(fetch.includes('this.pageRetry.succeeded(page)'))
   const retryPage = shelf.slice(shelf.indexOf('async retryPage(page)'), shelf.indexOf('mountEntites(fromIndex, toIndex)'))
-  assert.match(retryPage, /if \(this\.pagesLoaded\[page\] \|\| !this\.user\) return/)
+  assert.match(retryPage, /if \(this\.pagesLoaded\[page\] \|\| !this\.canLoad\) return/)
   assert.match(retryPage, /await this\.\$nextTick\(\)/)
   assert.match(retryPage, /this\.handleScroll\(wrapper\.scrollTop\)/)
   // Pending retries never outlive the list they were for

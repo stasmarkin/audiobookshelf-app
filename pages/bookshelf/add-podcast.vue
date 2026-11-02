@@ -3,13 +3,11 @@
     <template v-if="!showSelectedFeed">
       <div class="w-full mx-auto h-20 flex items-center px-2">
         <form class="w-full" @submit.prevent="submit">
-          <ui-text-input v-model="searchInput" :disabled="processing || !socketConnected" :placeholder="$strings.MessagePodcastSearchField" text-size="sm" />
+          <ui-text-input v-model="searchInput" :disabled="processing || !isServerOnline" :placeholder="$strings.MessagePodcastSearchField" text-size="sm" />
         </form>
       </div>
 
-      <div v-if="!socketConnected" class="w-full text-center py-6">
-        <p class="text-lg text-error">{{ $strings.MessageNoNetworkConnection }}</p>
-      </div>
+      <p v-if="!isServerOnline" class="requires-server-label w-full text-center py-6 text-lg text-fg-muted">{{ requiresServerLabel() }}</p>
       <div v-else class="w-full mx-auto pb-2 overflow-y-auto overflow-x-hidden h-[calc(100%-85px)]">
         <p v-if="termSearched && !results.length && !processing" class="text-center text-xl">{{ $strings.MessageNoPodcastsFound }}</p>
         <template v-for="podcast in results">
@@ -52,7 +50,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   data() {
     return {
       searchInput: '',
@@ -64,11 +65,6 @@ export default {
       showSelectedFeed: false
     }
   },
-  computed: {
-    socketConnected() {
-      return this.$store.state.socketConnected
-    }
-  },
   methods: {
     clearSelected() {
       this.selectedPodcastFeed = null
@@ -76,6 +72,7 @@ export default {
       this.showSelectedFeed = false
     },
     submit() {
+      if (!this.isServerOnline) return
       if (!this.searchInput) return
 
       if (this.searchInput.startsWith('http:') || this.searchInput.startsWith('https:')) {
@@ -113,6 +110,7 @@ export default {
       this.processing = false
     },
     async selectPodcast(podcast) {
+      if (!this.isServerOnline) return
       console.log('Selected podcast', podcast)
       if (!podcast.feedUrl) {
         this.$toast.error('Invalid podcast - no feed')

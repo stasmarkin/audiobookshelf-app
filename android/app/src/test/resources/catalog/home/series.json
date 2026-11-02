@@ -1,0 +1,150 @@
+[
+ {
+  "id": "dab8e9ba-ca32-4c5c-a5d7-2f15aa722213",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Alpha Saga",
+  "nameIgnorePrefix": "Alpha Saga",
+  "addedAt": 1792185844347,
+  "updatedAt": 1792185844347,
+  "members": [
+   {
+    "libraryItemId": "f11bc5fe-daf2-411f-9c3d-a326bc8e5ca1",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "1542ed61-b273-421a-a8ad-7a0164b0e229",
+    "sequence": "2"
+   },
+   {
+    "libraryItemId": "701953a9-4811-453d-b3c8-72f5380c3ea6",
+    "sequence": "10"
+   }
+  ]
+ },
+ {
+  "id": "f5f725ad-207d-41b7-bc55-b046a02c7934",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Beta Cycle",
+  "nameIgnorePrefix": "Beta Cycle",
+  "addedAt": 1792185844461,
+  "updatedAt": 1792185844461,
+  "members": [
+   {
+    "libraryItemId": "07ce414e-8a29-49dd-bae9-c42ca12ab13c",
+    "sequence": "2"
+   },
+   {
+    "libraryItemId": "c20a8723-4252-491f-aff8-f4d6b3363c8b",
+    "sequence": "3"
+   },
+   {
+    "libraryItemId": "bac6fc10-f902-4a13-b8dd-0be5caadaf1e",
+    "sequence": "4"
+   }
+  ]
+ },
+ {
+  "id": "83b3f6a5-8b59-4c09-ac33-fdd6b853bba2",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Gamma Line",
+  "nameIgnorePrefix": "Gamma Line",
+  "addedAt": 1792185844574,
+  "updatedAt": 1792185844574,
+  "members": [
+   {
+    "libraryItemId": "ab85b8ac-d40e-4021-9176-dfc55b55ebd3",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "02eba543-4f9a-40b7-a6da-37c8bdea8952",
+    "sequence": "2"
+   }
+  ]
+ },
+ {
+  "id": "c0e994d8-c878-46e9-80fa-ecb24d689194",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Hidden Arc",
+  "nameIgnorePrefix": "Hidden Arc",
+  "addedAt": 1792185844658,
+  "updatedAt": 1792185844658,
+  "members": [
+   {
+    "libraryItemId": "6e8d9207-c9c1-43ac-a237-d3874dcd18a8",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "5f309add-0994-46eb-9ddc-3c35a2ddce0b",
+    "sequence": "2"
+   }
+  ]
+ },
+ {
+  "id": "b371fe1f-753a-428b-a1da-93856d132809",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Delta Pair",
+  "nameIgnorePrefix": "Delta Pair",
+  "addedAt": 1792185844742,
+  "updatedAt": 1792185844742,
+  "members": [
+   {
+    "libraryItemId": "a2df075f-c7ce-4468-af87-24eb5831357c",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+    "sequence": "2"
+   }
+  ]
+ },
+ {
+  "id": "c462dbc5-7cc5-4453-a8d1-5225693849dc",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Epsilon Duo",
+  "nameIgnorePrefix": "Epsilon Duo",
+  "addedAt": 1792185844793,
+  "updatedAt": 1792185844793,
+  "members": [
+   {
+    "libraryItemId": "69b0e5a8-4337-4da7-b347-042ed3af2cfd",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "ebb00bb6-1a85-4bbe-b47e-653826d729e7",
+    "sequence": "3"
+   }
+  ]
+ },
+ {
+  "id": "c37008b8-75ef-4167-a4e0-38955cafc7e0",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Zeta Single",
+  "nameIgnorePrefix": "Zeta Single",
+  "addedAt": 1792185844882,
+  "updatedAt": 1792185844882,
+  "members": [
+   {
+    "libraryItemId": "35a237f0-6de0-49b0-bfb9-37596ed3011c",
+    "sequence": "1"
+   }
+  ]
+ },
+ {
+  "id": "e2eb2dfb-91a9-49a7-9b4a-7884f40062b8",
+  "libraryId": "8517fe2a-b8bb-4aae-bc47-63a7bc11cad5",
+  "name": "Eta Unread",
+  "nameIgnorePrefix": "Eta Unread",
+  "addedAt": 1792185844921,
+  "updatedAt": 1792185844921,
+  "members": [
+   {
+    "libraryItemId": "4e6fc5c9-ebc2-45c9-a2a9-c8a6f62b519f",
+    "sequence": "1"
+   },
+   {
+    "libraryItemId": "e1832ad6-3a8c-43a2-9d37-d5d2d63e0a11",
+    "sequence": "2"
+   }
+  ]
+ }
+]

@@ -167,6 +167,9 @@ class PlaybackSession(
     if (coverPath == null)
             return Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
 
+    // A streamed book shown online before has its cover in the cover cache, also offline and after a restart
+    CoverArt.cachedCoverUri(ctx, libraryItemId, libraryItem?.updatedAt)?.let { return it }
+
     // As of v2.17.0 token is not needed with cover image requests
     if (checkIsServerVersionGte("2.17.0")) {
       return Uri.parse("$serverAddress/api/items/$libraryItemId/cover")
@@ -194,6 +197,9 @@ class PlaybackSession(
   @JsonIgnore
   private var resolvedCoverBitmap: Bitmap? = null
 
+  @JsonIgnore
+  fun resolvedCoverBitmapOrNull(): Bitmap? = resolvedCoverBitmap
+
   /**
    * Builds the current session metadata, including the cover art bitmap if it has already been resolved.
    */
@@ -201,7 +207,7 @@ class PlaybackSession(
   @JsonIgnore
   fun getDisplayCoverUri(ctx: Context): Uri {
     val coverUri = getCoverUri(ctx)
-    return if (localLibraryItem?.coverContentUrl != null && CoverArt.isUnavailable(coverUri)) CoverArt.defaultUri() else coverUri
+    return if (CoverArt.isLocal(coverUri) && CoverArt.isUnavailable(coverUri)) CoverArt.defaultUri() else coverUri
   }
 
   @JsonIgnore
@@ -253,7 +259,7 @@ class PlaybackSession(
   ): Job? {
     val coverUri = getCoverUri(ctx)
 
-    if (localLibraryItem?.coverContentUrl != null) {
+    if (CoverArt.isLocal(coverUri)) {
       return coroutineScope.launch {
         resolvedCoverBitmap = withContext(Dispatchers.IO) { CoverArt.decodeLocal(ctx, coverUri, "session") }
         onArtResolved()
