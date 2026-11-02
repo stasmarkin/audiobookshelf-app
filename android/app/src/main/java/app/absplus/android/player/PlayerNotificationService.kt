@@ -1779,10 +1779,15 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     }
   }
 
-  fun advancePlaylistQueue() {
+  // Session id and callbacks of an endCurrentItem() that waits for the ended item's final sync
+  private var endingItem: Pair<String?, MutableList<() -> Unit>>? = null
+
+  /** [onFailed] runs when there is no next item to move on to, or it could not be loaded. */
+  fun advancePlaylistQueue(playWhenReady: Boolean = true, onFailed: (() -> Unit)? = null) {
     DLog.d(tag, "advancePlaylistQueue: called with queueSize=${playlistQueue.size}, currentIndex=$playlistQueueIndex")
     if (playlistQueue.isEmpty()) {
       DLog.d(tag, "advancePlaylistQueue: queue is empty, nothing to do")
+      onFailed?.invoke()
       return
     }
     val nextIndex = playlistQueueIndex + 1
@@ -1790,15 +1795,17 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       DLog.d(tag, "advancePlaylistQueue: end of queue (nextIndex=$nextIndex >= size=${playlistQueue.size})")
       playlistQueue = emptyList()
       playlistQueueIndex = -1
+      onFailed?.invoke()
       return
     }
     playlistQueueIndex = nextIndex
     val nextItem = playlistQueue[nextIndex]
     DLog.d(tag, "advancePlaylistQueue: advancing to index $nextIndex, libraryItemId=${nextItem.libraryItemId}, episodeId=${nextItem.episodeId}")
-    startQueueItem(nextItem, true)
+    startQueueItem(nextItem, playWhenReady, onFailed)
   }
 
-  private fun startQueueItem(nextItem: PlaylistQueueItem, playWhenReady: Boolean): StartGate.Ticket {
+  /** [onFailed]: as for [advancePlaylistQueue]; not called when the queue waits on the server for the item. */
+  private fun startQueueItem(nextItem: PlaylistQueueItem, playWhenReady: Boolean, onFailed: (() -> Unit)? = null): StartGate.Ticket {
     val playbackRate = initialPlaybackRate ?: 1f
 
     // Acquire a temporary WakeLock to keep the CPU alive during playlist advancement
@@ -1826,6 +1833,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           dropResumingDisplay(ticket)
           dropWaitNotice()
           if (wakeLock.isHeld) wakeLock.release()
+          onFailed?.invoke()
         }
         is PlaybackSource.Local -> {
           val startTime = localStartTime(plan.item, plan.episode, nextItem.libraryItemId)
@@ -1850,6 +1858,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
             dropResumingDisplay(ticket)
             dropWaitNotice()
             if (wakeLock.isHeld) wakeLock.release()
+            onFailed?.invoke()
             return@launch
           }
           val playbackSession = pinned.item.getPlaybackSession(pinned.episode, getDeviceInfo(), startTime)
@@ -1901,7 +1910,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           }
 
           // Immediately request next item from server without waiting for sync to complete
-          advancePlaylistQueueServerItem(nextItem, plan, ticket, playbackRate, wakeLock, wifiLock, 0)
+          advancePlaylistQueueServerItem(nextItem, plan, ticket, playbackRate, wakeLock, wifiLock, 0, onFailed)
         }
       }
     }
@@ -1927,7 +1936,40 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     blockQueue(item, playWhenReady)
   }
 
-  private fun advancePlaylistQueueServerItem(nextItem: PlaylistQueueItem, plan: PlaybackSource.Stream, ticket: StartGate.Ticket, playbackRate: Float, wakeLock: PowerManager.WakeLock, wifiLock: WifiManager.WifiLock, retryCount: Int) {
+  /**
+   * Leaves the current item for good: moves on to the next queue item, or closes the player when there is none.
+   * [onFinalSync] runs once the left item's last progress sync is done, so its progress can be written safely after.
+   */
+  fun endCurrentItem(onFinalSync: () -> Unit) {
+    val endedSessionId = currentPlaybackSession?.id
+    // A repeated call for the same item while the first still waits must not skip one more item
+    endingItem?.let { (id, waiting) -> if (id == endedSessionId) { waiting.add(onFinalSync); return } }
+    if (playlistQueueIndex < 0 || playlistQueueIndex + 1 >= playlistQueue.size) {
+      closePlayback(onFinalSync = onFinalSync)
+      return
+    }
+    val callbacks = mutableListOf(onFinalSync)
+    endingItem = endedSessionId to callbacks
+    // A paused item moves on to a paused next one
+    val wasPlaying = currentPlayer.playWhenReady
+    // Stopped before the pause, so the pause does not start a sync of its own
+    mediaProgressSyncer.stop {
+      mainHandler.post {
+        if (endingItem?.second === callbacks) endingItem = null
+        callbacks.forEach { it() }
+        // Another play request took over while the sync ran
+        if (currentPlaybackSession?.id != endedSessionId) return@post
+        // Staying on the ended item would let its next Play sync it back to unfinished
+        advancePlaylistQueue(wasPlaying) { if (currentPlaybackSession?.id == endedSessionId) closePlayback() }
+      }
+    }
+    // The service's own pause: as a user's it would make the next item's start prepare paused
+    pauseOrigin.beforeSelfPause(wasPlaying)
+    currentPlayer.pause()
+    mainHandler.post { pauseOrigin.settle() }
+  }
+
+  private fun advancePlaylistQueueServerItem(nextItem: PlaylistQueueItem, plan: PlaybackSource.Stream, ticket: StartGate.Ticket, playbackRate: Float, wakeLock: PowerManager.WakeLock, wifiLock: WifiManager.WifiLock, retryCount: Int, onFailed: (() -> Unit)? = null) {
     if (playlistQueue.getOrNull(playlistQueueIndex) !== nextItem || startGate.admit(ticket) == null) {
       dropResumingDisplay(ticket)
       if (wifiLock.isHeld) wifiLock.release()
@@ -1947,7 +1989,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
         val delay = (retryCount + 1) * 2000L
         DLog.w(tag, "advancePlaylistQueue: Server play request failed for ${plan.libraryItemId}, retrying in ${delay}ms (attempt ${retryCount + 1}/3)")
         mainHandler.postDelayed({
-          advancePlaylistQueueServerItem(nextItem, plan, ticket, playbackRate, wakeLock, wifiLock, retryCount + 1)
+          advancePlaylistQueueServerItem(nextItem, plan, ticket, playbackRate, wakeLock, wifiLock, retryCount + 1, onFailed)
         }, delay)
       } else if (session != null) {
         DLog.d(tag, "advancePlaylistQueue: Got server session, calling preparePlayer for ${plan.libraryItemId}")
@@ -1965,6 +2007,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           DLog.e(tag, "advancePlaylistQueue: Server play request failed for ${plan.libraryItemId} after ${retryCount + 1} attempts, giving up")
           dropResumingDisplay(ticket)
           dropWaitNotice()
+          onFailed?.invoke()
         }
         if (wifiLock.isHeld) wifiLock.release()
         if (wakeLock.isHeld) wakeLock.release()
@@ -2533,7 +2576,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaProgressSyncer.currentPlaybackSession?.let { setMediaSessionConnectorCustomActions(it) }
   }
 
-  fun closePlayback(calledOnError: Boolean? = false) {
+  /** [onFinalSync] runs once the last progress sync of the closed session has completed (or was not needed). */
+  fun closePlayback(calledOnError: Boolean? = false, onFinalSync: (() -> Unit)? = null) {
     if (awaiting.isAwaiting) stopAwaiting(CancelReason.CLOSED) else awaitingPresentation.end()
     startGate.invalidate()
     playlistQueue = emptyList()
@@ -2545,13 +2589,15 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
     val isLocal = mediaProgressSyncer.currentIsLocal
     val currentSessionId = mediaProgressSyncer.currentSessionId
-    if (mediaProgressSyncer.listeningTimerRunning) {
+    val syncPending = mediaProgressSyncer.listeningTimerRunning
+    if (syncPending) {
       DLog.i(tag, "About to close playback so stopping media progress syncer first")
 
       mediaProgressSyncer.stop(
               calledOnError == false
       ) { // If closing on error then do not sync progress (causes exception)
         DLog.d(tag, "Media Progress syncer stopped")
+        onFinalSync?.invoke()
         // If not local session then close on server
         if (!isLocal && currentSessionId != "") {
           apiHandler.closePlaybackSession(currentSessionId, config) {
@@ -2588,6 +2634,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     DeviceManager.widgetUpdater?.onPlayerClosed()
     stopForeground(Service.STOP_FOREGROUND_REMOVE)
     stopSelf()
+    if (!syncPending) onFinalSync?.invoke()
   }
 
   fun sendClientMetadata(playerState: PlayerState) {

@@ -58,7 +58,8 @@
 import { deleteFailureMessage } from '@/utils/deleteResult'
 import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
-import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { AbsAudioPlayer, AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
+import { endPlaybackOf } from '@/utils/finishPlaying'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
 import requiresServer from '@/mixins/requiresServer'
 import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
@@ -536,13 +537,18 @@ export default {
     },
     async toggleFinished() {
       await this.$hapticsImpact()
+      const isFinished = !this.userIsFinished
+
+      if (isFinished) {
+        const ids = { libraryItemId: this.libraryItemId, episodeId: this.episode.id, localLibraryItemId: this.localLibraryItemId, localEpisodeId: this.localEpisodeId }
+        await endPlaybackOf(this.$store.state.currentPlaybackSession, ids, () => AbsAudioPlayer.endCurrentItem())
+      }
 
       const target = progressTarget(this.libraryItem, this.episode)
       if (target) {
         // Works offline; native also updates the downloaded copy's own progress
-        await this.$absData.markFinished({ ...target, isFinished: !this.userIsFinished }).catch((error) => console.error('[episode] Could not save finished', error))
+        await this.$absData.markFinished({ ...target, isFinished }).catch((error) => console.error('[episode] Could not save finished', error))
       } else {
-        const isFinished = !this.userIsFinished
         const localLibraryItemId = this.localLibraryItemId
         const localEpisodeId = this.localEpisodeId
         const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId, localEpisodeId, isFinished })
