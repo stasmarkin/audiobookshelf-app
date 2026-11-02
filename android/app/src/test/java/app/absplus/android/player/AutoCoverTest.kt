@@ -14,7 +14,10 @@ import app.absplus.android.media.CoverCache
 import app.absplus.android.media.CoverFetcher
 import app.absplus.android.media.CoverStore
 import app.absplus.android.media.FetchedCover
+import app.absplus.android.sync.ActiveServer
+import app.absplus.android.sync.ServerReachability
 import app.absplus.android.sync.ServerState
+import app.absplus.android.sync.SyncTestFixture
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -82,12 +85,26 @@ class AutoCoverTest {
   }
 
   @Test fun descriptionIconIsTheCachedFile() {
-    store.put("li1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!
-    val withCache = book("li1", 5).getMediaDescription(null, ctx).iconUri!!
-    assertEquals("content", withCache.scheme)
-    assertTrue(withCache.toString(), withCache.toString().endsWith("/li1_5.jpg"))
-    val withoutCache = book("li2", 5).getMediaDescription(null, ctx).iconUri!!
-    assertEquals("offline without a cached file: the app icon", "android.resource", withoutCache.scheme)
+    // The icon reads the process-wide active server and reachability: set both rather than inherit another test's
+    val f = SyncTestFixture()
+    try {
+      f.save(f.config("srv"))
+      ActiveServer.init(ctx)
+      ActiveServer.remember("srv")
+      f.probeAnswer = false
+      ServerReachability.start(ctx, f.probe)
+      f.idle()
+      assertEquals(ServerState.OFFLINE, ServerReachability.state.value)
+
+      store.put("li1", 5, "jpg") { it.write(byteArrayOf(1, 2, 3)) }!!
+      val withCache = book("li1", 5).getMediaDescription(null, ctx).iconUri!!
+      assertEquals("content", withCache.scheme)
+      assertTrue(withCache.toString(), withCache.toString().endsWith("/li1_5.jpg"))
+      val withoutCache = book("li2", 5).getMediaDescription(null, ctx).iconUri!!
+      assertEquals("offline without a cached file: the app icon", "android.resource", withoutCache.scheme)
+    } finally {
+      f.close()
+    }
   }
 
   @Test fun prefetchAsksOnlyForMissingCovers() = runBlocking {

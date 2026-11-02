@@ -28,10 +28,12 @@ import io.paperdb.Paper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -72,7 +74,8 @@ class MediaProgressSyncerWriteTest {
   @After
   fun tearDown() {
     SyncEngine.resetForTest()
-    scope.cancel()
+    // A write still running would land in the next test's Paper books
+    runBlocking { withTimeout(10_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
     db.close()
   }
 
@@ -287,7 +290,11 @@ class MediaProgressSyncerWriteTest {
     assertEquals("li1", segment.libraryItemId)
     assertEquals(15L, segment.timeListening)
     assertEquals(PLAYMETHOD_DIRECTPLAY, segment.playMethod)
-    assertTrue("no other new Paper books", (paperBooks() - booksBefore).all { it == "playbackSession" || it == "listeningLedger" })
+    // The tick's queued write reads Paper too, and a read recreates the empty folder of a book setUp destroyed
+    runBlocking { SyncEngine.write { } }
+    val written = (paperBooks() - booksBefore).filter { java.io.File(paperDir(), it).list().orEmpty().isNotEmpty() }
+    assertTrue("the segment's book is seen as written: $written", "playbackSession" in written)
+    assertTrue("no other new Paper books: $written", written.all { it == "playbackSession" || it == "listeningLedger" })
     assertEquals("no new preferences", prefsBefore, sharedPrefs())
   }
 
@@ -442,7 +449,9 @@ class MediaProgressSyncerWriteTest {
     }
   }
 
-  private fun paperBooks() = java.io.File(Paper.book("playbackSession").path).parentFile!!.list()!!.toSet()
+  // Paper keeps each book at the folder of the test that opened it first, so this is not this test's filesDir
+  private fun paperDir() = java.io.File(Paper.book("playbackSession").path).parentFile!!
+  private fun paperBooks() = paperDir().list()!!.toSet()
   private fun sharedPrefs() = java.io.File(context.applicationInfo.dataDir, "shared_prefs").list()?.toSet().orEmpty()
 
   @Test

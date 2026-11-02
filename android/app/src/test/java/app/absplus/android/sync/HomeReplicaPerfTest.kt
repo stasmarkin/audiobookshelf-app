@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 
 /**
  * Home and search on a synthetic 10 000-book library (and 200 podcasts of 200 episodes), cold cache, JVM and
- * Robolectric SQLite: the release limits are 500 ms for the home and 300 ms for a search. Times are printed.
+ * Robolectric SQLite: the release limits are 500 ms for the home and 300 ms for a search ([assertWithin]). Times are printed.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -33,12 +33,25 @@ class HomeReplicaPerfTest {
   @After
   fun tearDown() = db.close()
 
-  private inline fun timed(label: String, block: () -> Unit): Long {
+  // The unit tests compile against android.jar, which lacks java.lang.management and com.sun.management
+  private val osBean = Class.forName("java.lang.management.ManagementFactory").getMethod("getOperatingSystemMXBean").invoke(null)
+  private val processCpuTime = Class.forName("com.sun.management.OperatingSystemMXBean").getMethod("getProcessCpuTime")
+  private fun processCpuNanos() = processCpuTime.invoke(osBean) as Long
+
+  /**
+   * The limit holds the CPU time of the whole process (Room runs queries on its own threads), which a loaded machine
+   * does not inflate; wall time, which it does, only has to stay within ten times the limit, so a query that waits fails.
+   */
+  private inline fun assertWithin(label: String, limitMs: Long, block: () -> Unit) {
     val start = System.nanoTime()
+    val cpuStart = processCpuNanos()
+    check(cpuStart >= 0) { "this JVM reports no process CPU time" }
     block()
-    val ms = (System.nanoTime() - start) / 1_000_000
-    println("HomeReplicaPerfTest: $label: $ms ms")
-    return ms
+    val cpuMs = (processCpuNanos() - cpuStart) / 1_000_000
+    val wallMs = (System.nanoTime() - start) / 1_000_000
+    println("HomeReplicaPerfTest: $label: $cpuMs ms CPU, $wallMs ms wall")
+    assertTrue("$label: $cpuMs ms CPU", cpuMs < limitMs)
+    assertTrue("$label: $wallMs ms wall", wallMs < 10 * limitMs)
   }
 
   private fun row(id: String, episodeId: String = "", currentTime: Double, isFinished: Boolean, lastUpdate: Long) = MediaProgressEntity(
@@ -62,10 +75,8 @@ class HomeReplicaPerfTest {
     progress = (0 until 3_000).map { row("li${it * 3}", currentTime = if (it % 3 == 0) 0.0 else 10.0, isFinished = it % 3 == 0, lastUpdate = now - it) }
     db.libraryState().upsert(LibraryStateEntity("srv", "lib1", 1, true, 1, 1, null, null, null))
 
-    val home = timed("personalized, 10 000 books, cold") { reader.personalized("srv", PersonalizedRequest("lib1", 10)) }
-    val search = timed("search \"book 12\", 10 000 books, cold") { reader.search("srv", SearchRequest("lib1", "book 12", 12)) }
-    assertTrue("home $home ms", home < 500)
-    assertTrue("search $search ms", search < 300)
+    assertWithin("home, 10 000 books, cold", 500) { reader.personalized("srv", PersonalizedRequest("lib1", 10)) }
+    assertWithin("search \"book 12\", 10 000 books, cold", 300) { reader.search("srv", SearchRequest("lib1", "book 12", 12)) }
 
     db.libraries().upsertAll(listOf(libraryRow("srv", "pods", 1, "podcast")))
     db.items().upsertAll((0 until 200).map { withKey(itemEntity("srv", "p$it", "pods", title = "Podcast $it", mediaType = "podcast", addedAt = now - it), numTracks = 0) })
@@ -76,13 +87,11 @@ class HomeReplicaPerfTest {
       })
     }
     progress = progress + (0 until 2_000).map { row("p${it % 200}", "p${it % 200}-e${it / 200}", 10.0, it % 4 == 0, now - it) }
-    val podcasts = timed("personalized, 200 podcasts x 200 episodes, cold") { reader.personalized("srv", PersonalizedRequest("pods", 10)) }
-    assertTrue("podcast home $podcasts ms", podcasts < 500)
+    assertWithin("podcast home, 200 podcasts x 200 episodes, cold", 500) { reader.personalized("srv", PersonalizedRequest("pods", 10)) }
 
     // An update from 4.x offline: every key still "", the first search computes them once
     (0 until 10_000).chunked(500).forEach { chunk -> db.withTransaction { chunk.forEach { db.items().setSearchKey("srv", "li$it", "") } } }
     reader.onReplicaChanged()
-    val first = timed("first search over 10 000 rows with stale keys") { reader.search("srv", SearchRequest("lib1", "book 12", 12)) }
-    assertTrue("first search with stale keys $first ms", first < 3_000)
+    assertWithin("first search over 10 000 rows with stale keys", 3_000) { reader.search("srv", SearchRequest("lib1", "book 12", 12)) }
   }
 }
