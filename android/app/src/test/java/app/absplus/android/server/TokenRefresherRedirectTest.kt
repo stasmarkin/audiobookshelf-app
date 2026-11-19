@@ -69,6 +69,8 @@ class TokenRefresherRedirectTest {
     @Volatile var code = 200
     @Volatile var location: String? = null
     @Volatile var beforeResponse: () -> Unit = {}
+    /** Sends the body one byte at a time with this pause, like an answer trickling over a bad network. */
+    @Volatile var bodyByteDelayMs = 0L
     init {
       executor.submit {
         while (!listener.isClosed) {
@@ -98,7 +100,12 @@ class TokenRefresherRedirectTest {
               val response = "HTTP/1.1 $code Fixture\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\n" +
                       "Connection: close\r\nSet-Cookie: syntheticSession=fixture; Path=/\r\n" +
                       (location?.let { dest -> "Location: $dest\r\n" } ?: "") + "\r\n"
-              it.getOutputStream().apply { write(response.toByteArray()); write(body); flush() }
+              it.getOutputStream().apply {
+                write(response.toByteArray())
+                if (bodyByteDelayMs == 0L) write(body)
+                else body.forEach { byte -> flush(); Thread.sleep(bodyByteDelayMs); write(byte.toInt()) }
+                flush()
+              }
               // Wait for the peer to consume the complete response and close; avoid a TCP reset
               // racing the redirect request on Windows. The socket timeout bounds broken clients.
               try { input.read() } catch (_: java.io.IOException) { /* Peer closed after consuming the response. */ }
@@ -122,14 +129,19 @@ class TokenRefresherRedirectTest {
     }
   }
 
-  private class Harness(address: String) {
+  private class Harness(
+          address: String,
+          retryDelaysMs: List<Long> = emptyList()
+  ) {
+    val scheduled = Collections.synchronizedList(mutableListOf<Long>())
     val store = Store()
     val addresses = Collections.synchronizedMap(mutableMapOf("A" to address))
     val rotated = Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     val rejected = Collections.synchronizedList(mutableListOf<String>())
     val logs = Collections.synchronizedList(mutableListOf<String>())
     val refresher = TokenRefresher(store, { addresses[it] }, { id, token -> rotated.add(id to token) },
-            { rejected.add(it) }, { logs.add(it) }, SingleFlight())
+            { rejected.add(it) }, { logs.add(it) }, SingleFlight(), retryDelaysMs = retryDelaysMs,
+            schedule = { delayMs, task -> scheduled.add(delayMs); task() })
     fun refresh(http: OkHttpClient = client()): RefreshResult {
       val done = CountDownLatch(1)
       var result: RefreshResult? = null
@@ -255,6 +267,36 @@ class TokenRefresherRedirectTest {
         val wirePath = expected.encodedPath + (expected.encodedQuery?.let { "?$it" } ?: "")
         assertEquals(wirePath, server.seen.last().path)
       }
+    }
+  }
+
+  @Test fun aLargeAnswerOnASlowNetworkIsReadToTheEnd() {
+    Server().use { server ->
+      server.bodyByteDelayMs = 20 // about 1.7 s for the whole body, each byte well within the read timeout
+      val harness = Harness(server.url)
+      assertEquals(RefreshResult.Success("synthetic-access-new"), harness.refresh())
+      assertEquals("synthetic-refresh-new", harness.store.tokens["A"])
+    }
+  }
+
+  @Test fun aShortDeadlineOnTheCallersClientDoesNotCutTheRefreshShort() {
+    Server().use { server ->
+      server.beforeResponse = { Thread.sleep(500) }
+      val pingLike = client().newBuilder().callTimeout(200, TimeUnit.MILLISECONDS).build()
+      val harness = Harness(server.url)
+      assertEquals(RefreshResult.Success("synthetic-access-new"), harness.refresh(pingLike))
+      assertEquals("synthetic-refresh-new", harness.store.tokens["A"])
+    }
+  }
+
+  @Test fun aBlockedRedirectIsNotRetried() {
+    Server().use { source ->
+      source.code = 302; source.location = "/elsewhere"
+      val harness = Harness(source.url, retryDelaysMs = listOf(1L, 1L))
+      assertEquals(RefreshResult.Transient, harness.refresh())
+      assertEquals(1, source.seen.size)
+      assertTrue(harness.scheduled.isEmpty())
+      harness.retained()
     }
   }
 }

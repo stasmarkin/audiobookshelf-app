@@ -213,14 +213,18 @@ class ApiHandler(var ctx:Context) {
     }
     when (val action = renewalAction(auth.token, DeviceManager.getServerConnectionConfig(auth.serverConnectionConfigId)?.token)) {
       is RenewalAction.RetryWith -> retryOriginalRequest(originalRequest, action.accessToken, httpClient, callback)
-      RenewalAction.Refresh ->
-        refreshAuthTokens(auth.serverConnectionConfigId, httpClient) { result ->
+      RenewalAction.Refresh -> {
+        // A short-deadline caller (pingClient) gets its answer in time; the refresh still finishes behind it.
+        val waitLimitMs = httpClient?.callTimeoutMillis?.toLong() ?: 0L
+        refreshWithin(waitLimitMs, { delayMs, task -> TokenRefresher.scheduleOnSharedExecutor(delayMs, task) },
+                { done -> refreshAuthTokens(auth.serverConnectionConfigId, httpClient, done) }) { result ->
           if (result is RefreshResult.Success && auth.generation == authGeneration) {
             retryOriginalRequest(originalRequest, result.accessToken, httpClient, callback)
           } else {
             failed()
           }
         }
+      }
     }
   }
 
