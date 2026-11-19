@@ -68,7 +68,7 @@ class PlaybackSpeedWidgetTest {
   @Test fun aSpeedChangeRedrawsTheWidget() {
     val pns = PlayerNotificationService()
     pns.mediaManager = MediaManager(ApiHandler(ctx), ctx)
-    pns.mediaProgressSyncer = MediaProgressSyncer(pns, ApiHandler(ctx))
+    pns.mediaProgressSyncer = MediaProgressSyncer(pns, apiHandler = { ApiHandler(ctx) })
     pns.currentPlayer = Proxy.newProxyInstance(Player::class.java.classLoader, arrayOf(Player::class.java)) { _, method, _ ->
       if (method.name == "setPlaybackSpeed") null else throw UnsupportedOperationException(method.name)
     } as Player

@@ -61,7 +61,7 @@ function playerView(store, playbackSession = store.state.currentPlaybackSession,
   vm.runInNewContext(strip(playerSource), sandbox)
   const { computed, methods } = sandbox.component
   const view = { $store: store, $strings: { LabelWaitingForServer: 'Waiting for server', ButtonHistory: 'History', LabelPlaybackDirect: 'Direct', LabelPlaybackLocal: 'Local', LabelPlaybackTranscode: 'Transcode' }, $constants: { PlayMethod: { DIRECTPLAY: 0, DIRECTSTREAM: 1, TRANSCODE: 2, LOCAL: 3 } }, $platform: 'android', playbackSession, showFullscreen: false, currentChapterTitle: '', isLoading: false, isCheckingServerProgress: false, playerSettings: {} }
-  for (const name of ['awaitingDisplay', 'awaitingServer', 'isPlayerOpen', 'mediaMetadata', 'libraryItem', 'localLibraryItem', 'localLibraryItemCoverSrc', 'coverLibraryItem', 'coverDownloadSrc', 'title', 'authorName', 'authorLine', 'mediaType', 'isPodcast', 'mediaId', 'chapters', 'menuItems', 'playMethod', 'isLocalPlayMethod', 'isDirectPlayMethod', 'playbackMethodLabel']) {
+  for (const name of ['awaitingDisplay', 'awaitingServer', 'isPlayerOpen', 'mediaMetadata', 'libraryItem', 'localLibraryItem', 'localLibraryItemCoverSrc', 'coverLibraryItem', 'coverDownloadSrc', 'title', 'authorName', 'authorLine', 'mediaType', 'isPodcast', 'mediaId', 'historyAvailable', 'chapters', 'menuItems', 'playMethod', 'isLocalPlayMethod', 'isDirectPlayMethod', 'playbackMethodLabel']) {
     Object.defineProperty(view, name, { get: () => computed[name].call(view), configurable: true })
   }
   for (const [name, fn] of Object.entries(methods)) view[name] = fn.bind(view)

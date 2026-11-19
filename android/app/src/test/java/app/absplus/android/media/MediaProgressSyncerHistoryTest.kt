@@ -57,7 +57,7 @@ class MediaProgressSyncerHistoryTest {
         else -> throw UnsupportedOperationException(method.name)
       }
     } as Player
-    syncer = MediaProgressSyncer(service, ApiHandler(ctx))
+    syncer = MediaProgressSyncer(service, apiHandler = { ApiHandler(ctx) })
     syncer.syncRunner = { _, _, _, cb -> syncCalls++; held.add(cb) }
     service.mediaProgressSyncer = syncer
   }
