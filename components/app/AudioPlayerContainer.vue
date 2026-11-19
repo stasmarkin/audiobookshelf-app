@@ -412,7 +412,15 @@ export default {
         console.log('Already streaming item', startTime)
         if (startTime !== undefined && startTime !== null) {
           // seek to start time
-          AbsAudioPlayer.seek({ value: startTime })
+          try {
+            await AbsAudioPlayer.seek({ value: startTime })
+          } catch (error) {
+            console.error('Failed to seek to start time', error)
+          }
+          // A History entry means "continue from here", so a paused book also starts
+          if (payload.playAfterSeek && this.$refs.audioPlayer && !this.$refs.audioPlayer.isPlaying) {
+            this.$refs.audioPlayer.play()
+          }
         } else if (this.$refs.audioPlayer) {
           this.$refs.audioPlayer.play()
         }
