@@ -29,6 +29,9 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
   private var isAutoSleepTimer: Boolean = false // When timer was auto-set
   private var autoTimerDisabled: Boolean = false // Disable until out of auto timer period
   private var sleepTimerSessionId: String = ""
+  private val warning = SleepTimerWarning()
+  // A tick already posted to the main looper still runs after its TimerTask is canceled
+  private var timerGeneration = 0
 
   /**
    * Gets the current time from the player notification service.
@@ -87,29 +90,32 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
    */
   private fun getSleepTimerTimeRemainingSeconds(speed: Float = 1f): Int {
     if (sleepTimerEndTime == 0L && sleepTimerLength > 0) { // For regular timer
-      return ((sleepTimerLength - sleepTimerElapsed) / 1000).toDouble().roundToInt()
+      return SleepTimerWarning.remainingSeconds(sleepTimerLength, sleepTimerElapsed)
     }
     // For chapter end timer
     if (sleepTimerEndTime <= 0) return 0
-    return (((sleepTimerEndTime - getCurrentTime()) / 1000).toDouble() / speed).roundToInt()
+    return SleepTimerWarning.remainingSecondsTo(sleepTimerEndTime, getCurrentTime(), speed)
   }
 
   /**
    * Sets the sleep timer.
    * @param time Long - the time to set the sleep timer for. When 0L, use end of chapter/track time.
+   * @param explicitEnd Long? - end time to use for an end of chapter timer instead of the current chapter end.
    * @return Boolean - true if the sleep timer was set successfully, false otherwise.
    */
-  private fun setSleepTimer(time: Long): Boolean {
+  private fun setSleepTimer(time: Long, explicitEnd: Long? = null): Boolean {
     DLog.d(tag, "Setting Sleep Timer for $time")
     sleepTimerTask?.cancel()
     sleepTimerRunning = true
     sleepTimerFinishedAt = 0L
     sleepTimerElapsed = 0L
+    warning.reset()
+    val generation = ++timerGeneration
     setVolume(1f)
 
     if (time == 0L) {
       // Get the current chapter time and set the sleep timer to the end of the chapter
-      val chapterEndTime = this.getChapterEndTime()
+      val chapterEndTime = explicitEnd ?: this.getChapterEndTime()
 
       if (chapterEndTime == null) {
         DLog.e(tag, "Setting sleep timer to end of chapter/track but there is no current session")
@@ -145,7 +151,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
     sleepTimerTask =
             Timer("SleepTimer", false).schedule(0L, 1000L) {
               Handler(Looper.getMainLooper()).post {
-                if (getIsPlaying()) {
+                if (generation == timerGeneration && getIsPlaying()) {
                   sleepTimerElapsed += 1000L
 
                   val sleepTimeSecondsRemaining =
@@ -163,6 +169,10 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
                   }
 
                   if (sleepTimeSecondsRemaining == 30 && sleepTimerElapsed > 1 && DeviceManager.deviceData.deviceSettings?.enableSleepTimerAlmostDoneChime == true) {
+                    playChimeSound()
+                  }
+
+                  if (warning.onTick(isHeadsetExtendEnabled(), sleepTimerElapsed, sleepTimeSecondsRemaining) { hasExtensionRoom() }) {
                     playChimeSound()
                   }
 
@@ -219,6 +229,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
 
   /** Clears the sleep timer. */
   private fun clearSleepTimer() {
+    timerGeneration++
     sleepTimerTask?.cancel()
     sleepTimerTask = null
     sleepTimerEndTime = 0
@@ -247,6 +258,54 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
 
     clearSleepTimer()
     playerNotificationService.clientEventEmitter?.onSleepTimerSet(0, false)
+  }
+
+  private fun isHeadsetExtendEnabled(): Boolean =
+          DeviceManager.deviceData.deviceSettings?.enableSleepTimerHeadsetExtend == true
+
+  /** Whether a headset media button press now should extend the timer instead of acting. */
+  fun canExtendFromWarning(): Boolean {
+    // Checked before the rest: every hardware media key asks, and the remaining time reads the player
+    if (!isHeadsetExtendEnabled() || !sleepTimerRunning) return false
+    return warning.canExtend(
+            true,
+            true,
+            getIsPlaying(),
+            getSleepTimerTimeRemainingSeconds(getPlaybackSpeed()),
+            sleepTimerEndTime == 0L,
+            sleepTimerLength
+    ) { warningChapterEnd() }
+  }
+
+  private fun hasExtensionRoom(): Boolean =
+          if (sleepTimerEndTime == 0L) SleepTimerWarning.durationExtendable(sleepTimerLength) else warningChapterEnd() != null
+
+  /**
+   * Extends the timer from its warning window without touching playback.
+   * @return Boolean - true if the timer was extended.
+   */
+  fun extendFromWarning(): Boolean {
+    if (!canExtendFromWarning()) return false
+    if (sleepTimerEndTime == 0L) {
+      DLog.d(tag, "Extending sleep timer from warning window to $sleepTimerLength")
+      vibrateFeedback()
+      return setSleepTimer(sleepTimerLength)
+    }
+    val end = warningChapterEnd() ?: return false
+    DLog.d(tag, "Extending end of chapter sleep timer from warning window to $end")
+    vibrateFeedback()
+    return setSleepTimer(0L, explicitEnd = end)
+  }
+
+  private fun warningChapterEnd(): Long? {
+    return SleepTimerWarning.chapterExtensionEnd(
+            playerNotificationService.getEndTimeOfChapterOrTrack(),
+            playerNotificationService.getEndTimeOfNextChapterOrTrack(),
+            sleepTimerEndTime,
+            getDuration(),
+            getCurrentTime(),
+            getPlaybackSpeed()
+    )
   }
 
   /** Provides vibration feedback when resetting the sleep timer. */
@@ -279,6 +338,10 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
     AbsLogger.info(tag, "playChimeSound: Playing sleep timer chime sound")
     val ctx = playerNotificationService.getContext()
     val mediaPlayer = MediaPlayer.create(ctx, R.raw.bell)
+    if (mediaPlayer == null) {
+      AbsLogger.error(tag, "playChimeSound: could not create the chime player")
+      return
+    }
     mediaPlayer.setVolume(SLEEP_TIMER_CHIME_SOUND_VOLUME, SLEEP_TIMER_CHIME_SOUND_VOLUME)
     mediaPlayer.start()
     mediaPlayer.setOnCompletionListener {

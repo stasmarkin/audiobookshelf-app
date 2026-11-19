@@ -16,6 +16,7 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
   private var mediaButtonClickCount: Int = 0
   private var mediaButtonClickTimeout: Long = 1000  //ms
   private val navigationKeys = ExternalNavigationKeys()
+  private val sleepTimerKeys = SleepTimerKeyGuard()
 
   override fun onPrepare() {
     DLog.d(tag, "ON PREPARE MEDIA SESSION COMPAT")
@@ -121,13 +122,18 @@ class MediaSessionCallback(var playerNotificationService:PlayerNotificationServi
   }
 
   override fun onMediaButtonEvent(mediaButtonEvent: Intent): Boolean {
-    val handled = handleCallMediaButton(mediaButtonEvent)
     val keyEvent = if (Build.VERSION.SDK_INT >= 33) {
       mediaButtonEvent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
     } else {
       @Suppress("DEPRECATION")
       mediaButtonEvent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
     }
+    val extendsSleepTimer = Intent.ACTION_MEDIA_BUTTON == mediaButtonEvent.action && keyEvent != null &&
+      sleepTimerKeys.intercept(keyEvent, SystemClock.uptimeMillis(),
+        { playerNotificationService.sleepTimerManager.canExtendFromWarning() },
+        { playerNotificationService.sleepTimerManager.extendFromWarning() })
+    if (extendsSleepTimer) DLog.d(tag, "onMediaButtonEvent: consumed by sleep timer warning | $keyEvent")
+    val handled = extendsSleepTimer || handleCallMediaButton(mediaButtonEvent)
     // The DOWN of a key that acts at UP has not finished its command: the service must wait for the UP
     if (MediaButtonLifecycle.completesCommand(keyEvent?.action, keyEvent?.keyCode)) {
       playerNotificationService.onMediaButtonHandled()

@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
+import app.absplus.android.managers.SleepTimerManager
 import com.google.android.exoplayer2.PlaybackParameters
 import com.google.android.exoplayer2.Player
 import java.lang.reflect.Proxy
@@ -58,6 +59,7 @@ class ExternalNavigationRoutesTest {
         else -> throw UnsupportedOperationException(method.name)
       }
     } as Player
+    service.sleepTimerManager = SleepTimerManager(service)
     callback = MediaSessionCallback(service)
   }
 
@@ -82,6 +84,13 @@ class ExternalNavigationRoutesTest {
   private fun press(code: Int, time: Long = ++keyTime) {
     assertTrue(callback.onMediaButtonEvent(key(KeyEvent.ACTION_DOWN, code, time)))
     assertTrue(callback.onMediaButtonEvent(key(KeyEvent.ACTION_UP, code, time)))
+  }
+
+  @Test fun navigationKeyPassesWithSleepTimerOptionOnAndNoTimer() {
+    settings.enableSleepTimerHeadsetExtend = true
+    // The proxy player throws on getPlaybackParameters, so this also fails if the guard reads the player without a timer
+    press(KeyEvent.KEYCODE_MEDIA_NEXT)
+    assertEquals(listOf(0 to 60_000L), seeks)
   }
 
   private fun chapters() {

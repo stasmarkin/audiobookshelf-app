@@ -150,6 +150,13 @@
         <span class="material-symbols text-xl ml-2" @click.stop="showInfo('enableSleepTimerAlmostDoneChime')">info</span>
       </div>
       <div class="flex items-center py-3">
+        <div class="w-10 flex justify-center" @click="toggleSleepTimerHeadsetExtend">
+          <ui-toggle-switch v-model="settings.enableSleepTimerHeadsetExtend" @input="saveSettings" />
+        </div>
+        <p class="pl-4">{{ $strings.LabelSleepTimerHeadsetExtend }}</p>
+        <span class="material-symbols text-xl ml-2" @click.stop="showInfo('enableSleepTimerHeadsetExtend')">info</span>
+      </div>
+      <div class="flex items-center py-3">
         <div class="w-10 flex justify-center" @click="toggleAutoSleepTimer">
           <ui-toggle-switch v-model="settings.autoSleepTimer" @input="saveSettings" />
         </div>
@@ -379,6 +386,7 @@ export default {
         disableSleepTimerFadeOut: false,
         disableSleepTimerResetFeedback: false,
         enableSleepTimerAlmostDoneChime: false,
+        enableSleepTimerHeadsetExtend: false,
         autoSleepTimerAutoRewind: false,
         autoSleepTimerAutoRewindTime: 300000, // 5 minutes
         languageCode: 'en-us',
@@ -420,6 +428,10 @@ export default {
         enableSleepTimerAlmostDoneChime: {
           name: this.$strings.LabelSleepTimerAlmostDoneChime,
           message: this.$strings.LabelSleepTimerAlmostDoneChimeHelp
+        },
+        enableSleepTimerHeadsetExtend: {
+          name: this.$strings.LabelSleepTimerHeadsetExtend,
+          message: this.$strings.LabelSleepTimerHeadsetExtendHelp
         },
         autoSleepTimerAutoRewind: {
           name: this.$strings.LabelAutoSleepTimerAutoRewind,
@@ -995,6 +1007,10 @@ export default {
       this.settings.enableSleepTimerAlmostDoneChime = !this.settings.enableSleepTimerAlmostDoneChime
       this.saveSettings()
     },
+    toggleSleepTimerHeadsetExtend() {
+      this.settings.enableSleepTimerHeadsetExtend = !this.settings.enableSleepTimerHeadsetExtend
+      this.saveSettings()
+    },
     toggleDisableAutoRewind() {
       this.settings.disableAutoRewind = !this.settings.disableAutoRewind
       this.saveSettings()
@@ -1065,6 +1081,7 @@ export default {
       this.settings.disableSleepTimerFadeOut = !!deviceSettings.disableSleepTimerFadeOut
       this.settings.disableSleepTimerResetFeedback = !!deviceSettings.disableSleepTimerResetFeedback
       this.settings.enableSleepTimerAlmostDoneChime = !!deviceSettings.enableSleepTimerAlmostDoneChime
+      this.settings.enableSleepTimerHeadsetExtend = !!deviceSettings.enableSleepTimerHeadsetExtend
 
       this.settings.autoSleepTimerAutoRewind = !!deviceSettings.autoSleepTimerAutoRewind
       this.settings.autoSleepTimerAutoRewindTime = !isNaN(deviceSettings.autoSleepTimerAutoRewindTime) ? deviceSettings.autoSleepTimerAutoRewindTime : 300000 // 5 minutes

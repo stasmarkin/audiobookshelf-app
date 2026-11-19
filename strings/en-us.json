@@ -462,6 +462,8 @@
   "LabelSleepTimer": "Sleep timer",
   "LabelSleepTimerAlmostDoneChime": "Play a chime when almost finished",
   "LabelSleepTimerAlmostDoneChimeHelp": "Play a chime when the sleep timer has 30 seconds remaining",
+  "LabelSleepTimerHeadsetExtend": "Warn before sleep and extend with headset buttons",
+  "LabelSleepTimerHeadsetExtendHelp": "Plays a chime 15 seconds before the sleep timer ends. Pressing a headset media button during those 15 seconds extends the timer instead of pausing or skipping. Some controllers send commands instead of buttons and keep their normal action.",
   "LabelSortDirectionAuto": "Auto direction (by podcast type)",
   "LabelStart": "Start",
   "LabelStartTime": "Start time",
