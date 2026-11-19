@@ -7,8 +7,6 @@ import android.os.Looper
 import android.os.ResultReceiver
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
-import app.absplus.android.data.LibraryItemWrapper
-import app.absplus.android.data.PodcastEpisode
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 
@@ -29,61 +27,29 @@ class MediaSessionPlaybackPreparer(var playerNotificationService:PlayerNotificat
 
   override fun onPrepare(playWhenReady: Boolean) {
     Log.d(tag, "ON PREPARE $playWhenReady")
-    playerNotificationService.mediaManager.getFirstItem()?.let { li ->
-      playerNotificationService.mediaManager.play(li, null, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-          Log.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-          }
-        }
-      }
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.firstPlayable { li, episode ->
+      li?.let { playerNotificationService.startWrapper(it, episode, playWhenReady, mediaManager.getSavedPlaybackRate()) }
     }
   }
 
   override fun onPrepareFromMediaId(mediaId: String, playWhenReady: Boolean, extras: Bundle?) {
     Log.d(tag, "ON PREPARE FROM MEDIA ID $mediaId $playWhenReady")
-
-    val libraryItemWrapper: LibraryItemWrapper?
-    var podcastEpisode: PodcastEpisode? = null
-
-    val libraryItemWithEpisode = playerNotificationService.mediaManager.getPodcastWithEpisodeByEpisodeId(mediaId)
-    if (libraryItemWithEpisode != null) {
-      libraryItemWrapper = libraryItemWithEpisode.libraryItemWrapper
-      podcastEpisode = libraryItemWithEpisode.episode
-    } else {
-      libraryItemWrapper = playerNotificationService.mediaManager.getById(mediaId)
-    }
-
-    libraryItemWrapper?.let { li ->
-      playerNotificationService.mediaManager.play(li, podcastEpisode, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-         Log.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-          }
-        }
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.resolveForPlay(mediaId) { libraryItemWrapper, podcastEpisode ->
+      if (libraryItemWrapper == null) {
+        playerNotificationService.reportUnknownItem(mediaId)
+      } else {
+        playerNotificationService.startWrapper(libraryItemWrapper, podcastEpisode, playWhenReady, mediaManager.getSavedPlaybackRate())
       }
     }
   }
 
   override fun onPrepareFromSearch(query: String, playWhenReady: Boolean, extras: Bundle?) {
     Log.d(tag, "ON PREPARE FROM SEARCH $query")
-    playerNotificationService.mediaManager.getFromSearch(query)?.let { li ->
-      playerNotificationService.mediaManager.play(li, null, playerNotificationService.getPlayItemRequestPayload(false)) {
-        if (it == null) {
-         Log.e(tag, "Failed to play library item")
-        } else {
-          val playbackRate = playerNotificationService.mediaManager.getSavedPlaybackRate()
-          Handler(Looper.getMainLooper()).post {
-            playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-          }
-        }
-      }
+    val mediaManager = playerNotificationService.mediaManager
+    mediaManager.findForVoice(query) { li, episode ->
+      li?.let { playerNotificationService.startWrapper(it, episode, playWhenReady, mediaManager.getSavedPlaybackRate()) }
     }
   }
 

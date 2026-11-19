@@ -1,0 +1,1108 @@
+{
+  "origin": "Composed by hand from the code of server 2.37.1 (utils/libraryHelpers.js handleCollapseSubseries, collapseBookSeries, getSeriesFromBooks); not recorded from a live server. GET /api/libraries/:id/items?filter=series.<id>&collapseseries=1 without sort. Ties the server leaves to its database order are listed in the order the books were added here.",
+  "server": "2.37.1",
+  "cases": [
+    {
+      "name": "three books of Мир are also in Трилогия",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ]
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ]
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m4",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "1.5"
+            }
+          },
+          {
+            "id": "m2",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "2"
+            },
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          },
+          {
+            "id": "m5",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "10"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "the same with hideSingleBookSeries",
+      "seriesId": "mir",
+      "hideSingleBookSeries": true,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ]
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ]
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m4",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "1.5"
+            }
+          },
+          {
+            "id": "m2",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "2"
+            },
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          },
+          {
+            "id": "m5",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "10"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "one book of Мир is also in Повесть",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tale",
+          "name": "Повесть"
+        }
+      ],
+      "books": [
+        {
+          "id": "p1",
+          "title": "Мир: один",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "p2",
+          "title": "Мир: два",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tale",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "p3",
+          "title": "Мир: три",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "p1",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "1"
+            }
+          },
+          {
+            "id": "p2",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "2"
+            },
+            "collapsedSeries": {
+              "id": "tale",
+              "name": "Повесть",
+              "nameIgnorePrefix": "Повесть",
+              "libraryItemIds": [
+                "p2"
+              ],
+              "numBooks": 1,
+              "seriesSequenceList": "2"
+            }
+          },
+          {
+            "id": "p3",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "one book of Мир is also in Повесть, hideSingleBookSeries",
+      "seriesId": "mir",
+      "hideSingleBookSeries": true,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tale",
+          "name": "Повесть"
+        }
+      ],
+      "books": [
+        {
+          "id": "p1",
+          "title": "Мир: один",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "p2",
+          "title": "Мир: два",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tale",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "p3",
+          "title": "Мир: три",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "p1",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "1"
+            }
+          },
+          {
+            "id": "p2",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "2"
+            }
+          },
+          {
+            "id": "p3",
+            "series": {
+              "id": "mir",
+              "name": "Мир",
+              "sequence": "3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a collapse to one card stays a flat list",
+      "seriesId": "cyc",
+      "hideSingleBookSeries": false,
+      "series": [
+        {
+          "id": "cyc",
+          "name": "Цикл"
+        },
+        {
+          "id": "duo",
+          "name": "Дилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "c1",
+          "title": "Цикл 1",
+          "series": [
+            {
+              "id": "cyc",
+              "sequence": "1"
+            },
+            {
+              "id": "duo",
+              "sequence": "1"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "title": "Цикл 2",
+          "series": [
+            {
+              "id": "cyc",
+              "sequence": "2"
+            },
+            {
+              "id": "duo",
+              "sequence": "2"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "total": 2,
+        "results": [
+          {
+            "id": "c1",
+            "series": {
+              "id": "cyc",
+              "name": "Цикл",
+              "sequence": "1"
+            }
+          },
+          {
+            "id": "c2",
+            "series": {
+              "id": "cyc",
+              "name": "Цикл",
+              "sequence": "2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Library title: cards and books by name",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "sort": "media.metadata.title",
+      "desc": false,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ],
+          "author": "Ann"
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ],
+          "author": "Bob"
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ],
+          "author": "Cid"
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ],
+          "author": "Zed"
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ],
+          "author": "Al"
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m4"
+          },
+          {
+            "id": "m5"
+          },
+          {
+            "id": "m2",
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Library title desc",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "sort": "media.metadata.title",
+      "desc": true,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ],
+          "author": "Ann"
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ],
+          "author": "Bob"
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ],
+          "author": "Cid"
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ],
+          "author": "Zed"
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ],
+          "author": "Al"
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m2",
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          },
+          {
+            "id": "m5"
+          },
+          {
+            "id": "m4"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Library authorName: cards last by name, books by author",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "sort": "media.metadata.authorName",
+      "desc": false,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ],
+          "author": "Ann"
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ],
+          "author": "Bob"
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ],
+          "author": "Cid"
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ],
+          "author": "Zed"
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ],
+          "author": "Al"
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m5"
+          },
+          {
+            "id": "m4"
+          },
+          {
+            "id": "m2",
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Library addedAt desc: the item model has no addedAt, books keep their order",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "sort": "addedAt",
+      "desc": true,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ],
+          "author": "Ann"
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ],
+          "author": "Bob"
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ],
+          "author": "Cid"
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ],
+          "author": "Zed"
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ],
+          "author": "Al"
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m4"
+          },
+          {
+            "id": "m5"
+          },
+          {
+            "id": "m2",
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Library random does not shuffle",
+      "seriesId": "mir",
+      "hideSingleBookSeries": false,
+      "sort": "random",
+      "desc": false,
+      "series": [
+        {
+          "id": "mir",
+          "name": "Мир"
+        },
+        {
+          "id": "tri",
+          "name": "Трилогия"
+        }
+      ],
+      "books": [
+        {
+          "id": "m1",
+          "title": "Мир: начало",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1"
+            },
+            {
+              "id": "tri",
+              "sequence": "3"
+            }
+          ],
+          "author": "Ann"
+        },
+        {
+          "id": "m2",
+          "title": "Мир: второй",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "2"
+            },
+            {
+              "id": "tri",
+              "sequence": "1"
+            }
+          ],
+          "author": "Bob"
+        },
+        {
+          "id": "m3",
+          "title": "Мир: третий",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "3"
+            },
+            {
+              "id": "tri",
+              "sequence": "2"
+            }
+          ],
+          "author": "Cid"
+        },
+        {
+          "id": "m4",
+          "title": "Мир: интерлюдия",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "1.5"
+            }
+          ],
+          "author": "Zed"
+        },
+        {
+          "id": "m5",
+          "title": "Мир: финал",
+          "series": [
+            {
+              "id": "mir",
+              "sequence": "10"
+            }
+          ],
+          "author": "Al"
+        }
+      ],
+      "expected": {
+        "total": 3,
+        "results": [
+          {
+            "id": "m4"
+          },
+          {
+            "id": "m5"
+          },
+          {
+            "id": "m2",
+            "collapsedSeries": {
+              "id": "tri",
+              "name": "Трилогия",
+              "nameIgnorePrefix": "Трилогия",
+              "libraryItemIds": [
+                "m2",
+                "m3",
+                "m1"
+              ],
+              "numBooks": 3,
+              "seriesSequenceList": "1-3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "one card left: the flat list keeps the sequence-then-title order",
+      "seriesId": "ss",
+      "hideSingleBookSeries": false,
+      "series": [
+        {
+          "id": "ss",
+          "name": "S"
+        },
+        {
+          "id": "tt",
+          "name": "T"
+        }
+      ],
+      "books": [
+        {
+          "id": "z",
+          "title": "Z",
+          "series": [
+            {
+              "id": "ss",
+              "sequence": null
+            },
+            {
+              "id": "tt",
+              "sequence": null
+            }
+          ]
+        },
+        {
+          "id": "a",
+          "title": "A",
+          "series": [
+            {
+              "id": "ss",
+              "sequence": null
+            },
+            {
+              "id": "tt",
+              "sequence": null
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "total": 2,
+        "results": [
+          {
+            "id": "a",
+            "series": {
+              "id": "ss",
+              "name": "S",
+              "sequence": null
+            }
+          },
+          {
+            "id": "z",
+            "series": {
+              "id": "ss",
+              "name": "S",
+              "sequence": null
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

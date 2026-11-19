@@ -17,6 +17,8 @@
 </template>
 
 <script>
+import { trackCount } from '@/utils/catalogItem'
+
 export default {
   props: {
     playlistId: String,
@@ -34,14 +36,14 @@ export default {
         const libraryItem = item.libraryItem
         if (!libraryItem || libraryItem.isMissing || libraryItem.isInvalid) return false
         if (item.episode) return !!item.episode.audioFile
-        return libraryItem.media?.tracks?.length > 0
+        return trackCount(libraryItem) > 0
       })
     },
     totalDuration() {
       var _total = 0
       this.items.forEach((item) => {
         if (item.episode) _total += item.episode.duration
-        else _total += item.libraryItem.media.duration
+        else _total += item.libraryItem?.media?.duration || 0
       })
       return _total
     },

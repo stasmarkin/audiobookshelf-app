@@ -1,11 +1,14 @@
 import { io } from 'socket.io-client'
 import EventEmitter from 'events'
+import { CATALOG_EVENTS } from '@/utils/dataService'
 
 class ServerSocket extends EventEmitter {
-  constructor(store) {
+  constructor(store, app) {
     super()
 
     this.$store = store
+    // $absData is injected after this plugin is created, so it is read from app at event time
+    this.app = app
     this.socket = null
     this.connected = false
     this.serverAddress = null
@@ -55,7 +58,7 @@ class ServerSocket extends EventEmitter {
     this.socket.on('auth_failed', this.onAuthFailed.bind(this))
     this.socket.on('user_updated', this.onUserUpdated.bind(this))
     this.socket.on('user_item_progress_updated', this.onUserItemProgressUpdated.bind(this))
-    this.socket.on('playlist_added', this.onPlaylistAdded.bind(this))
+    CATALOG_EVENTS.forEach((event) => this.socket.on(event, (payload) => this.onCatalogEvent(event, payload)))
     this.socket.io.on('reconnect_attempt', this.onReconnectAttempt.bind(this))
     this.socket.io.on('reconnect_error', this.onReconnectError.bind(this))
     this.socket.io.on('reconnect_failed', this.onReconnectFailed.bind(this))
@@ -79,6 +82,7 @@ class ServerSocket extends EventEmitter {
     this.connected = true
     this.$store.commit('setSocketConnected', true)
     this.emit('connection-update', true)
+    this.app?.$absData?.reportServerResponse({ address: this.serverAddress, status: 200 })
     this.sendAuthenticate()
   }
 
@@ -101,12 +105,16 @@ class ServerSocket extends EventEmitter {
     this.connected = false
     this.$store.commit('setSocketConnected', false)
     this.emit('connection-update', false)
+    // A lost socket on a live network is how a server that went away is noticed without any request; not on logout
+    if (reason !== 'io client disconnect') this.app?.$absData?.reportSocketLost()
   }
 
   onInit(data) {
     console.log('[SOCKET] Initial socket data received', data)
     this.emit('initialized', true)
     this.isAuthenticated = true
+    // An authenticated socket is a fresh connection: pull what changed meanwhile and send what waited
+    this.app?.$absData?.syncNow({ reason: 'socket-init' }).catch((error) => console.error('[SOCKET] Sync failed to start', error))
   }
 
   onAuthFailed(data) {
@@ -119,20 +127,36 @@ class ServerSocket extends EventEmitter {
     this.emit('user_updated', data)
   }
 
-  onUserItemProgressUpdated(payload) {
+  /**
+   * Native merges the record into userdata.db by the one rule (and the store follows through onDataChanged); listeners
+   * get `applied`, so nothing acts on a value that lost to an unsent local change.
+   */
+  async onUserItemProgressUpdated(payload) {
     console.log('[SOCKET] User Item Progress Updated', JSON.stringify(payload))
-    this.$store.commit('user/updateUserMediaProgress', payload.data)
-    this.emit('user_media_progress_updated', payload)
+    // The server it came from, before any await: native drops it if another server is active by then
+    const serverConfigId = this.$store.state.activeServerConfigId
+    let applied = false
+    try {
+      const result = await this.app.$absData.applyServerEvent({ event: 'user_item_progress_updated', payload, serverConfigId })
+      applied = result?.applied === true
+    } catch (error) {
+      console.error('[SOCKET] Could not apply the progress update', error)
+    }
+    this.emit('user_media_progress_updated', { ...payload, applied })
   }
 
-  onPlaylistAdded() {
-    // Currently numUserPlaylists is only used for showing the playlist tab or not. Precise number is not necessary
-    if (!this.$store.state.libraries.numUserPlaylists) {
-      this.$store.commit('libraries/setNumUserPlaylists', 1)
+  /** Into replica.db through native; the open pages follow its `catalog` notice, not the socket. */
+  async onCatalogEvent(event, payload) {
+    // The server it came from, before any await: native drops it if another server is active by then
+    const serverConfigId = this.$store.state.activeServerConfigId
+    try {
+      await this.app.$absData.applyServerEvent({ event, payload: payload ?? {}, serverConfigId })
+    } catch (error) {
+      console.error(`[SOCKET] Could not apply ${event}`, error)
     }
   }
 }
 
 export default ({ app, store }, inject) => {
-  inject('socket', new ServerSocket(store))
+  inject('socket', new ServerSocket(store, app))
 }

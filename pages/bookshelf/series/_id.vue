@@ -9,18 +9,24 @@
 import { Dialog } from '@capacitor/dialog'
 import { AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
+import requiresServer from '@/mixins/requiresServer'
 import { buildQueueSourceItems } from '@/utils/playbackQueue'
 import { downloadMissingItems } from '@/utils/bulkDownload'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
 
 export default {
   async asyncData({ params, app, store, redirect }) {
-    var series = await app.$nativeHttp.get(`/api/series/${params.id}`).catch((error) => {
-      console.error('Failed', error)
-      return false
-    })
+    // The replica answers offline; online before the series were first read, the server does
+    let answer
+    try {
+      answer = await app.$absData.getSeriesById({ id: params.id })
+    } catch (error) {
+      console.error('Failed to read the series', error)
+      return redirect('/bookshelf/series?error=series')
+    }
+    const series = answer?.series
     if (!series) {
-      return redirect('/oops?message=Series not found')
+      return redirect('/bookshelf/series')
     }
     store.commit('globals/setSeries', series)
     return {
@@ -42,7 +48,7 @@ export default {
       pendingAnyLocal: false
     }
   },
-  mixins: [cellularPermissionHelpers],
+  mixins: [cellularPermissionHelpers, requiresServer],
   computed: {
     isIos() {
       return this.$platform === 'ios'
@@ -79,6 +85,7 @@ export default {
       this.startSeriesPlayback(this.pendingQueueItems)
     },
     onDownloadOrStreamDownloadAndPlay() {
+      if (!this.isServerOnline) return
       downloadMissingItems(this, this.pendingQueueItems)
       this.startSeriesPlayback(this.pendingQueueItems)
     },
@@ -88,6 +95,7 @@ export default {
       this.$eventBus.$emit('add-queue-source-to-queue', { sourceType: 'series', sourceId: this.seriesId, libraryId: this.series.libraryId })
     },
     async downloadSeriesClick() {
+      if (!this.isServerOnline) return
       console.log('Download Series clicked')
       if (this.startingDownload) return
 

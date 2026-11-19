@@ -23,6 +23,8 @@
 </template>
 
 <script>
+import { isCoverRoute } from '@/utils/coverUrl'
+
 export default {
   props: {
     src: String,
@@ -43,17 +45,22 @@ export default {
       showCoverBg: false,
       isHovering: false,
       naturalHeight: 0,
-      naturalWidth: 0
+      naturalWidth: 0,
+      coverUnavailable: false
     }
   },
   watch: {
     cover() {
       this.imageFailed = false
+    },
+    src() {
+      this.coverUnavailable = false
     }
   },
   computed: {
     cover() {
-      return this.src
+      // A cover route that failed (offline, never shown online) shows the placeholder, not "Invalid Cover"
+      return this.coverUnavailable ? this.placeholderUrl : this.src
     },
     sizeMultiplier() {
       return this.width / 120
@@ -72,11 +79,11 @@ export default {
   methods: {
     setCoverBg() {
       if (this.$refs.coverBg) {
-        this.$refs.coverBg.style.backgroundImage = `url("${this.src}")`
+        this.$refs.coverBg.style.backgroundImage = `url("${this.cover}")`
       }
     },
     imageLoaded() {
-      if (this.$refs.cover && this.src !== this.placeholderUrl) {
+      if (this.$refs.cover && this.cover !== this.placeholderUrl) {
         var { naturalWidth, naturalHeight } = this.$refs.cover
         this.naturalHeight = naturalHeight
         this.naturalWidth = naturalWidth
@@ -94,6 +101,10 @@ export default {
       }
     },
     imageError(err) {
+      if (isCoverRoute(this.src) && !this.coverUnavailable) {
+        this.coverUnavailable = true
+        return
+      }
       console.error('ImgError', err)
       this.imageFailed = true
     }

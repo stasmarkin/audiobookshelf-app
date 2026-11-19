@@ -11,8 +11,11 @@
 import { deleteFailureMessage } from '@/utils/deleteResult'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem } from '@/plugins/capacitor'
+import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     value: Boolean,
     processing: Boolean,
@@ -95,14 +98,16 @@ export default {
         items.push({
           text: this.$strings.LabelAddToPlaylist,
           value: 'playlist',
-          icon: 'playlist_add'
+          icon: 'playlist_add',
+          ...this.serverOnlyItem
         })
 
         if (this.ereaderDeviceItems.length) {
           items.push({
             text: this.$strings.ButtonSendEbookToDevice,
             value: 'sendEbook',
-            icon: 'send'
+            icon: 'send',
+            ...this.serverOnlyItem
           })
         }
       }
@@ -112,7 +117,8 @@ export default {
         items.push({
           text: this.$strings.LabelRemoveFromPlaylist,
           value: 'removeFromPlaylist',
-          icon: 'playlist_remove'
+          icon: 'playlist_remove',
+          ...this.serverOnlyItem
         })
       }
 
@@ -120,7 +126,8 @@ export default {
         items.push({
           text: this.rssFeed ? this.$strings.HeaderRSSFeed : this.$strings.HeaderOpenRSSFeed,
           value: 'rssFeed',
-          icon: 'rss_feed'
+          icon: 'rss_feed',
+          ...this.serverOnlyItem
         })
       }
 
@@ -158,7 +165,8 @@ export default {
         items.push({
           text: this.$strings.ButtonGoToWebClient,
           value: 'openWebClient',
-          icon: 'language'
+          icon: 'language',
+          ...this.serverOnlyItem
         })
       }
 
@@ -173,7 +181,8 @@ export default {
       return items
     },
     ereaderDeviceItems() {
-      if (!this.ebookFile || !this.$store.state.libraries.ereaderDevices?.length) return []
+      // A minified item (the catalog replica) names the e-book's format, not its file; sending goes by the item id
+      if (!(this.ebookFile || this.media.ebookFormat) || !this.$store.state.libraries.ereaderDevices?.length) return []
       return this.$store.state.libraries.ereaderDevices.map((d) => {
         return {
           text: d.name,
@@ -183,8 +192,7 @@ export default {
     },
     isConnectedToServer() {
       if (!this.isLocal) return true
-      if (!this.libraryItem?.serverAddress) return false
-      return this.$store.getters['user/getServerAddress'] === this.libraryItem.serverAddress
+      return isCopyOfActiveServer(this.libraryItem, this.$store.state.activeServerConfigId)
     },
     isLocal() {
       return !!this.libraryItem?.isLocal
@@ -305,6 +313,8 @@ export default {
           displayTitle: this.episode?.title || this.title,
           displayAuthor: this.mediaMetadata.authorName
         })
+      } else if ((action === 'playlist' || action === 'removeFromPlaylist') && !this.isServerOnline) {
+        return
       } else if (action === 'playlist') {
         this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode: this.episode }])
         this.$store.commit('globals/setShowPlaylistsAddCreateModal', true)
@@ -328,8 +338,12 @@ export default {
       } else if (action === 'podcastAutoDownload') {
         this.showPodcastAutoDownloadModal = true
       } else if (action === 'openWebClient') {
-        this.$store.dispatch('user/openWebClient', `/item/${this.serverLibraryItemId}`)
+        this.openWebClient()
       }
+    },
+    openWebClient() {
+      if (!this.isServerOnline) return
+      this.$store.dispatch('user/openWebClient', `/item/${this.serverLibraryItemId}`)
     },
     async toggleFinished() {
       await this.$hapticsImpact()
@@ -344,60 +358,31 @@ export default {
       }
 
       this.$emit('update:processing', true)
-      if (this.isLocal) {
-        const isFinished = !this.userIsFinished
-        const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId: this.localLibraryItemId, isFinished })
-        console.log('toggleFinished payload', JSON.stringify(payload))
-        if (payload?.error) {
-          this.$toast.error(payload?.error || 'Unknown error')
-        } else {
-          const localMediaProgress = payload.localMediaProgress
-          console.log('toggleFinished localMediaProgress', JSON.stringify(localMediaProgress))
-          if (localMediaProgress) {
-            this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
-          }
-        }
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        await this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}`, updatePayload).catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedFailed : this.$strings.ToastItemMarkedAsNotFinishedFailed)
-        })
-      }
+      await this.setFinished(progressTarget(this.libraryItem), { localLibraryItemId: this.localLibraryItemId }, !this.userIsFinished)
       this.$emit('update:processing', false)
     },
     async toggleEpisodeFinished() {
       await this.$hapticsImpact()
 
       this.$emit('update:processing', true)
-      if (this.isLocal || this.localEpisode) {
-        const isFinished = !this.userIsFinished
-        const localLibraryItemId = this.localLibraryItemId
-        const localEpisodeId = this.localEpisodeId
-        const payload = await this.$db.updateLocalMediaProgressFinished({ localLibraryItemId, localEpisodeId, isFinished })
-        console.log('toggleFinished payload', JSON.stringify(payload))
-
-        if (payload?.error) {
-          this.$toast.error(payload?.error || 'Unknown error')
-        } else {
-          const localMediaProgress = payload.localMediaProgress
-          console.log('toggleFinished localMediaProgress', JSON.stringify(localMediaProgress))
-          if (localMediaProgress) {
-            this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
-          }
-        }
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        await this.$nativeHttp.patch(`/api/me/progress/${this.serverLibraryItemId}/${this.serverEpisodeId}`, updatePayload).catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedFailed : this.$strings.ToastItemMarkedAsNotFinishedFailed)
-        })
-      }
+      await this.setFinished(progressTarget(this.libraryItem, this.episode), { localLibraryItemId: this.localLibraryItemId, localEpisodeId: this.localEpisodeId }, !this.userIsFinished)
       this.$emit('update:processing', false)
+    },
+    /**
+     * A server item (or a copy linked to one) goes through $absData: it works offline, and native updates the copy's
+     * own progress. Only a copy without a server keeps the Paper-only path.
+     */
+    async setFinished(target, local, isFinished) {
+      if (target) {
+        await this.$absData.markFinished({ ...target, isFinished }).catch((error) => console.error('[ItemMoreMenuModal] Could not save finished', error))
+        return
+      }
+      const payload = await this.$db.updateLocalMediaProgressFinished({ ...local, isFinished })
+      if (payload?.error) {
+        this.$toast.error(payload?.error || 'Unknown error')
+      } else if (payload?.localMediaProgress) {
+        this.$store.commit('globals/updateLocalMediaProgress', payload.localMediaProgress)
+      }
     },
     async clearProgressClick() {
       await this.$hapticsImpact()
@@ -408,23 +393,16 @@ export default {
       })
       if (value) {
         this.$emit('update:processing', true)
-        const serverMediaProgressId = this.serverItemProgress?.id
-        if (this.localItemProgress) {
+        const target = progressTarget(this.libraryItem, this.episode)
+        if (target) {
+          // Native deletes the server record (now or once the server is back) and the copy's own progress
+          await this.$absData
+            .resetProgress(target)
+            .then(() => this.$toast.success(`Your progress was reset`))
+            .catch((error) => console.error('Progress reset failed', error))
+        } else if (this.localItemProgress) {
           await this.$db.removeLocalMediaProgress(this.localItemProgress.id)
           this.$store.commit('globals/removeLocalMediaProgressForItem', this.localItemProgress.id)
-        }
-
-        if (serverMediaProgressId) {
-          await this.$nativeHttp
-            .delete(`/api/me/progress/${serverMediaProgressId}`)
-            .then(() => {
-              console.log('Progress reset complete')
-              this.$toast.success(`Your progress was reset`)
-              this.$store.commit('user/removeMediaProgress', serverMediaProgressId)
-            })
-            .catch((error) => {
-              console.error('Progress reset failed', error)
-            })
         }
 
         this.$emit('update:processing', false)
@@ -447,6 +425,7 @@ export default {
       if (value) {
         const res = await AbsFileSystem.deleteTrackFromItem({ id: this.localLibraryItemId, trackLocalFileId: localFile.id, trackContentUrl: localEpisodeAudioTrack.contentUrl, localEpisodeId: this.localEpisode.id })
         if (res?.id) {
+          this.$eventBus.$emit('local-library-items-changed')
           if (this.isLocal) {
             // If this is local episode then redirect to server episode when available
             if (this.serverEpisodeId) {
@@ -472,6 +451,7 @@ export default {
       if (value) {
         const res = await AbsFileSystem.deleteItem(this.localLibraryItem)
         if (res?.success) {
+          this.$eventBus.$emit('local-library-items-changed')
           if (this.isLocal) {
             // If local then redirect to server version when available
             if (this.serverLibraryItemId) {
@@ -487,6 +467,7 @@ export default {
       }
     },
     clickRSSFeed() {
+      if (!this.isServerOnline) return
       this.$store.commit('globals/setRSSFeedOpenCloseModal', {
         id: this.serverLibraryItemId,
         name: this.title,
@@ -496,6 +477,7 @@ export default {
       })
     },
     sendEbookToDeviceAction(deviceName) {
+      if (!this.isServerOnline) return
       this.showSendEbookDevicesModal = false
 
       const payload = {
@@ -529,6 +511,8 @@ export default {
         .delete(url)
         .then(() => {
           this.$toast.success('Item removed from playlist')
+          // The page drops it at once: during a catalog pass native's notice comes only after it
+          this.$emit('removedFromPlaylist', { libraryItemId: this.serverLibraryItemId, episodeId: this.serverEpisodeId || null })
         })
         .catch((error) => {
           const errorMsg = error.response?.data || 'Unknown error'

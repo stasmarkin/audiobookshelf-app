@@ -5,7 +5,7 @@
       <div class="flex items-center">
         <p class="text-sm py-1">{{ $getString('MessageEpisodesQueuedForDownload', [episodeDownloadsQueued.length]) }}</p>
         <div class="flex-grow" />
-        <span v-if="isAdminOrUp" class="material-symbols text-xl ml-3 cursor-pointer" @click="clearDownloadQueue">close</span>
+        <span v-if="isAdminOrUp" class="material-symbols text-xl ml-3 cursor-pointer" :class="{ 'opacity-50': !isServerOnline }" :aria-disabled="!isServerOnline" :aria-label="isServerOnline ? null : requiresServerLabel()" @click="clearDownloadQueue">close</span>
       </div>
     </div>
 
@@ -22,7 +22,7 @@
 
       <div class="flex-grow" />
 
-      <button v-if="isAdminOrUp && !fetchingRSSFeed" class="outline:none mx-1 pt-0.5 relative" @click="searchEpisodes">
+      <button v-if="isAdminOrUp && !fetchingRSSFeed" class="outline:none mx-1 pt-0.5 relative disabled:opacity-50" :disabled="!isServerOnline" :aria-label="isServerOnline ? null : requiresServerLabel()" @click="searchEpisodes">
         <span class="material-symbols text-xl text-fg">search</span>
       </button>
       <widgets-loading-spinner v-else-if="fetchingRSSFeed" class="mx-1" />
@@ -37,9 +37,10 @@
         <span class="material-symbols ml-1 text-fg">{{ sortDesc ? 'arrow_drop_down' : 'arrow_drop_up' }}</span>
       </div>
     </div>
+    <p v-if="isAdminOrUp && isServerAway" class="requires-server-label text-xs text-fg-muted text-right">{{ requiresServerLabel() }}</p>
 
     <template v-for="episode in episodesSorted">
-      <tables-podcast-episode-row :episode="episode" :local-episode="localEpisodeMap[episode.id]" :library-item-id="libraryItemId" :local-library-item-id="localLibraryItemId" :is-local="isLocal" :sort-key="sortKey" :auto-downloaded="autoEpisodeIds.includes(episode.id)" :key="episode.id" @addToPlaylist="addEpisodeToPlaylist" />
+      <tables-podcast-episode-row :episode="episode" :local-episode="localEpisodeMap[episode.id]" :library-item-id="libraryItemId" :local-library-item-id="localLibraryItemId" :is-local="isLocal" :server-library-item-id="isLocal ? libraryItem.libraryItemId : null" :server-config-id="isLocal ? libraryItem.serverConnectionConfigId : null" :sort-key="sortKey" :auto-downloaded="autoEpisodeIds.includes(episode.id)" :key="episode.id" @addToPlaylist="addEpisodeToPlaylist" />
     </template>
 
     <!-- Huhhh?
@@ -58,8 +59,10 @@
 import { Dialog } from '@capacitor/dialog'
 import { AbsDownloader } from '@/plugins/capacitor'
 import { podcastSortOverrideKey, resolvePodcastEpisodeSort, sortPodcastEpisodes } from '@/utils/podcastEpisodes'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     libraryItem: {
       type: Object,
@@ -100,9 +103,6 @@ export default {
   computed: {
     isAdminOrUp() {
       return this.$store.getters['user/getIsAdminOrUp']
-    },
-    socketConnected() {
-      return this.$store.state.socketConnected
     },
     libraryItemId() {
       return this.libraryItem?.id || null
@@ -227,6 +227,7 @@ export default {
       this.$store.dispatch('user/updateUserSettings', { podcastEpisodesOrderOverrides: overrides })
     },
     async clearDownloadQueue() {
+      if (!this.isServerOnline) return
       const { value } = await Dialog.confirm({
         title: this.$strings.HeaderConfirm,
         message: this.$strings.MessageConfirmDeleteEpisodeDownloadQueue
@@ -246,9 +247,7 @@ export default {
       }
     },
     async searchEpisodes() {
-      if (!this.socketConnected) {
-        return this.$toast.error(this.$strings.MessageNoNetworkConnection)
-      }
+      if (!this.isServerOnline) return
 
       if (!this.mediaMetadata.feedUrl) {
         return this.$toast.error('Podcast does not have an RSS Feed')
@@ -273,6 +272,7 @@ export default {
       this.showPodcastEpisodeFeed = true
     },
     addEpisodeToPlaylist(episode) {
+      if (!this.isServerOnline) return
       this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode }])
       this.$store.commit('globals/setShowPlaylistsAddCreateModal', true)
     },

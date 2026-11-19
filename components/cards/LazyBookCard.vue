@@ -26,7 +26,7 @@
       <p class="text-white" :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }">{{ booksInSeries }}</p>
     </div>
 
-    <div class="w-full h-full absolute top-0 left-0 rounded overflow-hidden z-10">
+    <div class="w-full h-full absolute top-0 left-0 rounded overflow-hidden z-10" :class="{ 'opacity-50': notAvailableOffline }">
       <div v-show="libraryItem && !imageReady" class="absolute top-0 left-0 w-full h-full flex items-center justify-center" :style="{ padding: sizeMultiplier * 0.5 + 'rem' }">
         <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }" class="text-fg-muted text-center">{{ title }}</p>
       </div>
@@ -71,6 +71,10 @@
       <span class="material-symbols text-2xl text-success">download_done</span>
     </div>
 
+    <div v-if="notAvailableOffline" class="not-offline-badge absolute left-0 right-0 z-20 flex justify-center pointer-events-none" :style="{ bottom: 0.5 * sizeMultiplier + 'rem' }">
+      <p class="rounded bg-black/80 text-white text-center px-1" :style="{ fontSize: 0.65 * sizeMultiplier + 'rem' }">{{ $strings.LabelNotAvailableOffline }}</p>
+    </div>
+
     <!-- Error widget -->
     <div v-if="showError" :style="{ height: 1.5 * sizeMultiplier + 'rem', width: 2.5 * sizeMultiplier + 'rem' }" class="bg-error rounded-r-full shadow-md flex items-center justify-end border-r border-b border-red-300 absolute bottom-4 left-0 z-10">
       <span class="material-symbols text-red-100 pr-1" :style="{ fontSize: 0.875 * sizeMultiplier + 'rem' }">priority_high</span>
@@ -107,8 +111,10 @@
 
 <script>
 import { Capacitor } from '@capacitor/core'
+import requiresServer from '@/mixins/requiresServer'
 
 export default {
+  mixins: [requiresServer],
   props: {
     index: Number,
     queueSource: Object,
@@ -324,7 +330,7 @@ export default {
     localEpisode() {
       if (!this.recentEpisode || !this.localLibraryItem) return null
       // Current recentEpisode is only implemented server side so this will always be the serverEpisodeId
-      return this.localLibraryItem.media.episodes.find((ep) => ep.serverEpisodeId === this.recentEpisode.id)
+      return (this.localLibraryItem.media?.episodes || []).find((ep) => ep.serverEpisodeId === this.recentEpisode.id) || null
     },
     isStreaming() {
       return this.store.getters['getIsMediaStreaming'](this.libraryItemId, this.recentEpisode?.id)
@@ -411,7 +417,16 @@ export default {
       return this._libraryItem.rssFeed || null
     },
     showPlayButton() {
-      return !!this.queueSource && !this.collapsedSeries && !this.isPodcast && !this.isMissing && !this.isInvalid && !!this.numTracks
+      return !!this.queueSource && !this.collapsedSeries && !this.isPodcast && !this.isMissing && !this.isInvalid && !!this.numTracks && !this.notAvailableOffline
+    },
+    /** Without the server a downloaded episode opens its copy (the same rule as a search result). */
+    readsLocalEpisodePage() {
+      return this.store.state.serverState !== 'online'
+    },
+    /** Offline, a server item without a downloaded copy cannot be played; its page opens from the replica. */
+    notAvailableOffline() {
+      if (this.collapsedSeries || !this.libraryItem) return false
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem, this.recentEpisode?.id || null)
     }
   },
   methods: {
@@ -437,7 +452,8 @@ export default {
         }
         var mediaMetadata = libraryItem.media.metadata
         if (mediaMetadata.series) {
-          var newSeries = mediaMetadata.series.find((se) => se.id === this.series.id)
+          // A list filtered by series carries the one series as an object; an expanded item carries them all
+          var newSeries = Array.isArray(mediaMetadata.series) ? mediaMetadata.series.find((se) => se.id === this.series.id) : mediaMetadata.series.id === this.series.id ? mediaMetadata.series : null
           if (newSeries) {
             // update selected series
             libraryItem.media.metadata.series = newSeries
@@ -465,6 +481,10 @@ export default {
     },
     async playEpisode() {
       if (this.playerIsStartingPlayback) return
+      if (this.notAvailableOffline) {
+        this.$toast?.info(this.$strings.LabelNotAvailableOffline)
+        return
+      }
 
       await this.$hapticsImpact()
       const eventBus = this.$eventBus || this.$nuxt.$eventBus
@@ -495,7 +515,9 @@ export default {
       } else {
         const router = this.$router || this.$nuxt.$router
         if (router) {
-          if (this.recentEpisode) router.push(`/item/${this.libraryItemId}/${this.recentEpisode.id}`)
+          // Without the server a downloaded episode opens its copy; any other opens the server page from the replica
+          if (this.recentEpisode && this.localEpisode && this.readsLocalEpisodePage) router.push(`/item/${this.localLibraryItemId}/${this.localEpisode.id}`)
+          else if (this.recentEpisode) router.push(`/item/${this.libraryItemId}/${this.recentEpisode.id}`)
           else if (this.collapsedSeries) router.push(`/bookshelf/series/${this.collapsedSeries.id}`)
           else if (this.localLibraryItem) {
             // Pass local library item id to server page to allow falling back to offline page

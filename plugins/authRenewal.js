@@ -3,15 +3,17 @@ import { createAuthRenewal } from '@/utils/authRenewal'
 
 // Shared access-token renewal for $nativeHttp, $axios and the PDF reader (utils/authRenewal.js, docs/authentication.md)
 export default function ({ store, $socket }, inject) {
-  /** The server refused the refresh token: sign out of that session only, and show the sign-in screen. */
+  /**
+   * The server refused the refresh token: only the live session ends (user/revokeSession). The app stays where it is
+   * with the library, progress and bookmarks kept on the device; the indicator asks to sign in again, which opens the
+   * connect form for this server.
+   */
   const signInAgain = async (serverConnectionConfigId) => {
     const activeId = store.getters['user/getServerConnectionConfigId']
     // A newer session for another server must not be signed out by an old server's failure.
     if (activeId && activeId !== serverConnectionConfigId) return
-    if (activeId) await store.dispatch('user/logout')
-    if (window.location.pathname !== '/connect') {
-      window.location.href = '/connect?error=refreshTokenFailed&serverConnectionConfigId=' + serverConnectionConfigId
-    }
+    if (activeId) await store.dispatch('user/revokeSession')
+    store.commit('setServerState', 'unauthorized')
   }
 
   const authRenewal = createAuthRenewal({

@@ -6,14 +6,12 @@ import android.os.Looper
 import android.util.Log
 import app.absplus.android.MainActivity
 import app.absplus.android.data.*
-import app.absplus.android.device.AndroidVolumeProbe
 import app.absplus.android.device.DeviceManager
-import app.absplus.android.managers.LibraryItemDownloadStarter
-import app.absplus.android.managers.LocalItemLocks
-import app.absplus.android.player.LocalAvailability
-import app.absplus.android.player.LocalPlaybackAvailability
 import app.absplus.android.media.MediaEventManager
+import app.absplus.android.player.AwaitingDisplay
 import app.absplus.android.player.CastManager
+import app.absplus.android.player.PlaybackSource
+import app.absplus.android.player.StartRequest
 import app.absplus.android.player.PlayerListener
 import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.server.ApiHandler
@@ -121,6 +119,10 @@ class AbsAudioPlayer : Plugin() {
         override fun onPlaybackSpeedChanged(playbackSpeed:Float) {
           emit("onPlaybackSpeedChanged", playbackSpeed)
         }
+
+        override fun onAwaitingServer(awaiting: Boolean, display: AwaitingDisplay?) {
+          notifyListeners("onAwaitingServer", JSObject().put("awaiting", awaiting).put("display", display?.toJson() ?: JSONObject.NULL))
+        }
       })
 
       MediaEventManager.clientEventEmitter = playerNotificationService.clientEventEmitter
@@ -166,6 +168,9 @@ class AbsAudioPlayer : Plugin() {
     queue.put("items", JSArray(jacksonMapper.writeValueAsString(pns.playlistQueue)))
     queue.put("currentIndex", pns.playlistQueueIndex)
     ret.put("queue", queue)
+    ret.put("awaitingServer", pns.awaiting.isAwaiting)
+    // A UI recreated after the wait began missed its event: the player shows the awaited item from this
+    ret.put("awaitingDisplay", pns.awaitingDisplay?.toJson() ?: JSONObject.NULL)
     DLog.i("PlaybackRestore", "UI requested native playback state | hasSession=${session != null} | isPlaying=${session != null && pns.currentPlayer.isPlaying} | queue=${pns.playlistQueue.size}")
     call.resolve(ret)
   }
@@ -261,97 +266,61 @@ class AbsAudioPlayer : Plugin() {
   fun prepareLibraryItem(call: PluginCall) {
     val libraryItemId = call.getString("libraryItemId", "").toString()
     val episodeId = call.getString("episodeId", "").toString()
+    val ino = call.getString("ino")?.takeIf { it.isNotEmpty() }
     val playWhenReady = call.getBoolean("playWhenReady") == true
     val playbackRate = call.getFloat("playbackRate",1f) ?: 1f
     val startTimeOverride = call.getDouble("startTime")
+    val forceStream = call.getBoolean("forceStream") == true
+    val expectedTracks = call.getInt("expectedTracks")?.takeIf { it > 0 }
 
-    AbsLogger.info("AbsAudioPlayer", "prepareLibraryItem: lid=$libraryItemId, startTimeOverride=$startTimeOverride, playbackRate=$playbackRate")
+    AbsLogger.info("AbsAudioPlayer", "prepareLibraryItem: lid=$libraryItemId, startTimeOverride=$startTimeOverride, playbackRate=$playbackRate, forceStream=$forceStream")
 
     if (libraryItemId.isEmpty()) {
       DLog.e(tag, "Invalid call to play library item no library item id")
       return call.resolve(JSObject("{\"error\":\"Invalid request\"}"))
     }
 
-    if (libraryItemId.startsWith("local")) { // Play local media item
-      var availability: LocalAvailability? = null
-      var episode: PodcastEpisode? = null
-      val localLibraryItem = LocalItemLocks.readForPlayback(libraryItemId, { DeviceManager.dbManager.getLocalLibraryItem(libraryItemId) }) {
-        if (episodeId.isNotEmpty()) episode = (it.media as Podcast).episodes?.find { ep -> ep.id == episodeId }
-        availability = LocalPlaybackAvailability.check(it, AndroidVolumeProbe(mainActivity)) {
-          (episodeId.isEmpty() || episode != null) && it.hasTracks(mainActivity, episode)
-        }
-        availability == LocalAvailability.OK
-      }
-      if (localLibraryItem == null) {
-        if (availability == null) {
-          // Must resolve here - an unresolved call leaves AudioPlayerContainer.vue's
-          // preparingPlayback guard stuck true, permanently blocking all further playback.
-          DLog.e(tag, "prepareLibraryItem: Local library item not found $libraryItemId")
-          return call.resolve(JSObject("{\"error\":\"Local library item not found\"}"))
-        }
-        if (availability == LocalAvailability.STORAGE_UNAVAILABLE) {
-          DLog.e(tag, "prepareLibraryItem: SD card not available for $libraryItemId")
-          return call.resolve(JSObject().put("error", LibraryItemDownloadStarter.STORAGE_UNAVAILABLE_MESSAGE))
-        }
-        if (episodeId.isNotEmpty() && episode == null) {
-          DLog.e(tag, "prepareLibraryItem: Podcast episode not found $episodeId")
-          return call.resolve(JSObject("{\"error\":\"Podcast episode not found\"}"))
-        }
-        return call.resolve(JSObject("{\"error\":\"No audio files found on device. Download book again to fix.\"}"))
-      }
-      localLibraryItem.let {
-
-        Handler(Looper.getMainLooper()).post {
-          val playbackSession = it.getPlaybackSession(episode, playerNotificationService.getDeviceInfo())
-          // Concise on purpose: the serialized item contains file paths, SAF URIs and the server connection id
-          DLog.d(tag, "prepareLibraryItem: downloaded item ${it.id} (server item ${it.libraryItemId ?: "none"}${episode?.let { e -> ", episode " + e.id } ?: ""}) mediaType=${it.mediaType} title=\"${playbackSession.displayTitle}\" tracks=${playbackSession.audioTracks.size} start=${playbackSession.currentTime}s duration=${playbackSession.getTotalDuration()}s rate=$playbackRate playWhenReady=$playWhenReady")
-          if (startTimeOverride != null) {
-            DLog.d(tag, "prepareLibraryItem: Using start time override $startTimeOverride")
-            playbackSession.currentTime = startTimeOverride
+    val request = StartRequest(libraryItemId, episodeId.ifEmpty { null }, ino, startTime = startTimeOverride,
+            playWhenReady = playWhenReady, playbackRate = playbackRate, forceStream = forceStream, expectedTracks = expectedTracks)
+    Handler(Looper.getMainLooper()).post {
+      // Must always resolve - an unresolved call leaves AudioPlayerContainer.vue's preparingPlayback guard stuck true,
+      // permanently blocking all further playback.
+      playerNotificationService.startItem(request) { result ->
+        when (result) {
+          is PlayerNotificationService.StartResult.Failed -> {
+            DLog.e(tag, "prepareLibraryItem: ${result.message} ($libraryItemId)")
+            call.resolve(JSObject().put("error", result.message))
           }
-
-          if (playerNotificationService.mediaProgressSyncer.listeningTimerRunning) { // If progress syncing then first stop before preparing next
-            playerNotificationService.mediaProgressSyncer.stop {
-              DLog.d(tag, "Media progress syncer was already syncing - stopped")
-              PlayerListener.lazyIsPlaying = false
-
-              Handler(Looper.getMainLooper()).post { // TODO: This was needed again which is probably a design a flaw
-                playerNotificationService.preparePlayer(
-                  playbackSession,
-                  playWhenReady,
-                  playbackRate
-                )
-              }
-            }
-          } else {
-            playerNotificationService.mediaProgressSyncer.reset()
-            playerNotificationService.preparePlayer(playbackSession, playWhenReady, playbackRate)
-          }
+          // The call must resolve; another start took over and reports itself
+          PlayerNotificationService.StartResult.Replaced -> call.resolve(JSObject())
+          // The queue stays and waits on this item; the app shows its display, or a toast without one
+          is PlayerNotificationService.StartResult.AwaitingServer ->
+            call.resolve(JSObject().put("awaitingServer", true).put("display", result.display?.toJson() ?: JSONObject.NULL))
+          is PlayerNotificationService.StartResult.Started ->
+            if (result.session.isLocal) call.resolve(JSObject()) else call.resolve(JSObject(jacksonMapper.writeValueAsString(result.session)))
         }
-        return call.resolve(JSObject())
       }
-    } else { // Play library item from server
-      val playItemRequestPayload = playerNotificationService.getPlayItemRequestPayload(false)
-      Handler(Looper.getMainLooper()).post {
-        playerNotificationService.mediaProgressSyncer.stop {
-          apiHandler.playLibraryItem(libraryItemId, episodeId, playItemRequestPayload) {
-            if (it == null) {
-              call.resolve(JSObject("{\"error\":\"Server play request failed\"}"))
-            } else {
-              if (startTimeOverride != null) {
-                DLog.d(tag, "prepareLibraryItem: Using start time override $startTimeOverride")
-                it.currentTime = startTimeOverride
-              }
+    }
+  }
 
-              Handler(Looper.getMainLooper()).post {
-                DLog.d(tag, "prepareLibraryItem: streamed session ${it.id} for item ${it.libraryItemId}${it.episodeId?.let { e -> ", episode " + e } ?: ""} mediaType=${it.mediaType} playMethod=${it.playMethod} title=\"${it.displayTitle}\" tracks=${it.audioTracks.size} start=${it.currentTime}s duration=${it.getTotalDuration()}s rate=$playbackRate playWhenReady=$playWhenReady")
-                PlayerListener.lazyIsPlaying = false
-                playerNotificationService.preparePlayer(it, playWhenReady, playbackRate)
-              }
-              call.resolve(JSObject(jacksonMapper.writeValueAsString(it)))
-            }
-          }
+  /** Where prepareLibraryItem would play this item from: `local`, `stream` or `broken` (nothing to play). */
+  @PluginMethod
+  fun resolvePlaybackSource(call: PluginCall) {
+    val libraryItemId = call.getString("libraryItemId", "").toString()
+    val episodeId = call.getString("episodeId")?.takeIf { it.isNotEmpty() }
+    val ino = call.getString("ino")?.takeIf { it.isNotEmpty() }
+    val expectedTracks = call.getInt("expectedTracks")?.takeIf { it > 0 }
+    if (libraryItemId.isEmpty()) return call.resolve(JSObject().put("source", "broken"))
+    Handler(Looper.getMainLooper()).post {
+      // Not bound yet: the UI falls back to deciding by the id
+      if (!::playerNotificationService.isInitialized) return@post call.reject("Player service not ready")
+      playerNotificationService.resolveSource(StartRequest(libraryItemId, episodeId, ino, playWhenReady = false, expectedTracks = expectedTracks)) { source ->
+        val name = when (source) {
+          is PlaybackSource.Local -> "local"
+          is PlaybackSource.Stream -> "stream"
+          else -> "broken"
         }
+        call.resolve(JSObject().put("source", name))
       }
     }
   }
@@ -523,14 +492,19 @@ class AbsAudioPlayer : Plugin() {
     val queue = mutableListOf<PlayerNotificationService.PlaylistQueueItem>()
     for (i in 0 until items.length()) {
       val item = items.getJSONObject(i)
+      fun optional(key: String) = if (item.isNull(key)) null else item.getString(key).takeIf { it.isNotEmpty() }
       queue.add(PlayerNotificationService.PlaylistQueueItem(
         libraryItemId = item.getString("libraryItemId"),
-        episodeId = if (item.has("episodeId") && !item.isNull("episodeId")) item.getString("episodeId") else null
+        episodeId = optional("episodeId"),
+        ino = optional("ino"),
+        serverConnectionConfigId = optional("serverConnectionConfigId"),
+        expectedTracks = if (item.isNull("expectedTracks")) null else item.optInt("expectedTracks").takeIf { it > 0 }
       ))
     }
     Handler(Looper.getMainLooper()).post {
       playerNotificationService.playlistQueue = queue
       playerNotificationService.playlistQueueIndex = currentIndex
+      playerNotificationService.onQueueReplaced()
       DLog.d(tag, "setPlaylistQueue: ${queue.size} items, currentIndex=$currentIndex")
       call.resolve()
     }
@@ -551,6 +525,7 @@ class AbsAudioPlayer : Plugin() {
     Handler(Looper.getMainLooper()).post {
       playerNotificationService.playlistQueue = emptyList()
       playerNotificationService.playlistQueueIndex = -1
+      playerNotificationService.onQueueReplaced()
       DLog.d(tag, "clearPlaylistQueue: cleared")
       call.resolve()
     }

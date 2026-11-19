@@ -13,12 +13,13 @@ const dataUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).t
 const helperUrl = dataUrl(await read('../utils/pdfDocumentParams.js'))
 const { pdfDocumentParams } = await import(helperUrl)
 
-// The reader's script with its two imports resolved: the PDF component is not needed for its methods
+// The reader's script with its imports resolved: the PDF component is not needed for its methods
 const readerSource = await read('../components/readers/PdfReader.vue')
 const readerScript = readerSource
   .slice(readerSource.indexOf('<script>') + 8, readerSource.indexOf('</script>'))
   .replace("import pdf from '@teckel/vue-pdf'", 'const pdf = {}')
   .replace("from '@/utils/pdfDocumentParams'", `from '${helperUrl}'`)
+  .replace("from '@/utils/progressTarget'", `from '${dataUrl(await read('../utils/progressTarget.js'))}'`)
 const { default: reader } = await import(dataUrl(readerScript))
 
 // A reader instance: its data and methods, the computed URL and token, and a store whose renewal answers `renewed`

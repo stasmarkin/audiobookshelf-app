@@ -10,7 +10,8 @@ import vm from 'node:vm'
 
 const read = async (path) => (await readFile(new URL(path, import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
 const helperSource = await read('../utils/playbackQueue.js')
-const { nativeQueueItems, queueDisplayFromNative, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem } = await import(`data:text/javascript;base64,${Buffer.from(helperSource).toString('base64')}`)
+const helpers = await import(`data:text/javascript;base64,${Buffer.from(helperSource).toString('base64')}`)
+const { nativeQueueItems, queueDisplayFromNative } = helpers
 
 // Store module as Nuxt builds it: state factory, getters and mutations (imports are not needed by these)
 const storeSource = (await read('../store/index.js')).replace(/^import .*$/gm, '').replace(/^export const (\w+) =/gm, 'globalThis.$1 =')
@@ -56,7 +57,7 @@ function persistentPreferences() {
 
 // One UI instance (a fresh WebView): new store and container, same persisted Preferences
 function uiInstance(prefs, native = {}) {
-  const sandbox = { AbsAudioPlayer: native, AbsLogger: { info: async () => {} }, CellularPermissionHelpers: {}, nativeQueueItems, queueDisplayFromNative, resolvePlaybackQueue, resolveQueueSourceAppendItems, sessionToQueueItem, console: { ...console, log: () => {} } }
+  const sandbox = { ...helpers, AbsAudioPlayer: native, AbsLogger: { info: async () => {} }, CellularPermissionHelpers: {}, console: { ...console, log: () => {} } }
   vm.runInNewContext(containerScript, sandbox)
   const state = storeSandbox.state()
   const store = {
@@ -108,8 +109,9 @@ test('the display copy is used only when it is exactly the native queue, with a 
   assert.equal(queueDisplayFromNative(saved, nativeQueue(5)).queue.currentIndex, 5, 'native index wins (it advanced in the background)')
   assert.equal(queueDisplayFromNative(saved, nativeQueue(3, series13.slice(0, 12))).reason, 'mismatch')
   assert.equal(queueDisplayFromNative(saved, nativeQueue(3, [series13[1], series13[0], ...series13.slice(2)])).reason, 'mismatch', 'order matters')
+  // Native names a book by its server id whether or not it is downloaded (it plays the copy itself)
   const streamedInstead = series13.map((item, i) => (i === 2 ? { ...item, localLibraryItem: null } : item))
-  assert.equal(queueDisplayFromNative(saved, nativeQueue(3, streamedInstead)).reason, 'mismatch', 'a downloaded entry is not the same as its streamed entry')
+  assert.equal(queueDisplayFromNative(saved, nativeQueue(3, streamedInstead)).queue.currentIndex, 3)
   assert.equal(queueDisplayFromNative(saved, nativeQueue(13)).reason, 'invalid-index')
   assert.equal(queueDisplayFromNative(saved, nativeQueue(-1)).reason, 'invalid-index')
   assert.equal(queueDisplayFromNative(saved, nativeQueue(3), sessionFor(series13[4])).reason, 'session-mismatch')
@@ -128,6 +130,26 @@ test('podcast episodes match by episode identity (local episode for downloads, s
   assert.equal(queueDisplayFromNative(saved, native, { id: 's', libraryItemId: 'p', episodeId: 'e1', localLibraryItem: { id: 'local_p' }, localEpisodeId: 'local_e1' }).queue.currentIndex, 0)
   assert.equal(queueDisplayFromNative(saved, { ...native, currentIndex: 1 }, { id: 's', libraryItemId: 'p', episodeId: 'e2', localLibraryItem: null }).queue.currentIndex, 1)
   assert.equal(queueDisplayFromNative(saved, native, { id: 's', libraryItemId: 'p', episodeId: 'e2', localLibraryItem: null }).reason, 'session-mismatch')
+})
+
+test('queue restore display accepts server-id queue for a local session', () => {
+  const saved = savedSeriesQueue()
+  // series13[3] is downloaded: native holds server ids and plays the copy, so the session is local
+  const localSession = { id: 's', libraryItemId: 'b3', episodeId: null, localLibraryItem: { id: 'local_b3', libraryItemId: 'b3' }, localEpisodeId: null }
+  assert.equal(nativeQueue(3).items[3].libraryItemId, 'b3')
+  assert.equal(queueDisplayFromNative(saved, nativeQueue(3), localSession).queue.currentIndex, 3)
+  // A queue native saved before this version names the copies by their device ids; it is restored too
+  const legacy = { items: series13.map((item) => ({ libraryItemId: item.localLibraryItem?.id || item.libraryItemId, episodeId: null })), currentIndex: 3 }
+  assert.equal(legacy.items[3].libraryItemId, 'local_b3')
+  assert.equal(queueDisplayFromNative(saved, legacy, localSession).queue.currentIndex, 3)
+  // A copy downloaded through another library: native found it by ino for the same server
+  const inoItem = { libraryItemId: 'serverA', episodeId: null, libraryItem: { ino: '42' }, localLibraryItem: null }
+  const inoSaved = { sourceType: 'series', sourceId: 's', items: [inoItem], currentIndex: 0 }
+  const inoNative = { items: nativeQueueItems([inoItem], 'server'), currentIndex: 0 }
+  const inoSession = { id: 's2', libraryItemId: 'serverB', episodeId: null, localLibraryItem: { id: 'local_b', libraryItemId: 'serverB', ino: '42', serverConnectionConfigId: 'server' } }
+  assert.equal(queueDisplayFromNative(inoSaved, inoNative, inoSession).queue.currentIndex, 0)
+  const otherAccount = { ...inoSession, localLibraryItem: { ...inoSession.localLibraryItem, serverConnectionConfigId: 'other' } }
+  assert.equal(queueDisplayFromNative(inoSaved, inoNative, otherAccount).reason, 'session-mismatch')
 })
 
 // --- the reported defect: UI open first, native restores later ---

@@ -7,6 +7,8 @@
 </template>
 
 <script>
+import { shownGroupCovers } from '@/utils/coverUrl'
+
 export default {
   props: {
     id: String,
@@ -32,7 +34,8 @@ export default {
       isFannedOut: false,
       isDetached: false,
       isAttaching: false,
-      isInit: false
+      isInit: false,
+      initGeneration: 0
     }
   },
   watch: {
@@ -44,6 +47,11 @@ export default {
           this.$nextTick(this.init)
         }
       }
+    },
+    // The DOM is built by hand: a cover native announced as ready needs a rebuild to be asked for again
+    coverEpochKey() {
+      this.isInit = false
+      this.$nextTick(this.init)
     }
   },
   computed: {
@@ -54,6 +62,10 @@ export default {
     store() {
       return this.$store || this.$nuxt.$store
     },
+    coverEpochKey() {
+      const epochs = this.store.state.globals.coverEpochs || {}
+      return this.bookItems.map((book) => epochs[book.id] || 0).join(',')
+    },
     router() {
       return this.$router || this.$nuxt.$router
     }
@@ -62,32 +74,29 @@ export default {
     getCoverUrl(book) {
       return this.store.getters['globals/getLibraryItemCoverSrc'](book, '')
     },
-    async buildCoverImg(coverData, bgCoverWidth, offsetLeft, zIndex, forceCoverBg = false) {
+    /** Loads a cover once: whether it loaded, and whether its aspect ratio needs the blurred background. */
+    probeCover(src) {
+      return new Promise((resolve) => {
+        var image = new Image()
+
+        image.onload = () => {
+          var { naturalWidth, naturalHeight } = image
+          var aspectRatio = naturalHeight / naturalWidth
+          var arDiff = Math.abs(aspectRatio - this.bookCoverAspectRatio)
+
+          // If image aspect ratio is <= 1.45 or >= 1.75 then use cover bg, otherwise stretch to fit
+          resolve({ loaded: true, needsBg: arDiff > 0.15 })
+        }
+        image.onerror = (err) => {
+          console.error(err)
+          resolve({ loaded: false, needsBg: false })
+        }
+        image.src = src
+      })
+    },
+    buildCoverImg(coverData, bgCoverWidth, offsetLeft, zIndex, forceCoverBg = false) {
       var src = coverData.coverUrl
-
-      var showCoverBg =
-        forceCoverBg ||
-        (await new Promise((resolve) => {
-          var image = new Image()
-
-          image.onload = () => {
-            var { naturalWidth, naturalHeight } = image
-            var aspectRatio = naturalHeight / naturalWidth
-            var arDiff = Math.abs(aspectRatio - this.bookCoverAspectRatio)
-
-            // If image aspect ratio is <= 1.45 or >= 1.75 then use cover bg, otherwise stretch to fit
-            if (arDiff > 0.15) {
-              resolve(true)
-            } else {
-              resolve(false)
-            }
-          }
-          image.onerror = (err) => {
-            console.error(err)
-            resolve(false)
-          }
-          image.src = src
-        }))
+      var showCoverBg = forceCoverBg || coverData.needsBg
 
       var imgdiv = document.createElement('div')
       imgdiv.style.height = this.height + 'px'
@@ -139,11 +148,9 @@ export default {
     async init() {
       if (this.isInit) return
       this.isInit = true
+      // A rebuild (a cover announced as ready) may start while an earlier one awaits its probes: only the latest draws
+      const generation = ++this.initGeneration
 
-      if (this.coverDiv) {
-        this.coverDiv.remove()
-        this.coverDiv = null
-      }
       var validCovers = this.bookItems
         .map((bookItem) => {
           return {
@@ -153,12 +160,25 @@ export default {
         })
         .filter((b) => b.coverUrl !== '')
       if (!validCovers.length) {
+        this.replaceCoverDiv(null)
         this.noValidCovers = true
         return
       }
       this.noValidCovers = false
 
       validCovers = validCovers.slice(0, 10)
+      // Every cover is probed, also a single one drawn with a background: a cover route can fail offline
+      var probes = await Promise.all(validCovers.map((cover) => this.probeCover(cover.coverUrl)))
+      if (generation !== this.initGeneration) return
+      validCovers = shownGroupCovers(
+        validCovers.map((cover, i) => ({ ...cover, needsBg: probes[i].needsBg })),
+        probes.map((probe) => probe.loaded)
+      )
+      if (!validCovers.length) {
+        this.replaceCoverDiv(null)
+        this.noValidCovers = true
+        return
+      }
 
       var coverWidth = this.width
       var widthPer = this.width
@@ -179,17 +199,20 @@ export default {
       for (let i = 0; i < validCovers.length; i++) {
         offsetLeft = widthPer * i
         var zIndex = validCovers.length - i
-        var img = await this.buildCoverImg(validCovers[i], coverWidth, offsetLeft, zIndex, validCovers.length === 1)
+        var img = this.buildCoverImg(validCovers[i], coverWidth, offsetLeft, zIndex, validCovers.length === 1)
         outerdiv.appendChild(img)
         coverImageEls.push(img)
       }
 
       this.coverImageEls = coverImageEls
 
-      if (this.$refs.wrapper) {
-        this.coverDiv = outerdiv
-        this.$refs.wrapper.appendChild(outerdiv)
-      }
+      if (this.$refs.wrapper) this.replaceCoverDiv(outerdiv)
+    },
+    /** The previous covers stay until their replacement is ready, then go. */
+    replaceCoverDiv(div) {
+      if (this.coverDiv) this.coverDiv.remove()
+      this.coverDiv = div
+      if (div) this.$refs.wrapper.appendChild(div)
     }
   },
   mounted() {},

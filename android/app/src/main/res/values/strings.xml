@@ -10,7 +10,12 @@
     <string name="action_skip_backward">Skip Backward</string>
     <string name="action_change_speed">Change Playback Speed</string>
     <string name="widget_play_pause">Play/Pause</string>
+    <string name="waiting_for_server">Waiting for server</string>
+    <!-- Android Auto: an item that is not downloaded, while the server is away (list subtitle and playback error) -->
+    <string name="not_available_offline">Not available offline</string>
+    <string name="item_not_found">Item not found</string>
     <!-- Placeholder text of the standard compact widget, shown in the launcher's widget preview before any playback -->
     <string name="widget_preview_artist">Artist</string>
     <string name="widget_preview_title">Title</string>
+    <string name="tap_play_to_continue">Tap Play to continue</string>
 </resources>

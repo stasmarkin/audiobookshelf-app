@@ -29,17 +29,19 @@
 
     <!-- action buttons -->
     <div class="flex mt-4 -mx-1">
-      <ui-btn color="success" class="flex items-center justify-center flex-grow mx-1" :loading="playerIsStartingForThisMedia" :padding-x="4" @click="playClick">
+      <ui-btn color="success" class="flex items-center justify-center flex-grow mx-1" :loading="playerIsStartingForThisMedia" :disabled="notAvailableOffline && !playerIsPlaying" :padding-x="4" @click="playClick">
         <span class="material-symbols text-2xl fill">{{ playerIsPlaying ? 'pause' : 'play_arrow' }}</span>
         <span class="px-1 text-sm">{{ playerIsPlaying ? $strings.ButtonPause : localEpisodeId ? $strings.ButtonPlay : $strings.ButtonStream }}</span>
       </ui-btn>
-      <ui-btn v-if="showDownload" :color="downloadItem ? 'warning' : 'primary'" class="flex items-center justify-center mx-1" :padding-x="2" @click="downloadClick">
+      <ui-btn v-if="showDownload" :color="downloadItem ? 'warning' : 'primary'" class="flex items-center justify-center mx-1" :disabled="!isServerOnline" :padding-x="2" @click="downloadClick">
         <span class="material-symbols text-2xl" :class="downloadItem || startingDownload ? 'animate-pulse' : ''">{{ downloadItem || startingDownload ? 'downloading' : 'download' }}</span>
       </ui-btn>
       <ui-btn color="primary" class="flex items-center justify-center mx-1" :padding-x="2" @click="showMoreMenu = true">
         <span class="material-symbols text-2xl">more_vert</span>
       </ui-btn>
     </div>
+    <p v-if="notAvailableOffline" class="not-offline-label text-xs text-fg-muted text-center mt-1">{{ notAvailableOfflineLabel() }}</p>
+    <p v-if="showDownload && isServerAway" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
 
     <p class="text-sm text-fg mt-1.5 mb-0.5 default-style description-container" v-html="transformedDescription"></p>
 
@@ -58,7 +60,27 @@ import { Capacitor } from '@capacitor/core'
 import { Dialog } from '@capacitor/dialog'
 import { AbsFileSystem, AbsDownloader } from '@/plugins/capacitor'
 import cellularPermissionHelpers from '@/mixins/cellularPermissionHelpers'
+import requiresServer from '@/mixins/requiresServer'
+import { progressTarget, isCopyOfActiveServer } from '@/utils/progressTarget'
 import { appStorageFolderFor, safFoldersFor } from '@/utils/appStorage'
+import { findLocalCopy } from '@/utils/localCopy'
+import { createDebouncer } from '@/utils/catalogRefresh'
+
+/** The podcast from the replica; an episode it does not have yet (newer than the last reconcile) asks the server. */
+async function readPodcastWithEpisode(app, store, libraryItemId, episodeId) {
+  const read = (args) =>
+    app.$absData.getLibraryItem({ id: libraryItemId, ...args }).catch((error) => {
+      console.error('[episode] Could not read the podcast', error)
+      return null
+    })
+  const episodeOf = (item) => (item?.media?.episodes || []).find((ep) => ep.id === episodeId) || null
+  let libraryItem = (await read({}))?.libraryItem || null
+  if (!episodeOf(libraryItem) && store.getters.getIsServerOnline) {
+    // force: the podcast's copy is usually expanded already, which a plain refresh would leave as it is
+    libraryItem = (await read({ refresh: true, force: true }))?.libraryItem || null
+  }
+  return { libraryItem, episode: episodeOf(libraryItem) }
+}
 
 export default {
   async asyncData({ store, params, redirect, app }) {
@@ -67,42 +89,23 @@ export default {
 
     let libraryItem = null
     let episode = null
-    let localEpisode = null
 
     if (libraryItemId.startsWith('local')) {
       libraryItem = await app.$db.getLocalLibraryItem(libraryItemId)
-      console.log('Got lli', libraryItemId)
-    } else if (store.state.user.serverConnectionConfig) {
-      libraryItem = await app.$nativeHttp.get(`/api/items/${libraryItemId}?expanded=1`).catch((error) => {
-        console.error('Failed', error)
-        return false
-      })
-
-      if (libraryItem) {
-        const localLibraryItem = await app.$db.getLocalLibraryItemByLId(libraryItemId)
-        if (localLibraryItem) {
-          console.log('Library item has local library item also', localLibraryItem.id)
-          libraryItem.localLibraryItem = localLibraryItem
-
-          localEpisode = localLibraryItem.media.episodes.find((ep) => ep.serverEpisodeId === episodeId)
-        }
-      }
-    }
-
-    if (!libraryItem) {
-      console.error('No item...', params.id)
+      episode = libraryItem?.media?.episodes?.find((ep) => ep.id === episodeId) || null
+      if (!libraryItem) return redirect('/')
+      if (!episode) return redirect(`/item/${libraryItemId}`)
+    } else if (store.getters.getHasActiveServer) {
+      const found = await readPodcastWithEpisode(app, store, libraryItemId, episodeId)
+      libraryItem = found.libraryItem
+      episode = found.episode
+      if (!episode) return redirect(`/item/${libraryItemId}?error=episode`)
+      const localItems = await app.$db.getLocalLibraryItems().catch(() => [])
+      libraryItem.localLibraryItem = findLocalCopy(localItems, libraryItem, store.state.activeServerConfigId)
+      const localEpisode = libraryItem.localLibraryItem?.media?.episodes?.find((ep) => ep.serverEpisodeId === episodeId)
+      if (localEpisode) episode.localEpisode = localEpisode
+    } else {
       return redirect('/')
-    }
-
-    episode = libraryItem.media.episodes.find((ep) => ep.id === episodeId)
-    if (localEpisode) {
-      // For server episodes that have a matching local episode
-      episode.localEpisode = localEpisode
-    }
-
-    if (!episode) {
-      console.error('No episode...', params.episode)
-      return redirect(`/item/${libraryItemId}`)
     }
 
     return {
@@ -116,10 +119,12 @@ export default {
       processing: false,
       resettingProgress: false,
       startingDownload: false,
-      itemMovedListener: null
+      itemMovedListener: null,
+      stopDataChanged: null,
+      refreshDebouncer: null
     }
   },
-  mixins: [cellularPermissionHelpers],
+  mixins: [cellularPermissionHelpers, requiresServer],
   computed: {
     transformedDescription() {
       return this.parseDescription(this.description)
@@ -151,8 +156,7 @@ export default {
     },
     isConnectedToServer() {
       if (!this.isLocal) return true
-      if (!this.libraryItem.serverAddress) return false
-      return this.$store.getters['user/getServerAddress'] === this.libraryItem.serverAddress
+      return isCopyOfActiveServer(this.libraryItem, this.$store.state.activeServerConfigId)
     },
     serverLibraryItemId() {
       if (!this.isLocal) return this.libraryItemId
@@ -271,6 +275,9 @@ export default {
     showDownload() {
       return this.userCanDownload && !this.localEpisode
     },
+    notAvailableOffline() {
+      return this.isNotAvailableOffline(this.libraryItem, this.localLibraryItem, this.episode.id)
+    },
     moreMenuItems() {
       const items = []
 
@@ -291,10 +298,12 @@ export default {
       }
 
       if (!this.isLocal) {
+        // Adding writes to the server: offline the item stays visible, disabled and labeled
         items.push({
           text: this.$strings.LabelAddToPlaylist,
           value: 'playlist',
-          icon: 'playlist_add'
+          icon: 'playlist_add',
+          ...this.serverOnlyItem
         })
       }
 
@@ -310,7 +319,8 @@ export default {
         items.push({
           text: this.$strings.ButtonRemoveFromServer,
           value: 'remove_from_server',
-          icon: 'delete_forever'
+          icon: 'delete_forever',
+          ...this.serverOnlyItem
         })
       }
 
@@ -371,7 +381,7 @@ export default {
       }
     },
     async playClick() {
-      if (this.playerIsStartingPlayback) return
+      if (this.playerIsStartingPlayback || (this.notAvailableOffline && !this.playerIsPlaying)) return
 
       await this.$hapticsImpact()
       if (this.playerIsPlaying) {
@@ -385,7 +395,7 @@ export default {
     },
     async clickPlaybackTime(event) {
       const startTime = event.target.getAttribute('data-time')
-      if (this.playerIsStartingPlayback) return
+      if (this.playerIsStartingPlayback || this.notAvailableOffline) return
 
       await this.$hapticsImpact()
 
@@ -424,6 +434,7 @@ export default {
       }
     },
     async downloadClick() {
+      if (!this.isServerOnline) return
       if (this.downloadItem || this.startingDownload) return
 
       const hasPermission = await this.checkCellularPermission('download')
@@ -489,7 +500,7 @@ export default {
         this.toggleFinished()
       } else if (action === 'discardProgress') {
         this.discardProgress()
-      } else if (action === 'playlist' && !this.isLocal) {
+      } else if (action === 'playlist' && !this.isLocal && this.isServerOnline) {
         this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode: this.episode }])
         this.$store.commit('globals/setShowPlaylistsAddCreateModal', true)
       } else if (action === 'remove_from_server' && this.serverEpisodeId && this.isAdminOrUp) {
@@ -508,23 +519,16 @@ export default {
       if (value) {
         this.resettingProgress = true
 
-        const serverItemProgressId = this.serverItemProgress?.id
-        if (this.localItemProgress) {
+        const target = progressTarget(this.libraryItem, this.episode)
+        if (target) {
+          // Native deletes the server record (now or once the server is back) and the copy's own progress
+          await this.$absData
+            .resetProgress(target)
+            .then(() => this.$toast.success(`Your progress was reset`))
+            .catch((error) => console.error('Progress reset failed', error))
+        } else if (this.localItemProgress) {
           await this.$db.removeLocalMediaProgress(this.localItemProgress.id)
           this.$store.commit('globals/removeLocalMediaProgress', this.localItemProgress.id)
-        }
-
-        if (serverItemProgressId) {
-          await this.$nativeHttp
-            .delete(`/api/me/progress/${serverItemProgressId}`)
-            .then(() => {
-              console.log('Progress reset complete')
-              this.$toast.success(`Your progress was reset`)
-              this.$store.commit('user/removeMediaProgress', serverItemProgressId)
-            })
-            .catch((error) => {
-              console.error('Progress reset failed', error)
-            })
         }
 
         this.resettingProgress = false
@@ -533,7 +537,11 @@ export default {
     async toggleFinished() {
       await this.$hapticsImpact()
 
-      if (this.isLocal || this.localEpisode) {
+      const target = progressTarget(this.libraryItem, this.episode)
+      if (target) {
+        // Works offline; native also updates the downloaded copy's own progress
+        await this.$absData.markFinished({ ...target, isFinished: !this.userIsFinished }).catch((error) => console.error('[episode] Could not save finished', error))
+      } else {
         const isFinished = !this.userIsFinished
         const localLibraryItemId = this.localLibraryItemId
         const localEpisodeId = this.localEpisodeId
@@ -549,17 +557,10 @@ export default {
             this.$store.commit('globals/updateLocalMediaProgress', localMediaProgress)
           }
         }
-      } else {
-        const updatePayload = {
-          isFinished: !this.userIsFinished
-        }
-        this.$nativeHttp.patch(`/api/me/progress/${this.libraryItemId}/${this.episode.id}`, updatePayload).catch((error) => {
-          console.error('Failed', error)
-          this.$toast.error(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedFailed : this.$strings.ToastItemMarkedAsNotFinishedFailed)
-        })
       }
     },
     async deleteEpisodeFromServerClick() {
+      if (!this.isServerOnline) return
       await this.$hapticsImpact()
 
       const { value } = await Dialog.confirm({
@@ -595,6 +596,28 @@ export default {
         }
       }
     },
+    /** The podcast's library changed (an edit, new or removed episodes): read it again, a second later. */
+    dataChanged(change) {
+      const libraryId = this.libraryItem?.libraryId
+      if (change?.scope !== 'catalog' || !libraryId) return
+      if (![`items:${libraryId}`, `episodes:${libraryId}`].some((topic) => (change.ids || []).includes(topic))) return
+      if (Array.isArray(change.itemIds) && !change.itemIds.includes(this.libraryItemId)) return
+      if (!this.refreshDebouncer) this.refreshDebouncer = createDebouncer({ delayMs: 1000 })
+      this.refreshDebouncer.schedule(() => this.readEpisode())
+    },
+    async readEpisode() {
+      const answer = await this.$absData.getLibraryItem({ id: this.libraryItemId }).catch((error) => {
+        console.error('[episode] Could not read the podcast', error)
+        return undefined
+      })
+      if (answer === undefined || this._isDestroyed) return
+      const episode = (answer?.libraryItem?.media?.episodes || []).find((ep) => ep.id === this.episode.id)
+      if (!episode) return this.$router.replace(`/item/${this.libraryItemId}?error=episode`)
+      answer.libraryItem.localLibraryItem = this.libraryItem.localLibraryItem
+      if (this.episode.localEpisode) episode.localEpisode = this.episode.localEpisode
+      this.libraryItem = answer.libraryItem
+      this.episode = episode
+    },
     onLocalLibraryItemMoved(item) {
       if (this.isLocal && item.id === this.libraryItem.id) {
         const episode = item.media?.episodes?.find((ep) => ep.id === this.episode.id)
@@ -610,6 +633,7 @@ export default {
     }
   },
   async mounted() {
+    if (!this.isLocal) this.stopDataChanged = this.$absData.onDataChanged(this.dataChanged)
     this.$eventBus.$on('new-local-library-item', this.newLocalLibraryItem)
     this.bindTimeMarkerEvents()
     const listener = await AbsFileSystem.addListener('onLocalLibraryItemMoved', this.onLocalLibraryItemMoved)
@@ -623,6 +647,9 @@ export default {
   beforeDestroy() {
     this.itemMovedListener?.remove()
     this.$eventBus.$off('new-local-library-item', this.newLocalLibraryItem)
+    if (this.stopDataChanged) this.stopDataChanged()
+    this.stopDataChanged = null
+    if (this.refreshDebouncer) this.refreshDebouncer.cancel()
     document.querySelectorAll('.time-marker').forEach((marker) => {
       marker.removeEventListener('click', this.clickPlaybackTime)
     })

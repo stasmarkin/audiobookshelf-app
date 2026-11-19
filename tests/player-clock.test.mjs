@@ -129,6 +129,7 @@ function makePlayer(component, { everyMinute, rate = 1, chapters = null, scaled 
   ctx.playbackSession = { playMethod, ...(chapters ? { chapters } : {}) }
   ctx.$constants = { PlayMethod }
   ctx.$eventBus = { $emit() {} }
+  ctx.$store = { state: { playerAwaitingServer: false } }
   ctx.totalDuration = duration
   ctx.currentPlaybackRate = rate
   ctx.sleepTimeRemaining = 0

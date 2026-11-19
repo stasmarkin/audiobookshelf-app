@@ -9,8 +9,9 @@
     <div class="flex items-center">
       <p class="hidden md:block text-xl font-semibold">{{ yearInReviewYear }} Year in Review</p>
       <div class="hidden md:block flex-grow" />
-      <ui-btn class="w-full md:w-auto" @click.stop="clickShowYearInReview">{{ showYearInReview ? $strings.LabelYearReviewHide : $strings.LabelYearReviewShow }}</ui-btn>
+      <ui-btn class="w-full md:w-auto" :disabled="!isServerOnline && !showYearInReview" @click.stop="clickShowYearInReview">{{ showYearInReview ? $strings.LabelYearReviewHide : $strings.LabelYearReviewShow }}</ui-btn>
     </div>
+    <p v-if="isServerAway && !showYearInReview" class="requires-server-label text-xs text-fg-muted text-center mt-1">{{ requiresServerLabel() }}</p>
 
     <!-- your year in review -->
     <div v-if="showYearInReview">
@@ -31,7 +32,7 @@
         <div class="flex-grow" />
 
         <!-- refresh button -->
-        <ui-btn small :disabled="processingYearInReview" class="inline-flex items-center font-semibold mr-1 sm:mr-2" @click="refreshYearInReview">
+        <ui-btn small :disabled="processingYearInReview || !isServerOnline" class="inline-flex items-center font-semibold mr-1 sm:mr-2" @click="refreshYearInReview">
           <span class="hidden sm:inline-block">Refresh</span>
           <span class="material-symbols sm:!hidden text-lg py-px">refresh</span>
         </ui-btn>
@@ -67,7 +68,7 @@
           <div class="flex-grow" />
 
           <!-- refresh button -->
-          <ui-btn small :disabled="processingYearInReviewServer" class="inline-flex items-center font-semibold mr-1 sm:mr-2" @click="refreshYearInReviewServer">
+          <ui-btn small :disabled="processingYearInReviewServer || !isServerOnline" class="inline-flex items-center font-semibold mr-1 sm:mr-2" @click="refreshYearInReviewServer">
             <span class="hidden sm:inline-block">Refresh</span>
             <span class="material-symbols sm:!hidden text-lg py-px">refresh</span>
           </ui-btn>
@@ -84,7 +85,10 @@
 </template>
 
 <script>
+import requiresServer from '@/mixins/requiresServer'
+
 export default {
+  mixins: [requiresServer],
   data() {
     return {
       showYearInReview: false,
@@ -112,13 +116,17 @@ export default {
       this.$refs.yearInReviewShort.share()
     },
     refreshYearInReviewServer() {
+      if (!this.isServerOnline) return
       this.$refs.yearInReviewServer.refresh()
     },
     refreshYearInReview() {
+      if (!this.isServerOnline) return
       this.$refs.yearInReview.refresh()
       this.$refs.yearInReviewShort.refresh()
     },
     clickShowYearInReview() {
+      // Hiding works offline; showing loads the server's stats
+      if (!this.isServerOnline && !this.showYearInReview) return
       this.showYearInReview = !this.showYearInReview
     }
   },

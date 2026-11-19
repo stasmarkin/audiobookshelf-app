@@ -102,3 +102,22 @@ test('folder page: rescan status, folder-scoped progress and error handling', as
   }
   assert.doesNotMatch(strings.LabelRescanChecked, /%/, 'no percentage')
 })
+
+test('ui-btn: a disabled success button takes the neutral fill; enabled and loading keep the success fill', async () => {
+  const { default: vm } = await import('node:vm')
+  const script = (await read('../components/ui/Btn.vue'))
+    .match(/<script>([\s\S]*?)<\/script>/)[1]
+    .replace('export default', 'globalThis.component =')
+  const sandbox = {}
+  vm.runInNewContext(script, sandbox)
+  const classes = (props) => sandbox.component.computed.classList.call({ color: 'success', small: false, ...props })
+  const disabled = classes({ disabled: true })
+  assert.ok(disabled.includes('bg-primary'))
+  assert.ok(!disabled.includes('bg-success-action') && !disabled.includes('text-white'))
+  const enabled = classes({ disabled: false })
+  assert.ok(enabled.includes('bg-success-action') && enabled.includes('text-white'))
+  assert.ok(!enabled.includes('bg-primary'))
+  const loading = classes({ disabled: false, loading: true })
+  assert.ok(loading.includes('bg-success-action') && loading.includes('text-white'), 'the spinner sits on the green button')
+  assert.deepEqual([...sandbox.component.computed.classList.call({ color: 'primary', disabled: true })].filter((c) => c.startsWith('bg-')), ['bg-primary'])
+})

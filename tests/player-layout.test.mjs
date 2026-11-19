@@ -566,10 +566,73 @@ test('Full-player bookmark key: shown for every server book whether or not the s
   const src = await read('../components/app/AudioPlayer.vue')
   const key = src.match(/<span v-if="([^"]*)" class="player-key utility-key bookmark-key[^"]*"[^>]*>bookmark<\/span>/)
   assert.ok(key, 'the bookmark key exists in the utility row')
-  assert.equal(key[1], '!isPodcast && serverLibraryItemId')
+  // A downloaded copy of another saved server has bookmarks without the active server's ids (bookmarkable)
+  // Hidden while a queue waits on another book (the bookmarks would be the open book's)
+  assert.equal(key[1], '!isPodcast && !awaitingDisplay && (serverLibraryItemId || bookmarkable)')
   assert.match(key[0], /@click="\$emit\('showBookmarks'\)"/)
   // Order in the row: queue, bookmark, speed, sleep, chapters
   const row = src.slice(src.indexOf('class="utility-row'), src.indexOf('chapters-key'))
   const at = (s) => row.indexOf(s)
   assert.ok(at('queue-key') < at('bookmark-key') && at('bookmark-key') < at('speed-readout') && at('speed-readout') < at('sleep-key'))
+})
+
+// Release 3: a stream whose server went away pauses and waits for it (native AwaitingServer). The player stays open
+// with a "Waiting for server" label instead of the "Playback Failed" toast and close.
+test('awaiting server shows a label and keeps the player open', async () => {
+  const strip = (source) => source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('export default', 'globalThis.component =')
+  const storeSandbox = {}
+  vm.runInNewContext((await read('../store/index.js')).replace(/^import .*$/gm, '').replace(/^export const (\w+) =/gm, 'globalThis.$1 ='), storeSandbox)
+  const state = storeSandbox.state()
+  const store = { state, commit: (name, payload) => storeSandbox.mutations[name].call({ $localStore: { setPlaybackQueue: () => {} } }, state, payload) }
+
+  const native = { listeners: {}, closed: 0 }
+  const AbsAudioPlayer = {
+    addListener: async (name, fn) => {
+      native.listeners[name] = fn
+      return { remove: () => {} }
+    },
+    closePlayback: () => native.closed++
+  }
+  const containerSandbox = { AbsAudioPlayer, AbsLogger: { info: async () => {} }, CellularPermissionHelpers: {}, console: { ...console, log: () => {} } }
+  vm.runInNewContext(strip(await read('../components/app/AudioPlayerContainer.vue')), containerSandbox)
+  const toasts = []
+  const bus = { $on: () => {}, $off: () => {} }
+  const container = { $store: { ...store, getters: { 'user/getUserSetting': () => 1 } }, $toast: { error: (m) => toasts.push(m), info: () => {} }, $eventBus: bus }
+  for (const [name, fn] of Object.entries(containerSandbox.component.methods)) container[name] = fn.bind(container)
+  await containerSandbox.component.mounted.call(container)
+
+  store.commit('setPlaybackSession', { id: 'stream-1', libraryItemId: 'li1' })
+  native.listeners.onAwaitingServer({ awaiting: true })
+  assert.equal(state.playerAwaitingServer, true)
+  assert.deepEqual(toasts, [])
+  assert.equal(native.closed, 0)
+  assert.equal(state.currentPlaybackSession.id, 'stream-1', 'the player stays open')
+
+  // The player shows the label in place of the author, and its Play key instead of the loading spinner
+  const playerSandbox = { AbsAudioPlayer, console, Capacitor: {}, Dialog: {}, getAverageColorFromCoverUrl: () => null, normalizePlaybackRate: (v) => v, formatPlaybackRate: String, coverPresentation: {}, playerLayout: {}, WrappingMarquee: function () {}, jumpLabelMixin: {} }
+  vm.runInNewContext(strip(await read('../components/app/AudioPlayer.vue')), playerSandbox)
+  const computed = playerSandbox.component.computed
+  const view = { $store: store, $strings: { LabelWaitingForServer: 'Waiting for server' }, authorName: 'Author', isLoading: true, isCheckingServerProgress: false }
+  view.awaitingServer = computed.awaitingServer.call(view)
+  assert.equal(computed.authorLine.call(view), 'Waiting for server')
+  assert.equal(computed.showLoadingState.call(view), false)
+  assert.match(await read('../components/app/AudioPlayer.vue'), /\{\{ authorLine \}\}/)
+
+  native.listeners.onAwaitingServer({ awaiting: false })
+  view.awaitingServer = computed.awaitingServer.call(view)
+  assert.equal(computed.authorLine.call(view), 'Author')
+  assert.equal(computed.showLoadingState.call(view), true)
+
+  // A new session or a close ends the label even if no event said so
+  native.listeners.onAwaitingServer({ awaiting: true })
+  store.commit('setPlaybackSession', { id: 'stream-1', libraryItemId: 'li1' })
+  assert.equal(state.playerAwaitingServer, true, 'the same session keeps waiting')
+  store.commit('setPlaybackSession', { id: 'stream-2', libraryItemId: 'li2' })
+  assert.equal(state.playerAwaitingServer, false)
+  native.listeners.onAwaitingServer({ awaiting: true })
+  store.commit('setPlaybackSession', null)
+  assert.equal(state.playerAwaitingServer, false)
+
+  const strings = JSON.parse(await read('../strings/en-us.json'))
+  assert.equal(strings.LabelWaitingForServer, 'Waiting for server')
 })

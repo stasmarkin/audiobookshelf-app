@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
+import app.absplus.android.R
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import kotlinx.coroutines.*
@@ -21,14 +22,20 @@ class AbMediaDescriptionAdapter (private val controller: MediaControllerCompat, 
   override fun createCurrentContentIntent(player: Player): PendingIntent? =
     controller.sessionActivity
 
-  override fun getCurrentContentText(player: Player) = controller.metadata.description.subtitle.toString()
+  // The awaited item is read from the service: the controller's copy of the session metadata arrives asynchronously
+  override fun getCurrentContentText(player: Player) =
+    if (playerNotificationService.awaitingDisplay != null) playerNotificationService.getString(R.string.waiting_for_server)
+    else controller.metadata.description.subtitle.toString()
 
-  override fun getCurrentContentTitle(player: Player) = controller.metadata.description.title.toString()
+  override fun getCurrentContentTitle(player: Player) =
+    playerNotificationService.awaitingDisplay?.title ?: controller.metadata.description.title.toString()
 
   override fun getCurrentLargeIcon(
     player: Player,
     callback: PlayerNotificationManager.BitmapCallback
   ): Bitmap? {
+    // Decoded off the main thread when the awaited item was read
+    if (playerNotificationService.awaitingDisplay != null) return playerNotificationService.awaitingCover?.bitmap
     val albumArtUri = controller.metadata.description.iconUri
     val albumBitmap = controller.metadata.description.iconBitmap
       ?: controller.metadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART)

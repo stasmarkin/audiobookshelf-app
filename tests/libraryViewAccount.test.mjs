@@ -122,7 +122,10 @@ test('planViewSwitch: first run still takes the live settings, a returning memor
 test('the store activates the account memory before it fetches and records tabs only with an account', async () => {
   const source = await read('../store/libraries.js')
   const fetchBody = source.slice(source.indexOf('  fetch({'), source.indexOf('  // Switch from the library button'))
-  assert.ok(fetchBody.indexOf("dispatch('activateViewScope')") > 0 && fetchBody.indexOf("dispatch('activateViewScope')") < fetchBody.indexOf('this.$nativeHttp'), 'activation precedes the request')
+  // The library is read through $absData (the replica, or the server while it was never reconciled)
+  const request = fetchBody.indexOf('this.$absData\n      .getLibrary(')
+  assert.ok(request > 0, 'fetch reads the library')
+  assert.ok(fetchBody.indexOf("dispatch('activateViewScope')") > 0 && fetchBody.indexOf("dispatch('activateViewScope')") < request, 'activation precedes the request')
   assert.match(fetchBody, /state\.viewStateLoaded && state\.viewScope/, 'a view is applied only with an account')
   assert.match(source, /if \(!state\.viewStateLoaded \|\| !state\.viewScope \|\| !state\.currentLibraryId\) return/, 'rememberTab needs an account')
   const activate = source.slice(source.indexOf('  activateViewScope({'), source.indexOf('  // Writes only after loading'))

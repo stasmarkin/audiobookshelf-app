@@ -52,6 +52,8 @@ internal class ServiceStopper(private val stopSelfResult: (Int) -> Boolean) {
 
   fun onStartCommand(startId: Int) {
     lastStartId = startId
+    // A stop the binding outlived (the app's activity holds the service) is undone by this start
+    isStopPending = false
   }
 
   /** Asks Android to stop for the latest seen start; false means a newer start is pending and the service stays. */

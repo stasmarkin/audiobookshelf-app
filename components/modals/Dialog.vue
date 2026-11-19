@@ -11,10 +11,13 @@
         <ul class="h-full w-full" role="listbox" aria-labelledby="listbox-label">
           <template v-for="item in itemsToShow">
             <slot :name="item.value" :item="item" :selected="item.value === selected">
-              <li :key="item.value" :ref="`item-${item.value}`" class="text-fg select-none relative cursor-pointer hover:bg-black-400" :class="selected === item.value ? 'bg-success bg-opacity-10 option-selected' : ''" :style="{ paddingTop: itemPaddingY, paddingBottom: itemPaddingY }" role="option" @click="clickedOption(item.value)">
-                <div class="relative flex items-center px-3">
+              <li :key="item.value" :ref="`item-${item.value}`" class="text-fg select-none relative cursor-pointer hover:bg-black-400" :class="selected === item.value ? 'bg-success bg-opacity-10 option-selected' : ''" :style="{ paddingTop: itemPaddingY, paddingBottom: itemPaddingY }" role="option" :aria-disabled="item.disabled ? 'true' : null" @click="selectItem(item)">
+                <div class="relative flex items-center px-3" :class="item.disabled ? 'opacity-50' : ''">
                   <span v-if="item.icon" class="material-symbols text-xl mr-2 text-fg text-opacity-80">{{ item.icon }}</span>
-                  <p class="font-normal block truncate text-base text-fg text-opacity-80">{{ item.text }}</p>
+                  <div class="min-w-0">
+                    <p class="font-normal block truncate text-base text-fg text-opacity-80">{{ item.text }}</p>
+                    <p v-if="item.subtext" class="block truncate text-xs text-fg-muted">{{ item.subtext }}</p>
+                  </div>
                 </div>
               </li>
             </slot>
@@ -79,6 +82,11 @@ export default {
   methods: {
     clickedOption(action) {
       this.$emit('action', action)
+    },
+    /** A disabled item (`disabled: true`, with its reason as `subtext`) is shown but does nothing. */
+    selectItem(item) {
+      if (item.disabled) return
+      this.clickedOption(item.value)
     },
     init() {
       if (this.selected && this.$refs[`item-${this.selected}`]?.[0]) {

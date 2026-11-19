@@ -1,0 +1,52 @@
+{
+ "id": "5448c89f-8d2f-40a2-b310-b53b53602982",
+ "ino": "1442012",
+ "oldLibraryItemId": null,
+ "libraryId": "ad4b6377-f8af-48be-b9d0-2e8fe044ddca",
+ "folderId": "eb22823f-9fbc-45d4-9b1f-c8d863ce39ed",
+ "path": "/podcasts/Synthetic Pod",
+ "relPath": "Synthetic Pod",
+ "isFile": false,
+ "mtimeMs": 1792076722739,
+ "ctimeMs": 1792076722739,
+ "birthtimeMs": 1792076722599,
+ "addedAt": 1792076738008,
+ "updatedAt": 1792076754857,
+ "isMissing": false,
+ "isInvalid": false,
+ "mediaType": "podcast",
+ "media": {
+  "id": "1593c145-e4ec-494e-a4bf-e1ff5d02bb8e",
+  "metadata": {
+   "title": "Synthetic Pod",
+   "author": "Pod Author",
+   "description": null,
+   "releaseDate": null,
+   "genres": [
+    "Tech"
+   ],
+   "feedUrl": null,
+   "imageUrl": null,
+   "itunesPageUrl": null,
+   "itunesId": null,
+   "itunesArtistId": null,
+   "explicit": false,
+   "language": "English",
+   "type": "episodic",
+   "titleIgnorePrefix": "Synthetic Pod"
+  },
+  "coverPath": null,
+  "tags": [
+   "daily"
+  ],
+  "numEpisodes": 3,
+  "autoDownloadEpisodes": false,
+  "autoDownloadSchedule": "0 * * * *",
+  "lastEpisodeCheck": null,
+  "maxEpisodesToKeep": 0,
+  "maxNewEpisodesToDownload": 3,
+  "size": 7326
+ },
+ "numFiles": 3,
+ "size": 7326
+}

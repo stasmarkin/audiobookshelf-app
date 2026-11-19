@@ -287,7 +287,7 @@ data class PodcastEpisode(
     val coverUri = if (libraryItem is LocalLibraryItem) {
       libraryItem.getCoverUri(ctx)
     } else {
-      (libraryItem as LibraryItem).getCoverUri()
+      (libraryItem as LibraryItem).getCoverUri(ctx)
     }
 
     val extras = Bundle()
