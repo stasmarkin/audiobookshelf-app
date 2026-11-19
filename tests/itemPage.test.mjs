@@ -255,6 +255,7 @@ async function itemPage({ id = 'li1', serverState = 'offline', activeServerConfi
     $strings: strings,
     $getString: (key) => key,
     $secondsToTimestamp: (s) => `${s}`,
+    $listeningSeconds: (s) => s,
     $eventBus: { $on() {}, $off() {}, $emit: (name, payload) => emitted.push([name, payload]) },
     $hapticsImpact: async () => {},
     $localStore: { setLastLibraryId() {} },
