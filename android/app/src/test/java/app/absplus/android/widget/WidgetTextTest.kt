@@ -32,4 +32,16 @@ class WidgetTextTest {
     assertNull(WidgetText.snapshot(1_000, 0))
     assertNull(WidgetText.snapshot(-1, 60_000))
   }
+
+  @Test fun timesAreListeningTimeAtTheSpeedAndTheBarIsTheShareOfTheBook() {
+    val atOne = WidgetText.snapshot(1_800_000, 3_600_000, 1f)!!
+    assertEquals(WidgetText.snapshot(1_800_000, 3_600_000), atOne)
+    val atTwo = WidgetText.snapshot(1_800_000, 3_600_000, 2f)!!
+    assertEquals("15:00", atTwo.elapsed)
+    assertEquals("-15:00", atTwo.remaining)
+    assertEquals(atOne.progress, atTwo.progress)
+    assertEquals("-40:00", WidgetText.snapshot(0, 3_600_000, 1.5f)!!.remaining)
+    listOf(0f, -1f, Float.NaN).forEach { assertEquals("$it", atOne, WidgetText.snapshot(1_800_000, 3_600_000, it)) }
+  }
 }
+

@@ -11,6 +11,7 @@ import app.absplus.android.MediaPlayerWidget
 import app.absplus.android.data.*
 import app.absplus.android.managers.DbManager
 import app.absplus.android.managers.PlaybackRestoreStore
+import app.absplus.android.media.readSavedPlaybackRate
 import app.absplus.android.player.PlayerNotificationService
 import app.absplus.android.updateAppWidget
 import app.absplus.android.widget.WidgetRenderer
@@ -273,7 +274,7 @@ object DeviceManager {
     val playbackSession = pns.getCurrentPlaybackSessionCopy() ?: deviceData.lastPlaybackSession
     pns.awaitingDisplay?.let { awaiting ->
       return WidgetRenderer.State(playbackSession, false, true, (awaiting.currentTime * 1000).toLong(),
-              (awaiting.duration * 1000).toLong().takeIf { it > 0 }, awaiting, pns.awaitingCover?.uri)
+              (awaiting.duration * 1000).toLong().takeIf { it > 0 }, awaiting, pns.awaitingCover?.uri, readSavedPlaybackRate(context) ?: 1f)
     }
     // A position-only redraw keeps the play state the player intends: a seek briefly buffers
     // (isPlaying=false), which the play-state events also ignore
@@ -283,7 +284,10 @@ object DeviceManager {
     // Progress snapshot for the widget (read only; never throws into the player)
     val positionMs = if (hasLiveSession) sampledPositionMs ?: runCatching { pns.getCurrentTime() }.getOrNull() else null
     val durationMs = if (hasLiveSession) runCatching { pns.getDuration() }.getOrNull()?.takeIf { it > 0 } else null
-    return widgetStateOf(playbackSession, isPlaying, showControls, positionMs, durationMs)
+    // Without a live player, the speed the user last chose
+    val speed = (if (hasLiveSession) runCatching { pns.currentPlayer.playbackParameters.speed }.getOrNull() else null)
+            ?: readSavedPlaybackRate(context) ?: 1f
+    return widgetStateOf(playbackSession, isPlaying, showControls, positionMs, durationMs, speed)
   }
 
   /**

@@ -21,7 +21,7 @@
         <p class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ displayAuthor }}</p>
         <p v-if="displaySortLine" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ displaySortLine }}</p>
         <p v-if="notAvailableOffline" class="not-offline-badge truncate text-warning" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ $strings.LabelNotAvailableOffline }}</p>
-        <p v-if="duration" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ $elapsedPretty(duration) }}</p>
+        <p v-if="duration" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">{{ $elapsedPretty($listeningSeconds(duration)) }}</p>
 
         <p v-if="numEpisodesIncomplete" class="truncate text-fg-muted" :style="{ fontSize: 0.7 * sizeMultiplier + 'rem' }">
           {{ $getString('LabelNumEpisodesIncomplete', [numEpisodes, numEpisodesIncomplete]) }}

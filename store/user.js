@@ -255,5 +255,9 @@ export const mutations = {
   setSettings(state, settings) {
     if (!settings) return
     state.settings = settings
+  },
+  // A speed changed outside the app UI (notification, Android Auto): native has already saved it, so only memory follows
+  setPlaybackRateSetting(state, rate) {
+    state.settings = { ...state.settings, playbackRate: rate }
   }
 }

@@ -23,7 +23,7 @@
     <!-- user progress card -->
     <div v-if="progressPercent > 0" class="px-4 py-2 bg-primary text-sm font-semibold rounded-md text-fg mt-4 relative" :class="resettingProgress ? 'opacity-25' : ''">
       <p class="leading-6">{{ $strings.LabelYourProgress }}: {{ Math.round(progressPercent * 100) }}%</p>
-      <p v-if="progressPercent < 1" class="text-fg-muted text-xs">{{ $getString('LabelTimeRemaining', [$elapsedPretty(userTimeRemaining)]) }}</p>
+      <p v-if="progressPercent < 1" class="text-fg-muted text-xs">{{ $getString('LabelTimeRemaining', [$elapsedPretty($listeningSeconds(userTimeRemaining))]) }}</p>
       <p v-else class="text-fg-muted text-xs">{{ $strings.LabelFinished }} {{ $formatDate(userProgressFinishedAt) }}</p>
     </div>
 
@@ -209,7 +209,7 @@ export default {
       return this.episode.episodeType
     },
     duration() {
-      return this.$secondsToTimestamp(this.episode.duration)
+      return this.$secondsToTimestamp(Math.round(this.$listeningSeconds(this.episode.duration)))
     },
     coverUrl() {
       if (this.isLocal) {
@@ -262,10 +262,10 @@ export default {
     },
     timeRemaining() {
       if (this.playerIsPlaying) return 'Playing'
-      if (!this.progressPercent) return this.$elapsedPretty(this.episode.duration)
+      if (!this.progressPercent) return this.$elapsedPretty(this.$listeningSeconds(this.episode.duration))
       if (this.userIsFinished) return 'Finished'
       const remaining = Math.floor(this.userItemProgress.duration - this.userItemProgress.currentTime)
-      return `${this.$elapsedPretty(remaining)} left`
+      return `${this.$elapsedPretty(this.$listeningSeconds(remaining))} left`
     },
     publishedAt() {
       return this.episode.publishedAt

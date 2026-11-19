@@ -19,7 +19,7 @@
         <p v-if="evt.num" class="text-sm text-fg-muted italic px-1">+{{ evt.num }}</p>
 
         <div class="flex-grow" />
-        <p class="text-base text-fg" @click="clickPlaybackTime(evt.currentTime)">{{ $secondsToTimestampFull(evt.currentTime) }}</p>
+        <p class="text-base text-fg" @click="clickPlaybackTime(evt.currentTime)">{{ $secondsToTimestampFull(Math.round($listeningSeconds(evt.currentTime))) }}</p>
       </div>
     </div>
   </div>

@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.absplus.android.data.*
 import app.absplus.android.device.DeviceManager
 import app.absplus.android.managers.DbManager
+import com.google.android.exoplayer2.PlaybackParameters
 import com.google.android.exoplayer2.Player
 import java.lang.reflect.Proxy
 import org.junit.Assert.*
@@ -29,6 +30,7 @@ class ExternalNavigationRoutesTest {
   private val settings get() = DeviceManager.deviceData.deviceSettings!!
   private val session get() = service.currentPlaybackSession!!
   private var keyTime = 500L
+  private var speed = 1f
 
   @Before fun setup() {
     DbManager.initialize(ApplicationProvider.getApplicationContext<Context>())
@@ -46,6 +48,7 @@ class ExternalNavigationRoutesTest {
         "getCurrentMediaItemIndex" -> index
         "getCurrentPosition" -> position
         "getPlayWhenReady", "isPlaying" -> false
+        "getPlaybackParameters" -> PlaybackParameters(speed)
         "seekTo" -> {
           if (args!!.size == 2) { index = args[0] as Int; position = args[1] as Long }
           else position = args[0] as Long
@@ -254,4 +257,37 @@ class ExternalNavigationRoutesTest {
     // The on-screen explicit seek remains independent of the external mode.
     service.seekPlayer(125_000); assertEquals(1 to 35_000L, seeks.last())
   }
+
+  @Test fun everyTimeStepRouteCoversTheListeningStepAtTheCurrentSpeed() {
+    settings.jumpForwardTime = 10
+    settings.jumpBackwardsTime = 10
+    speed = 2f
+    val forward = listOf<() -> Unit>({ callback.onFastForward() }, { press(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) },
+      { callback.onCustomAction(CUSTOM_ACTION_JUMP_FORWARD, null) }, { service.notificationControls(service.currentPlayer).seekForward() },
+      { callback.onSkipToNext() }, { press(KeyEvent.KEYCODE_MEDIA_NEXT) }, { callback.onCustomAction(CUSTOM_ACTION_SKIP_FORWARD, null) })
+    forward.forEachIndexed { i, command -> position = 50_000; command(); assertEquals("forward $i", 70_000L, position) }
+    val backward = listOf<() -> Unit>({ callback.onRewind() }, { press(KeyEvent.KEYCODE_MEDIA_REWIND) },
+      { callback.onCustomAction(CUSTOM_ACTION_JUMP_BACKWARD, null) }, { service.notificationControls(service.currentPlayer).seekBack() },
+      { callback.onSkipToPrevious() }, { press(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }, { callback.onCustomAction(CUSTOM_ACTION_SKIP_BACKWARD, null) })
+    backward.forEachIndexed { i, command -> position = 50_000; command(); assertEquals("backward $i", 30_000L, position) }
+    // The label the system may show stays the step the user set
+    assertEquals(10_000L, service.notificationControls(service.currentPlayer).seekForwardIncrement)
+  }
+
+  @Test fun theSpeedChangesBoundaryNavigationOnlyWhereItFallsBackToTime() {
+    settings.externalMediaNavigation = "chapters"; chapters()
+    speed = 2f
+    callback.onSkipToNext(); assertEquals(60_000, position)
+    session.chapters = emptyList(); position = 50_000
+    callback.onSkipToNext(); assertEquals(70_000, position)
+  }
+
+  @Test fun theAppsJumpButtonsAreListeningSecondsAndExplicitSeeksAreNot() {
+    speed = 1.5f
+    service.seekForward(service.listeningToMediaMs(20_000)); assertEquals(80_000, position)
+    service.seekBackward(service.listeningToMediaMs(20_000)); assertEquals(50_000, position)
+    service.seekForward(20_000); assertEquals(70_000, position)
+    service.seekPlayer(10_000); assertEquals(10_000, position)
+  }
 }
+

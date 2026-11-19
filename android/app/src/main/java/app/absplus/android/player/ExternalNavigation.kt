@@ -1,6 +1,7 @@
 package app.absplus.android.player
 
 import android.view.KeyEvent
+import kotlin.math.roundToLong
 import app.absplus.android.data.PlaybackSession
 
 /** External Next/Previous stay inside one playback session, never advancing its book/podcast queue. */
@@ -52,6 +53,10 @@ internal object ExternalNavigation {
       if (now >= last) null else (now + forwardMs.coerceAtLeast(0).coerceAtMost(duration)).coerceAtMost(last)
     } else (now - backwardMs.coerceAtLeast(0).coerceAtMost(duration)).coerceAtLeast(0)
   }
+
+  /** A step the user set in listening time, in book time at [speed]: at 2x, back 30 s re-plays 30 s, i.e. 60 s of the book. */
+  fun scaleStep(ms: Long, speed: Float): Long =
+    if (!speed.isFinite() || speed <= 0f) ms else (ms * speed.toDouble()).roundToLong()
 }
 
 /** Consume both halves of navigation keys, acting once. Repeat DOWNs and duplicate intents do not seek. */

@@ -375,16 +375,16 @@ class AbsAudioPlayer : Plugin() {
   fun seekForward(call: PluginCall) {
     val amount:Int = call.getInt("value", 0) ?: 0
     Handler(Looper.getMainLooper()).post {
-      playerNotificationService.seekForward(amount * 1000L) // convert to ms
+      playerNotificationService.seekForward(playerNotificationService.listeningToMediaMs(amount * 1000L))
       call.resolve()
     }
   }
 
   @PluginMethod
   fun seekBackward(call: PluginCall) {
-    val amount:Int = call.getInt("value", 0) ?: 0 // Value in seconds
+    val amount:Int = call.getInt("value", 0) ?: 0 // Seconds of listening time
     Handler(Looper.getMainLooper()).post {
-      playerNotificationService.seekBackward(amount * 1000L) // convert to ms
+      playerNotificationService.seekBackward(playerNotificationService.listeningToMediaMs(amount * 1000L))
       call.resolve()
     }
   }

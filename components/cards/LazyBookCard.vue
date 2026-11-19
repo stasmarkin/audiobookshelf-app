@@ -293,7 +293,7 @@ export default {
       if (this.orderBy === 'mtimeMs') return 'Modified ' + this.$formatDate(this._libraryItem.mtimeMs)
       if (this.orderBy === 'birthtimeMs') return 'Born ' + this.$formatDate(this._libraryItem.birthtimeMs)
       if (this.orderBy === 'addedAt') return this.$getString('LabelAddedDate', [this.$formatDate(this._libraryItem.addedAt)])
-      if (this.orderBy === 'media.duration') return 'Duration: ' + this.$elapsedPrettyExtended(this.media.duration, false)
+      if (this.orderBy === 'media.duration') return 'Duration: ' + this.$elapsedPrettyExtended(this.$listeningSeconds(this.media.duration), false)
       if (this.orderBy === 'size') return 'Size: ' + this.$bytesPretty(this._libraryItem.size)
       if (this.orderBy === 'media.numTracks') return `${this.numEpisodes} Episodes`
       return null

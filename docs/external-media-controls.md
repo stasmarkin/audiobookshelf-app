@@ -4,13 +4,13 @@ Android Settings → Playback → **Bluetooth / external media controls** select
 
 | Mode | Next | Previous |
 | --- | --- | --- |
-| Skip by time (default) | Configured forward interval | Configured backward interval |
+| Skip by time (default) | Configured forward interval, in listening time | Configured backward interval, in listening time |
 | Navigate chapters | Next audiobook chapter timestamp | Restart current chapter after 4 seconds; otherwise previous chapter |
 | Navigate audio files | Start of adjacent next audio file | Start of adjacent previous file; restart at the first file |
 
 The setting is device-local and persists through the existing device-settings database. Old records, missing values and unknown modes use time skips. Chapter navigation uses the session's chapter metadata, including timestamps inside one file and across files. It does not manufacture chapters from file boundaries. Missing, overlapping, unsorted or invalid chapter metadata falls back to time skips. Podcasts use time skips in chapter mode. File navigation requires a matching original-file player timeline; transcoded or inconsistent timelines fall back to time skips.
 
-Next at the last chapter/file does nothing. Navigation never explicitly advances the book/podcast queue or marks an item finished. Time skips clamp before the end; ordinary playback completion and continuous playback remain unchanged. Navigation preserves paused state. Fast Forward, Rewind and their notification actions always use the current configured time intervals. On-screen chapter buttons and explicit seeks remain independent.
+Next at the last chapter/file does nothing. Navigation never explicitly advances the book/podcast queue or marks an item finished. Time skips clamp before the end; ordinary playback completion and continuous playback remain unchanged. Navigation preserves paused state. Fast Forward, Rewind and their notification actions always use the current configured time intervals. Every time interval is listening time: it covers the interval multiplied by the current playback speed of the book (at 2×, a 30-second skip moves 60 seconds), see [speed-aware time](speed-aware-time.md). On-screen chapter buttons and explicit seeks remain independent.
 
 `ExternalNavigation` owns the destination decision. `MediaSessionCallback` sends hardware keys, transport commands and custom Skip actions through the same service handler. Hardware Next/Previous act at key-up; Fast Forward/Rewind act at key-down. Both halves are consumed; repeats, canceled events and duplicate deliveries of the same event are ignored. Distinct transport requests have no event identity and remain distinct commands, and so do the home widget's key events, which carry no timestamps. `notificationControls` delegates ordinary player operations while routing notification FF/RW through current settings.
 

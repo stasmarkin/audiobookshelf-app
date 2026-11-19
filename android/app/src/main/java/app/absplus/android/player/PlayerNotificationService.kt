@@ -2535,7 +2535,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     if (!this::currentPlayer.isInitialized || currentPlayer.mediaItemCount == 0) return
     val target = ExternalNavigation.target(mode, forward, session, getCurrentTime(),
       currentPlayer.currentMediaItemIndex, currentPlayer.mediaItemCount,
-      deviceSettings.jumpForwardTimeMs, deviceSettings.jumpBackwardsTimeMs) ?: return
+      listeningToMediaMs(deviceSettings.jumpForwardTimeMs), listeningToMediaMs(deviceSettings.jumpBackwardsTimeMs)) ?: return
     DLog.d(tag, "External navigation mode=${ExternalNavigation.normalize(mode)} forward=$forward target=$target")
     // Use the established absolute-time seek, including its multi-file mapping and progress callbacks.
     // Never use seekToNext(): at the end it can leave the current book/episode.
@@ -2560,6 +2560,12 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     override fun getSeekBackIncrement(): Long = deviceSettings.jumpBackwardsTimeMs
   }
 
+  /** Book milliseconds for a user step given in listening time, at the current playback speed. */
+  fun listeningToMediaMs(ms: Long): Long {
+    if (!this::currentPlayer.isInitialized) return ms
+    return ExternalNavigation.scaleStep(ms, currentPlayer.playbackParameters.speed)
+  }
+
   fun seekForward(amount: Long) {
     seekPlayer(getCurrentTime() + amount)
   }
@@ -2570,7 +2576,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
 
   fun setPlaybackSpeed(speed: Float) {
     mediaManager.userSettingsPlaybackRate = speed
+    // The next playlist item starts at this speed, not the one this item was prepared with
+    initialPlaybackRate = speed
     currentPlayer.setPlaybackSpeed(speed)
+    // The widget's elapsed and remaining times are drawn at this speed
+    DeviceManager.widgetUpdater?.onPlayerChanged(this)
 
     // Refresh Android Auto actions
     mediaProgressSyncer.currentPlaybackSession?.let { setMediaSessionConnectorCustomActions(it) }

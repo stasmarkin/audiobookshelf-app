@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 
 // Load the Nuxt ES module without changing this project's CommonJS package type.
 const source = await readFile(new URL('../utils/playbackRate.js', import.meta.url), 'utf8')
-const { normalizePlaybackRate, formatPlaybackRate } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+const { normalizePlaybackRate, formatPlaybackRate, listeningSeconds } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
 // Source files are read LF-normalized, so a Windows (core.autocrlf) checkout and CI see the same text
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8').then((s) => s.replace(/\r\n/g, '\n'))
 
@@ -48,4 +48,74 @@ test('the player normalizes every native speed and shows the concise label', asy
   const reattach = player.match(/async reattachNativePlayback\(\) \{[\s\S]*?\n {4}\}/)[0]
   assert.match(reattach, /normalizePlaybackRate\(state\.playbackRate\)/)
   assert.doesNotMatch(reattach, /Number\(state\.playbackRate\)/)
+})
+
+test('book time is shown as listening time at the playback speed', () => {
+  assert.equal(listeningSeconds(3600, 1), 3600)
+  assert.equal(listeningSeconds(3600, 2), 1800)
+  assert.equal(listeningSeconds(5400, 1.5), 3600)
+  assert.equal(listeningSeconds(3600, asNativeFloat(1.5)), 2400)
+  for (const rate of [undefined, null, 0, -1, NaN, 'abc', 0.004]) assert.equal(listeningSeconds(3600, rate), 3600, `rate ${rate}`)
+  for (const seconds of [undefined, null]) assert.equal(listeningSeconds(seconds, 2), seconds, `seconds ${seconds}`)
+  assert.ok(Number.isNaN(listeningSeconds(NaN, 2)))
+})
+
+test('book durations, remaining times and positions outside the player are shown at the playback speed', async () => {
+  const wrapped = {
+    '../components/cards/LazyBookCard.vue': [/\$elapsedPrettyExtended\(this\.\$listeningSeconds\(this\.media\.duration\), false\)/],
+    '../components/cards/LazyListBookCard.vue': [/\$elapsedPretty\(\$listeningSeconds\(duration\)\)/],
+    '../components/tables/collection/BookTableRow.vue': [/\$elapsedPretty\(this\.\$listeningSeconds\(this\.media\.duration\)\)/],
+    '../components/tables/collection/CollectionBooksTable.vue': [/\$elapsedPrettyExtended\(this\.\$listeningSeconds\(this\.totalDuration\)\)/],
+    '../components/tables/playlist/PlaylistItemsTable.vue': [/\$elapsedPrettyExtended\(this\.\$listeningSeconds\(this\.totalDuration\)\)/],
+    '../components/tables/playlist/ItemTableRow.vue': [/\$elapsedPretty\(this\.\$listeningSeconds\(this\.episode\.duration\)\)/, /\$elapsedPretty\(this\.\$listeningSeconds\(this\.media\.duration\)\)/],
+    '../components/tables/ChaptersTable.vue': [/\$secondsToTimestamp\(Math\.round\(\$listeningSeconds\(chapter\.start\)\)\)/, /\$secondsToTimestamp\(Math\.round\(\$listeningSeconds\(Math\.max\(0, chapter\.end - chapter\.start\)\)\)\)/],
+    '../pages/item/_id/index.vue': [/\$elapsedPretty\(\$listeningSeconds\(userTimeRemaining\)\)/, /\$elapsedPretty\(\$listeningSeconds\(duration\)\)/, /\$secondsToTimestamp\(Math\.round\(this\.\$listeningSeconds\(startTime\)\)\)/],
+    '../pages/media/_id/history.vue': [/\$secondsToTimestampFull\(Math\.round\(\$listeningSeconds\(evt\.currentTime\)\)\)/]
+  }
+  const episodeTime = [
+    /\$secondsToTimestamp\(Math\.round\(this\.\$listeningSeconds\(this\.episode\.duration\)\)\)/,
+    /\$elapsedPretty\(this\.\$listeningSeconds\(this\.episode\.duration\)\)/,
+    /\$elapsedPretty\(this\.\$listeningSeconds\(remaining\)\)\} left/
+  ]
+  wrapped['../components/tables/podcast/EpisodeRow.vue'] = episodeTime
+  wrapped['../components/tables/podcast/LatestEpisodeRow.vue'] = episodeTime
+  wrapped['../pages/item/_id/_episode/index.vue'] = [...episodeTime, /\$elapsedPretty\(\$listeningSeconds\(userTimeRemaining\)\)/]
+  for (const [path, patterns] of Object.entries(wrapped)) {
+    const source = await read(path)
+    for (const pattern of patterns) assert.match(source, pattern, path)
+  }
+  // The history row still seeks to the book position, not the scaled one
+  assert.match(await read('../pages/media/_id/history.vue'), /@click="clickPlaybackTime\(evt\.currentTime\)"/)
+  // File durations, real-time sleep remaining and listening statistics are not book time at a speed
+  for (const path of ['../components/tables/TracksTable.vue', '../components/modals/SleepTimerModal.vue', '../pages/stats.vue']) {
+    assert.doesNotMatch(await read(path), /\$listeningSeconds/, path)
+  }
+})
+
+test('a speed changed outside the app UI reaches the store the screens read', async () => {
+  const player = await read('../components/app/AudioPlayer.vue')
+  const speedChanged = player.match(/onPlaybackSpeedChanged\(data\) \{[\s\S]*?\n {4}\}/)[0]
+  assert.match(speedChanged, /if \(rate === null\) return[\s\S]*\$store\.commit\('user\/setPlaybackRateSetting', rate\)/)
+  // The speed modal and bookmarks read the container's copy
+  assert.match(speedChanged, /\$emit\('nativeSpeedChanged', rate\)/)
+  assert.match(await read('../components/app/AudioPlayerContainer.vue'), /@nativeSpeedChanged="\(rate\) => \(playbackSpeed = rate\)"/)
+
+  const store = await read('../store/user.js')
+  const mutation = store.match(/setPlaybackRateSetting\(state, rate\) \{[\s\S]*?\n {2}\}/)[0]
+  const setPlaybackRateSetting = new Function(`return function ${mutation}`)()
+  const state = { settings: { playbackRate: 1, mobileOrderBy: 'addedAt' } }
+  const before = state.settings
+  setPlaybackRateSetting(state, 1.5)
+  assert.deepEqual(state.settings, { playbackRate: 1.5, mobileOrderBy: 'addedAt' })
+  assert.notEqual(state.settings, before, 'a new settings object keeps the getter reactive')
+  // Memory only: the native side already saved it, and a full save could overwrite settings not loaded yet
+  assert.doesNotMatch(mutation, /localStore|\$eventBus/)
+})
+
+test('the screens read the user speed through one helper that works without a component store', async () => {
+  const init = await read('../plugins/init.client.js')
+  assert.match(init, /import \{ listeningSeconds \} from '@\/utils\/playbackRate'/)
+  const helper = init.match(/Vue\.prototype\.\$listeningSeconds = function \(seconds\) \{[\s\S]*?\n\}/)[0]
+  assert.match(helper, /this\.\$store \|\| this\.\$nuxt\.\$store/)
+  assert.match(helper, /getUserSetting'\]\('playbackRate'\)/)
 })

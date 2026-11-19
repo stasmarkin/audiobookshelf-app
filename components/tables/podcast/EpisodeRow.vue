@@ -148,7 +148,7 @@ export default {
       return this.episode.episodeType
     },
     duration() {
-      return this.$secondsToTimestamp(this.episode.duration)
+      return this.$secondsToTimestamp(Math.round(this.$listeningSeconds(this.episode.duration)))
     },
     isStreaming() {
       return this.$store.getters['getIsMediaStreaming'](this.libraryItemId, this.episode.id)
@@ -186,10 +186,10 @@ export default {
     },
     timeRemaining() {
       if (this.streamIsPlaying) return 'Playing'
-      if (!this.itemProgressPercent) return this.$elapsedPretty(this.episode.duration)
+      if (!this.itemProgressPercent) return this.$elapsedPretty(this.$listeningSeconds(this.episode.duration))
       if (this.userIsFinished) return 'Finished'
       var remaining = Math.floor(this.itemProgress.duration - this.itemProgress.currentTime)
-      return `${this.$elapsedPretty(remaining)} left`
+      return `${this.$elapsedPretty(this.$listeningSeconds(remaining))} left`
     },
     publishedAt() {
       return this.episode.publishedAt

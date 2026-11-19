@@ -216,6 +216,18 @@ internal class SnapshotCache(
   }
 }
 
+/** The playback speed the user last chose, as the app saved it in its user settings; null when it was never saved. */
+fun readSavedPlaybackRate(context: Context): Float? {
+  val userSettingsPref = context.getSharedPreferences("CapacitorStorage", Activity.MODE_PRIVATE)?.getString("userSettings", null) ?: return null
+  return try {
+    val userSettings = JSObject(userSettingsPref)
+    if (userSettings.has("playbackRate")) userSettings.getDouble("playbackRate").toFloat() else null
+  } catch (je: JSONException) {
+    Log.e("MediaManager", "Failed to parse userSettings JSON ${je.localizedMessage}")
+    null
+  }
+}
+
 class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private val catalog: AutoCatalog = AutoCatalog.create(ctx)) {
   val tag = "MediaManager"
 
@@ -528,20 +540,9 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
       return userSettingsPlaybackRate ?: 1f
     }
 
-    val sharedPrefs = ctx.getSharedPreferences("CapacitorStorage", Activity.MODE_PRIVATE)
-    if (sharedPrefs != null) {
-      val userSettingsPref = sharedPrefs.getString("userSettings", null)
-      if (userSettingsPref != null) {
-        try {
-          val userSettings = JSObject(userSettingsPref)
-          if (userSettings.has("playbackRate")) {
-            userSettingsPlaybackRate = userSettings.getDouble("playbackRate").toFloat()
-            return userSettingsPlaybackRate ?: 1f
-          }
-        } catch(je:JSONException) {
-          Log.e(tag, "Failed to parse userSettings JSON ${je.localizedMessage}")
-        }
-      }
+    readSavedPlaybackRate(ctx)?.let {
+      userSettingsPlaybackRate = it
+      return it
     }
     return 1f
   }
@@ -569,6 +570,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context, private
         val userSettings = JSONObject()
         userSettings.put("playbackRate", newRate.toString().toDouble())
         sharedPrefEditor.putString("userSettings", userSettings.toString())
+        sharedPrefEditor.apply()
         userSettingsPlaybackRate = newRate
         Log.d(tag, "Created and saved userSettings JSON from Android Auto with playbackRate=$newRate")
       }

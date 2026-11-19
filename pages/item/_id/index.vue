@@ -77,7 +77,7 @@
 
           <div v-if="!isPodcast && progressPercent > 0" class="detail-progress px-4 py-2 bg-primary text-sm font-semibold rounded-md text-fg mt-4 text-center">
             <p>{{ $strings.LabelYourProgress }}: {{ Math.round(progressPercent * 100) }}%</p>
-            <p v-if="!useEBookProgress && !userIsFinished" class="text-fg-muted text-xs">{{ $getString('LabelTimeRemaining', [$elapsedPretty(userTimeRemaining)]) }}</p>
+            <p v-if="!useEBookProgress && !userIsFinished" class="text-fg-muted text-xs">{{ $getString('LabelTimeRemaining', [$elapsedPretty($listeningSeconds(userTimeRemaining))]) }}</p>
             <p v-else-if="userIsFinished" class="text-fg-muted text-xs">{{ $strings.LabelFinished }} {{ $formatDate(userProgressFinishedAt) }}</p>
           </div>
         </div>
@@ -116,7 +116,7 @@
           </div>
 
           <div v-if="numTracks" class="text-fg-muted uppercase text-sm">{{ $strings.LabelDuration }}</div>
-          <div v-if="numTracks" class="text-sm">{{ $elapsedPretty(duration) }}</div>
+          <div v-if="numTracks" class="text-sm">{{ $elapsedPretty($listeningSeconds(duration)) }}</div>
 
           <div v-if="narrators?.length" class="text-fg-muted uppercase text-sm">{{ $strings.LabelNarrators }}</div>
           <div v-if="narrators?.length" class="text-sm">
@@ -691,7 +691,7 @@ export default {
         if (startTime !== null && startTime !== undefined && !this.$store.getters['getIsMediaStreaming'](libraryItemId, null)) {
           const { value } = await Dialog.confirm({
             title: this.$strings.HeaderConfirm,
-            message: this.$getString('MessageConfirmPlaybackTime', [this.title, this.$secondsToTimestamp(startTime)])
+            message: this.$getString('MessageConfirmPlaybackTime', [this.title, this.$secondsToTimestamp(Math.round(this.$listeningSeconds(startTime)))])
           })
           if (!value) return
         }

@@ -14,3 +14,11 @@ export function formatPlaybackRate(value) {
   const rate = normalizePlaybackRate(value)
   return `${rate === null ? 1 : rate}x`
 }
+
+// Book time as it is heard at this speed (1 hour of a book at 2x is 30 minutes of listening). An invalid speed is 1x
+export function listeningSeconds(seconds, rate) {
+  const speed = normalizePlaybackRate(rate)
+  // A positive speed under 0.005 rounds to 0
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || !speed) return seconds
+  return seconds / speed
+}

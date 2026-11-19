@@ -46,7 +46,7 @@ export default {
       return _total
     },
     totalDurationPretty() {
-      return this.$elapsedPrettyExtended(this.totalDuration)
+      return this.$elapsedPrettyExtended(this.$listeningSeconds(this.totalDuration))
     }
   },
   methods: {
