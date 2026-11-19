@@ -259,6 +259,10 @@ const TRANSPORT_BANK = Object.freeze({ 'justify-content': 'center', gap: `${DECK
 const PRIMARY_IN_BANK = Object.freeze({ margin: '0', top: `-${DECK.primaryLift}px` })
 const LONG_JUMPS_BANK = Object.freeze({ gap: `${DECK.transport.gap / 2}px` })
 const LONG_JUMPS_KEY = Object.freeze({ flex: `0 1 ${DECK.transport.width}px`, 'min-width': '0' })
+// With both optional keys (queue and history) the secondary row holds six items, wider than a 360dp screen at full size:
+// the keys shrink to share it and the readouts drop their minimum width
+const DENSE_UTILITY_KEY = Object.freeze({ flex: `0 1 ${DECK.utility.width}px`, 'min-width': '0' })
+const DENSE_READOUT = Object.freeze({ 'min-width': '0', padding: '0 6px' })
 const TRANSPORT_SECTION = Object.freeze({ bottom: `${DECK.seam.base - DECK.seam.drop}px`, 'padding-bottom': `${DECK.seam.drop}px` })
 // The utility keys sit centered in the section under the seam (the odd px above them): no padding, the row's own offset
 const UTILITY_SECTION_DEPTH = DECK.seam.base - DECK.seam.drop
@@ -853,6 +857,9 @@ const EQUIPMENT_RULES = [
   ['.fullscreen #playerContent .utility-row', UTILITY_ROW],
   ['.fullscreen #playerContent .speed-readout', READOUT_BOX],
   ['.fullscreen #playerContent .sleep-display', READOUT_BOX],
+  ['#playerContent .utility-bank-dense .utility-key', DENSE_UTILITY_KEY],
+  ['.fullscreen #playerContent .utility-bank-dense .speed-readout', DENSE_READOUT],
+  ['.fullscreen #playerContent .utility-bank-dense .sleep-display', DENSE_READOUT],
   // Top chrome (finishing pass): collapse, cast and overflow are utility-family keys on one line; the playback method is a
   // recessed green display between them
   ['#streamContainer.fullscreen .chrome-key', CHROME_KEY],

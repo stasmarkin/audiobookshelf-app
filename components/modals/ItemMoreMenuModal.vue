@@ -292,6 +292,8 @@ export default {
     },
     mediaId() {
       if (this.isPodcast) return null
+      // The journal of a downloaded book lives under its server id, also while that server is not connected
+      if (this.isLocal) return this.libraryItem?.libraryItemId || this.localLibraryItemId
       return this.serverLibraryItemId || this.localLibraryItemId
     }
   },

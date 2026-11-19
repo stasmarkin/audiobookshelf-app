@@ -327,6 +327,12 @@ class DbManager {
   fun getMediaItemHistory(id: String): MediaItemHistory? {
     return Paper.book("mediaItemHistory").read(id)
   }
+  fun removeMediaItemHistory(id: String) {
+    Paper.book("mediaItemHistory").delete(id)
+  }
+  fun hasMediaItemHistory(id: String): Boolean {
+    return Paper.book("mediaItemHistory").contains(id)
+  }
 
   fun savePlaybackSession(playbackSession: PlaybackSession) {
     synchronized(playbackSessionLock) { Paper.book("playbackSession").write(playbackSession.id, playbackSession) }

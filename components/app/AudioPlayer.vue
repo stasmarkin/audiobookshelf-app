@@ -67,7 +67,7 @@
       <!-- Faceplate console plate around the transport and utility banks: decorative, never a touch target -->
       <div v-if="faceplateHooks.plates.console" class="player-plate player-plate-console" aria-hidden="true" />
       <!-- Top controls bar - fullscreen only: bookmarks, speed, sleep timer, chapters -->
-      <div v-if="showFullscreen" class="utility-row absolute bottom-4 left-0 right-0 w-full pb-4 pt-2 mx-auto px-6" style="max-width: 414px">
+      <div v-if="showFullscreen" class="utility-row absolute bottom-4 left-0 right-0 w-full pb-4 pt-2 mx-auto" :class="denseUtilityRow ? 'utility-bank-dense px-2' : 'px-6'" style="max-width: 414px">
         <div class="flex items-center justify-between pointer-events-auto">
           <!-- Optional queue icon: list glyph with a bordered "Q" badge, matches the chapters icon style -->
           <div v-if="playerSettings.showQueueIcon" class="player-key utility-key queue-key relative cursor-pointer" @click="$emit('showQueue')">
@@ -79,6 +79,7 @@
           <span v-if="!isPodcast && !awaitingDisplay && (serverLibraryItemId || bookmarkable)" class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="{ fill: bookmarks.length }" @click="$emit('showBookmarks')">bookmark</span>
           <!-- hidden for podcasts but still using this as a placeholder -->
           <span v-else class="material-symbols text-3xl text-white text-opacity-0">bookmark</span>
+          <span v-if="playerSettings.showHistoryIcon && historyAvailable" class="player-key utility-key history-key material-symbols text-3xl text-fg-muted cursor-pointer" @click.stop="openHistory">history</span>
 
           <span class="speed-readout font-mono text-fg-muted cursor-pointer" style="font-size: 1.35rem" @click="$emit('selectPlaybackSpeed')">{{ playbackRateLabel }}</span>
           <!-- Sleep key: the wrapper is the key (flex, so it is exactly the icon's box); the icon is its legend -->
@@ -216,6 +217,7 @@ export default {
         scaleElapsedTimeBySpeed: true,
         lockUi: false,
         showQueueIcon: false,
+        showHistoryIcon: false,
         updateEveryMinute: false
       },
       isLoading: false,
@@ -279,11 +281,19 @@ export default {
     coverChrome() {
       return coverPresentation.coverColorPresentation(this.presentationTheme, { rgb: this.coverRgb, isLight: this.coverBgIsLight })
     },
+    // History is Android-only and books-only (the journal is native, podcasts are not covered)
+    historyAvailable() {
+      // The history is the open session's, not the awaited book's
+      return this.$platform !== 'ios' && !this.isPodcast && !!this.mediaId && !this.awaitingDisplay
+    },
+    // Six items in the secondary row only fit a narrow screen when they may shrink (theme/presets.js)
+    denseUtilityRow() {
+      return this.playerSettings.showQueueIcon && this.playerSettings.showHistoryIcon && this.historyAvailable
+    },
     menuItems() {
       const items = []
       // TODO: Implement on iOS
-      // The history is the open session's, not the awaited book's
-      if (this.$platform !== 'ios' && !this.isPodcast && this.mediaId && !this.awaitingDisplay) {
+      if (this.historyAvailable) {
         items.push({
           text: this.$strings.ButtonHistory,
           value: 'history',
@@ -306,6 +316,15 @@ export default {
             value: 'show_queue_icon',
             icon: this.playerSettings.showQueueIcon ? 'check_box' : 'check_box_outline_blank'
           },
+          ...(this.historyAvailable
+            ? [
+                {
+                  text: this.playerSettings.showHistoryIcon ? this.$strings.LabelHideHistoryIcon : this.$strings.LabelShowHistoryIcon,
+                  value: 'show_history_icon',
+                  icon: this.playerSettings.showHistoryIcon ? 'check_box' : 'check_box_outline_blank'
+                }
+              ]
+            : []),
           {
             text: this.$strings.LabelTotalTrack,
             value: 'total_track',
@@ -985,17 +1004,23 @@ export default {
       this.updateTimestamp()
       this.updateTrack()
     },
+    openHistory() {
+      this.$router.push(`/media/${this.mediaId}/history?title=${encodeURIComponent(this.title)}`)
+      this.showFullscreen = false
+    },
     async clickMenuAction(action) {
       await this.$hapticsImpact()
       this.showMoreMenuDialog = false
       this.$nextTick(() => {
         if (action === 'history') {
-          this.$router.push(`/media/${this.mediaId}/history?title=${this.title}`)
-          this.showFullscreen = false
+          this.openHistory()
         } else if (action === 'queue') {
           this.$emit('showQueue')
         } else if (action === 'show_queue_icon') {
           this.playerSettings.showQueueIcon = !this.playerSettings.showQueueIcon
+          this.savePlayerSettings()
+        } else if (action === 'show_history_icon') {
+          this.playerSettings.showHistoryIcon = !this.playerSettings.showHistoryIcon
           this.savePlayerSettings()
         } else if (action === 'scale_elapsed_time') {
           this.playerSettings.scaleElapsedTimeBySpeed = !this.playerSettings.scaleElapsedTimeBySpeed
@@ -1076,6 +1101,7 @@ export default {
         this.playerSettings.lockUi = !!savedPlayerSettings.lockUi
         this.playerSettings.scaleElapsedTimeBySpeed = !!savedPlayerSettings.scaleElapsedTimeBySpeed
         this.playerSettings.showQueueIcon = !!savedPlayerSettings.showQueueIcon
+        this.playerSettings.showHistoryIcon = !!savedPlayerSettings.showHistoryIcon
         this.playerSettings.updateEveryMinute = !!savedPlayerSettings.updateEveryMinute
       }
     },

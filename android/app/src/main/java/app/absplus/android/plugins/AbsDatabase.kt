@@ -606,8 +606,8 @@ class AbsDatabase : Plugin() {
     val mediaId = call.getString("mediaId") ?: ""
 
     GlobalScope.launch(Dispatchers.IO) {
-      val mediaItemHistory = DeviceManager.dbManager.getMediaItemHistory(mediaId)
-      if (mediaItemHistory == null) {
+      val mediaItemHistory = MediaEventManager.filterForRead(DeviceManager.dbManager.getMediaItemHistory(mediaId), System.currentTimeMillis())
+      if (mediaItemHistory == null || mediaItemHistory.events.isEmpty()) {
         call.resolve()
       } else {
         call.resolve(JSObject(jacksonMapper.writeValueAsString(mediaItemHistory)))

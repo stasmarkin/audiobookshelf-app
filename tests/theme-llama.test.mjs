@@ -473,12 +473,13 @@ test('Phase 3A: a drag started while a seek is still pending keeps the played li
 test('Gate B semantic hooks: player keys, unavailable state and sleep readout are marked in the player template', async () => {
   const player = await read('../components/app/AudioPlayer.vue')
   const template = player.slice(0, player.indexOf('</template>'))
-  // Ten keys: chapter start/end, short and long jumps, and queue, bookmark, sleep, chapters in the secondary row
-  assert.equal((template.match(/class="player-key /g) || []).length, 10)
+  // Eleven keys: chapter start/end, short and long jumps, and queue, bookmark, history, sleep, chapters in the secondary row
+  assert.equal((template.match(/class="player-key /g) || []).length, 11)
   assert.equal((template.match(/class="player-key [^"]*next-icon/g) || []).length, 2)
   assert.equal((template.match(/class="player-key [^"]*jump-icon/g) || []).length, 4)
   // The four secondary-row keys also carry the utility hooks (Phase 4J); the sleep key is the icon's wrapper
   assert.match(template, /v-if="playerSettings\.showQueueIcon" class="player-key utility-key queue-key relative cursor-pointer"/)
+  assert.match(template, /v-if="playerSettings\.showHistoryIcon && historyAvailable" class="player-key utility-key history-key material-symbols text-3xl text-fg-muted cursor-pointer"/)
   assert.match(template, /class="player-key utility-key bookmark-key material-symbols text-3xl text-fg-muted cursor-pointer" :class="\{ fill: bookmarks\.length \}"/)
   assert.match(template, /<span v-if="!sleepTimerRunning" class="player-key utility-key sleep-key flex cursor-pointer" @click\.stop="\$emit\('showSleepTimer'\)">\s*<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" class="h-7 w-7 text-fg-muted"/)
   assert.match(template, /class="player-key utility-key chapters-key material-symbols text-3xl text-fg cursor-pointer" :class="chapters\.length \? 'text-opacity-75' : 'text-opacity-10 key-disabled'"/)
@@ -1159,6 +1160,10 @@ const READOUT_LAYOUT_PROPERTIES = {
   '.fullscreen #playerContent .utility-row': ['bottom', 'padding-top', 'padding-bottom'],
   '.fullscreen #playerContent .speed-readout': READOUT_BOX_GEOMETRY,
   '.fullscreen #playerContent .sleep-display': READOUT_BOX_GEOMETRY,
+  // Both optional keys shown: six items share the row (keys may shrink, readouts drop their minimum)
+  '#playerContent .utility-bank-dense .utility-key': ['flex', 'min-width'],
+  '.fullscreen #playerContent .utility-bank-dense .speed-readout': ['min-width', 'padding'],
+  '.fullscreen #playerContent .utility-bank-dense .sleep-display': ['min-width', 'padding'],
   '#streamContainer.fullscreen .chrome-key': [...KEY_BOX_GEOMETRY, 'font-size'],
   '#streamContainer.fullscreen .collapse-key': ['margin-top'],
   '#streamContainer.fullscreen .cast-key': ['margin-top'],
@@ -1689,10 +1694,10 @@ test('Control deck: the hit target is the visible key itself (no pseudo-element 
 test('Control deck hooks: semantic classes on the keys, readouts, utility row and top chrome; no theme branch in the player', async () => {
   const player = await read('../components/app/AudioPlayer.vue')
   const template = player.slice(0, player.indexOf('</template>'))
-  for (const hook of ['queue-key', 'bookmark-key', 'sleep-key', 'chapters-key', 'speed-readout', 'sleep-readout', 'sleep-display', 'utility-row', 'collapse-key', 'cast-key', 'menu-key', 'playback-method']) {
+  for (const hook of ['queue-key', 'bookmark-key', 'history-key', 'sleep-key', 'chapters-key', 'speed-readout', 'sleep-readout', 'sleep-display', 'utility-row', 'collapse-key', 'cast-key', 'menu-key', 'playback-method']) {
     assert.equal((template.match(new RegExp(`\\b${hook}\\b`, 'g')) || []).length, 1, hook)
   }
-  assert.equal((template.match(/\butility-key\b/g) || []).length, 4)
+  assert.equal((template.match(/\butility-key\b/g) || []).length, 5)
   assert.equal((template.match(/\bchrome-key\b/g) || []).length, 3)
   // The sleep wrapper is a flex span carrying the key hooks and the original click
   const sleep = template.match(/<span v-if="!sleepTimerRunning" class="([^"]*)" @click\.stop="\$emit\('showSleepTimer'\)">\s*<svg [^>]*class="h-7 w-7 text-fg-muted"[^>]*>/)

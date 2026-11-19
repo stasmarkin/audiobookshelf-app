@@ -60,6 +60,10 @@ class StartupHistoryPreservationTest {
     db = DbManager(); db.saveLocalLibraryItem(item); db.saveLocalMediaProgress(progress())
     // Cached payload sentinel; Android has no separate bookmark book. JS owns actual server bookmark caching.
     Paper.book("device").write("cached-user-bookmarks", listOf(mapOf("libraryItemId" to "show", "time" to 12)))
+    // Listening journal past its retention and the legacy shared "" key: only a journal write may prune them, never startup
+    val expired = MediaItemEvent("Pause", "Playback", "", 12.0, false, null, null, 1L, "expired-event")
+    db.saveMediaItemHistory(MediaItemHistory("show", "Show", "show", null, false, "server", "https://fixture.invalid", "user", 1L, mutableListOf(expired)))
+    db.saveMediaItemHistory(MediaItemHistory("", "Legacy", "", null, false, null, null, null, 1L, mutableListOf(expired)))
   }
 
   private fun start() { db = DbManager(); db.cleanLocalLibraryItems(ctx); db.cleanLocalMediaProgress() }
@@ -137,6 +141,14 @@ class StartupHistoryPreservationTest {
     db.saveLocalLibraryItem(item); val internalBefore = disk()
     start(); assertEquals(internalBefore, disk())
     internal.delete(); start(); assertEquals(internalBefore, disk())
+  }
+
+  @Test fun startupKeepsExpiredHistoryAndEmptyKeyByteExact() {
+    val before = disk()
+    repeat(3) { start() }
+    assertEquals(before["mediaItemHistory"], disk()["mediaItemHistory"])
+    assertEquals("expired-event", DbManager().getMediaItemHistory("show")!!.events.single().id)
+    assertTrue(DbManager().hasMediaItemHistory(""))
   }
 
   @Test fun repeatedStartupDoesNotRemoveOrphanProgressAndExplicitRemovalStillWorks() {

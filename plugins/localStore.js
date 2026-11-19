@@ -81,6 +81,25 @@ class LocalStorage {
     }
   }
 
+  // History screen: show Save/Sync/Seek too, not only the playback transitions
+  async setHistoryShowAll(showAll) {
+    try {
+      await Preferences.set({ key: 'historyShowAll', value: showAll ? '1' : '0' })
+    } catch (error) {
+      console.error('[LocalStorage] Failed to set history show all', error)
+    }
+  }
+
+  async getHistoryShowAll() {
+    try {
+      const obj = (await Preferences.get({ key: 'historyShowAll' })) || {}
+      return obj.value === '1'
+    } catch (error) {
+      console.error('[LocalStorage] Failed to get history show all', error)
+      return false
+    }
+  }
+
   async setBookshelfListView(useIt) {
     try {
       await Preferences.set({ key: 'bookshelfListView', value: useIt ? '1' : '0' })
