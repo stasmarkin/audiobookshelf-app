@@ -59,6 +59,19 @@ class MediaProgressSyncer(
     serverProgressAck = serverProgressAck?.let { if (acknowledged) it.acknowledged(sessionId, currentTime, System.currentTimeMillis()) else it.sent(sessionId, currentTime) }
   }
 
+  // Test seams: the sync call (to hold or skip its callback) and the main-thread hop of a late Stop/Finished answer
+  internal var syncRunner: (Boolean, Double, Boolean, (SyncResult?) -> Unit) -> Unit = { shouldSyncServer, currentTime, forcePosition, cb ->
+    sync(shouldSyncServer, currentTime, forcePosition, cb)
+  }
+  internal var mainPoster: ((() -> Unit) -> Unit) = { Handler(Looper.getMainLooper()).post(it) }
+
+  @Volatile private var nextPauseIsSleepTimer = false
+
+  /** The sleep timer is about to pause the player: the journal marks that pause as the sleep timer's */
+  fun markNextPauseAsSleepTimer() {
+    nextPauseIsSleepTimer = true
+  }
+
   private val currentDisplayTitle
     get() = currentPlaybackSession?.displayTitle ?: "Unset"
   val currentIsLocal
@@ -108,28 +121,35 @@ class MediaProgressSyncer(
                                           METERED_CONNECTION_SYNC_INTERVAL
 
                   val currentTime = playerNotificationService.getCurrentTimeSeconds()
-                  if (currentTime > 0) {
-                    sync(shouldSyncServer, currentTime) { syncResult ->
-                      DLog.d(tag, "Sync complete")
-
-                      currentPlaybackSession?.let { playbackSession ->
-                        MediaEventManager.saveEvent(playbackSession, syncResult)
-                      }
-                    }
-                  }
+                  if (currentTime > 0) saveTick(shouldSyncServer, currentTime)
                 }
               }
             }
   }
 
+  internal fun saveTick(shouldSyncServer: Boolean, currentTime: Double) {
+    // Recorded before the request: a late answer must not land in whatever book plays by then
+    val snapshot = currentPlaybackSession?.let { MediaEventManager.snapshot(it, currentTime) }
+    val eventId = snapshot?.let { MediaEventManager.recordEvent("Save", it) }
+    syncRunner(shouldSyncServer, currentTime, false) { syncResult ->
+      DLog.d(tag, "Sync complete")
+      if (snapshot != null && eventId != null && syncResult != null) {
+        MediaEventManager.attachSyncResult(snapshot.key, eventId, syncResult)
+      }
+    }
+  }
+
   fun play(playbackSession: PlaybackSession) {
     DLog.d(tag, "play ${playbackSession.displayTitle}")
-    MediaEventManager.playEvent(playbackSession)
+    nextPauseIsSleepTimer = false
+    // After any rewind on resume (auto-rewind, sleep timer): the position the listener actually starts from
+    MediaEventManager.recordEvent("Play", MediaEventManager.snapshot(playbackSession, playerNotificationService.getCurrentTimeSeconds()))
 
     start(playbackSession)
   }
 
   fun stop(shouldSync: Boolean? = true, cb: () -> Unit) {
+    nextPauseIsSleepTimer = false
     if (!listeningTimerRunning) {
       reset()
       return cb()
@@ -140,28 +160,35 @@ class MediaProgressSyncer(
     listeningTimerRunning = false
     DLog.d(tag, "stop: Stopping listening for $currentDisplayTitle")
 
+    val snapshot = currentPlaybackSession?.let { MediaEventManager.snapshot(it, playerNotificationService.getCurrentTimeSeconds()) }
+    val eventId = snapshot?.let { MediaEventManager.recordEvent("Stop", it) }
     val currentTime =
             if (shouldSync == true) playerNotificationService.getCurrentTimeSeconds() else 0.0
     if (currentTime > 0) { // Current time should always be > 0 on stop
-      sync(true, currentTime) { syncResult ->
-        currentPlaybackSession?.let { playbackSession ->
-          MediaEventManager.stopEvent(playbackSession, syncResult)
-        }
-
-        reset()
-        cb()
+      syncRunner(true, currentTime, false) { syncResult ->
+        if (snapshot != null && eventId != null) MediaEventManager.attachSyncResult(snapshot.key, eventId, syncResult)
+        resetIfStill(snapshot?.sessionId, cb)
       }
     } else {
-      currentPlaybackSession?.let { playbackSession ->
-        MediaEventManager.stopEvent(playbackSession, null)
-      }
-
-      reset()
-      cb()
+      resetIfStill(snapshot?.sessionId, cb)
     }
   }
 
+  /**
+   * Ends a Stop/Finished once its sync answered. The answer can arrive after the next book started: only the session
+   * that was stopped is reset, checked and reset on the main thread where start() sets the session. [cb] always runs.
+   */
+  private fun resetIfStill(sessionId: String?, cb: () -> Unit) {
+    val finish = {
+      if (sessionId == null || currentSessionId == sessionId) reset()
+      cb()
+    }
+    if (Looper.myLooper() == Looper.getMainLooper()) finish() else mainPoster(finish)
+  }
+
   fun pause(cb: () -> Unit) {
+    val bySleepTimer = nextPauseIsSleepTimer
+    nextPauseIsSleepTimer = false
     if (!listeningTimerRunning) return
 
     listeningTimerTask?.cancel()
@@ -171,15 +198,16 @@ class MediaProgressSyncer(
     DLog.d(tag, "pause: Last sync time $lastSyncTime")
 
     val currentTime = playerNotificationService.getCurrentTimeSeconds()
+    val description = if (bySleepTimer) MediaEventManager.SLEEP_TIMER_DESCRIPTION else ""
+    val snapshot = currentPlaybackSession?.let { MediaEventManager.snapshot(it, currentTime, description) }
+    val eventId = snapshot?.let { MediaEventManager.recordEvent("Pause", it) }
     if (currentTime > 0) { // Current time should always be > 0 on pause
-      sync(true, currentTime) { syncResult ->
+      syncRunner(true, currentTime, false) { syncResult ->
         lastSyncTime = 0L
         DLog.d(tag, "pause: Set last sync time 0 $lastSyncTime")
         failedSyncs = 0
 
-        currentPlaybackSession?.let { playbackSession ->
-          MediaEventManager.pauseEvent(playbackSession, syncResult)
-        }
+        if (snapshot != null && eventId != null) MediaEventManager.attachSyncResult(snapshot.key, eventId, syncResult)
 
         cb()
       }
@@ -187,10 +215,6 @@ class MediaProgressSyncer(
       lastSyncTime = 0L
       DLog.d(tag, "pause: Set last sync time 0 $lastSyncTime (current time < 0)")
       failedSyncs = 0
-
-      currentPlaybackSession?.let { playbackSession ->
-        MediaEventManager.pauseEvent(playbackSession, null)
-      }
 
       cb()
     }
@@ -204,14 +228,11 @@ class MediaProgressSyncer(
     listeningTimerRunning = false
     DLog.d(tag, "finished: Stopping listening for $currentDisplayTitle")
 
-    sync(true, currentPlaybackSession?.duration ?: 0.0) { syncResult ->
-      reset()
-
-      currentPlaybackSession?.let { playbackSession ->
-        MediaEventManager.finishedEvent(playbackSession, syncResult)
-      }
-
-      cb()
+    val snapshot = currentPlaybackSession?.let { MediaEventManager.snapshot(it, playerNotificationService.getCurrentTimeSeconds()) }
+    val eventId = snapshot?.let { MediaEventManager.recordEvent("Finished", it) }
+    syncRunner(true, currentPlaybackSession?.duration ?: 0.0, false) { syncResult ->
+      if (snapshot != null && eventId != null) MediaEventManager.attachSyncResult(snapshot.key, eventId, syncResult)
+      resetIfStill(snapshot?.sessionId, cb)
     }
   }
 
@@ -230,7 +251,7 @@ class MediaProgressSyncer(
     // The widget shows the confirmed seek position right away (also while paused, e.g. its own jump keys)
     playerNotificationService.showWidgetPosition(currentPlaybackSession?.id, currentPlaybackSession?.currentTime)
 
-    MediaEventManager.seekEvent(currentPlaybackSession!!, null)
+    MediaEventManager.recordEvent("Seek", MediaEventManager.snapshot(currentPlaybackSession!!, currentPlaybackSession!!.currentTime))
 
     // A seek is an explicit position change, even with the listening timer stopped or less than
     // a second after the last save. Use the normal durable/session/server path without counting
