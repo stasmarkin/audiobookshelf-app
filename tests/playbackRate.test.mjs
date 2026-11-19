@@ -70,7 +70,7 @@ test('book durations, remaining times and positions outside the player are shown
     '../components/tables/playlist/ItemTableRow.vue': [/\$elapsedPretty\(this\.\$listeningSeconds\(this\.episode\.duration\)\)/, /\$elapsedPretty\(this\.\$listeningSeconds\(this\.media\.duration\)\)/],
     '../components/tables/ChaptersTable.vue': [/\$secondsToTimestamp\(Math\.round\(\$listeningSeconds\(chapter\.start\)\)\)/, /\$secondsToTimestamp\(Math\.round\(\$listeningSeconds\(Math\.max\(0, chapter\.end - chapter\.start\)\)\)\)/],
     '../pages/item/_id/index.vue': [/\$elapsedPretty\(\$listeningSeconds\(userTimeRemaining\)\)/, /\$elapsedPretty\(\$listeningSeconds\(duration\)\)/, /\$secondsToTimestamp\(Math\.round\(this\.\$listeningSeconds\(startTime\)\)\)/],
-    '../pages/media/_id/history.vue': [/\$secondsToTimestampFull\(Math\.round\(\$listeningSeconds\(evt\.currentTime\)\)\)/]
+    '../pages/media/_id/history.vue': [/\$secondsToTimestampFull\(Math\.round\(\$listeningSeconds\((?:row\.)?evt\.currentTime\)\)\)/]
   }
   const episodeTime = [
     /\$secondsToTimestamp\(Math\.round\(this\.\$listeningSeconds\(this\.episode\.duration\)\)\)/,
