@@ -7,6 +7,10 @@ Audiobookshelf+ changes by release. Earlier releases, their `versionCode`s and d
 
 Merged into `plus`, not yet in a published release.
 
+- **Marking what's playing as finished stops it** (contributed by Stanislav Markin): marking the book or episode in the
+  player as finished now leaves it first, after its last progress sync: playback moves on to the next item of the
+  queue, or the player closes when there is none. Before, playback went on, and its next progress sync marked the item
+  as not finished again, so a finished episode came back to the Incomplete list.
 - **One-tap library switch** (contributed by Stanislav Markin): with exactly two libraries (for example books and
   podcasts), a tap on the library button in the top bar opens the other one; a long press opens the libraries menu.
   With one or three and more libraries a tap opens the menu, as before. Each library remembers its tab, sort and
