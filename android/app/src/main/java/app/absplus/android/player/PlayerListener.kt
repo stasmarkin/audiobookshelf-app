@@ -15,6 +15,11 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
 
   companion object {
     var lastPauseTime: Long = 0   //ms
+
+    /** A seek back of [seekBackMs] from [currentMs] that stops at the start of the current chapter. */
+    fun clampToChapterStart(seekBackMs: Long, currentMs: Long, chapterStartMs: Long): Long =
+      if (currentMs - seekBackMs < chapterStartMs) currentMs - chapterStartMs else seekBackMs
+
     var lazyIsPlaying: Boolean = false
     private const val EARLY_END_SECONDS = 30.0
   }
@@ -72,17 +77,11 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
       DLog.d(tag, "SeekBackTime: Player is playing")
       if (lastPauseTime > 0 && DeviceManager.deviceData.deviceSettings?.disableAutoRewind != true) {
         DLog.d(tag, "SeekBackTime: playing started now set seek back time $lastPauseTime")
-        var seekBackTime = calcPauseSeekBackTime()
+        var seekBackTime = playerNotificationService.listeningToMediaMs(calcPauseSeekBackTime())
         if (seekBackTime > 0) {
           // Current chapter is used so that seek back does not go back to the previous chapter
-          val currentChapter = playerNotificationService.getCurrentBookChapter()
-          val minSeekBackTime = currentChapter?.startMs ?: 0
-
-          val currentTime = playerNotificationService.getCurrentTime()
-          val newTime = currentTime - seekBackTime
-          if (newTime < minSeekBackTime) {
-            seekBackTime = currentTime - minSeekBackTime
-          }
+          val minSeekBackTime = playerNotificationService.getCurrentBookChapter()?.startMs ?: 0
+          seekBackTime = clampToChapterStart(seekBackTime, playerNotificationService.getCurrentTime(), minSeekBackTime)
           DLog.d(tag, "SeekBackTime $seekBackTime")
         }
 

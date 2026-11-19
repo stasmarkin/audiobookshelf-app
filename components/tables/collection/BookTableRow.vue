@@ -63,7 +63,7 @@ export default {
       return this.mediaMetadata.authorName || ''
     },
     bookDuration() {
-      return this.$elapsedPretty(this.media.duration)
+      return this.$elapsedPretty(this.$listeningSeconds(this.media.duration))
     },
     bookCoverAspectRatio() {
       return this.$store.getters['libraries/getBookCoverAspectRatio']

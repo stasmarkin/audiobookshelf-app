@@ -1179,6 +1179,8 @@ export default {
       const rate = normalizePlaybackRate(data.value)
       if (rate === null) return
       this.currentPlaybackRate = rate
+      this.$store.commit('user/setPlaybackRateSetting', rate)
+      this.$emit('nativeSpeedChanged', rate)
       this.updateTimestamp()
       this.updateCoarseTrack()
     },

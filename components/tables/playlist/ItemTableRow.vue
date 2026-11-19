@@ -102,8 +102,8 @@ export default {
       return this.bookAuthorName
     },
     itemDuration() {
-      if (this.episode) return this.$elapsedPretty(this.episode.duration)
-      return this.$elapsedPretty(this.media.duration)
+      if (this.episode) return this.$elapsedPretty(this.$listeningSeconds(this.episode.duration))
+      return this.$elapsedPretty(this.$listeningSeconds(this.media.duration))
     },
     isMissing() {
       return this.libraryItem.isMissing

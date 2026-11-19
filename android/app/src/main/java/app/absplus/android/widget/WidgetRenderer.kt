@@ -1,5 +1,6 @@
 package app.absplus.android.widget
 
+import app.absplus.android.media.readSavedPlaybackRate
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
@@ -59,7 +60,8 @@ object WidgetRenderer {
     val positionMs: Long?,
     val durationMs: Long?,
     val awaiting: AwaitingDisplay? = null,
-    val awaitingCoverUri: Uri? = null
+    val awaitingCoverUri: Uri? = null,
+    val speed: Float = 1f
   ) {
     val title: String? get() = awaiting?.title ?: session?.displayTitle
     val author: String? get() = if (awaiting != null) awaiting.author else session?.displayAuthor
@@ -110,7 +112,8 @@ object WidgetRenderer {
       isPlaying = false,
       showControls = session != null && PlaybackRestoreStore.isResumable(context),
       positionMs = session?.let { (it.currentTime * 1000).toLong() },
-      durationMs = session?.let { (it.duration * 1000).toLong() }
+      durationMs = session?.let { (it.duration * 1000).toLong() },
+      speed = readSavedPlaybackRate(context) ?: 1f
     )
   }
 
@@ -213,7 +216,7 @@ object WidgetRenderer {
         }
       }
       // Snapshot only: fixed at this update, never advanced by a timer or scheduled work
-      val snapshot = WidgetText.snapshot(state.positionMs, state.durationMs)
+      val snapshot = WidgetText.snapshot(state.positionMs, state.durationMs, state.speed)
       views.setViewVisibility(R.id.widgetTimeRow, if (snapshot != null) View.VISIBLE else View.INVISIBLE)
       views.setProgressBar(R.id.widgetProgress, WidgetText.PROGRESS_MAX, snapshot?.progress ?: 0, false)
       if (snapshot != null) {

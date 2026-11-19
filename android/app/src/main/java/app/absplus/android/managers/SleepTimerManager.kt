@@ -329,7 +329,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
                 tag,
                 "Auto sleep timer auto rewind seeking back ${deviceSettings.autoSleepTimerAutoRewindTime}ms"
         )
-        playerNotificationService.seekBackward(deviceSettings.autoSleepTimerAutoRewindTime)
+        playerNotificationService.seekBackward(playerNotificationService.listeningToMediaMs(deviceSettings.autoSleepTimerAutoRewindTime))
       }
     }
   }

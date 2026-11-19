@@ -139,15 +139,17 @@ class AbsAudioPlayerWeb extends WebPlugin {
   }
 
   // PluginMethod
+  // value: seconds of listening time, as on Android
   seekForward({ value }) {
-    this.startTime = Math.min(this.overallCurrentTime + value, this.totalDuration)
+    // Stops 2 s before the end, as on Android: the end itself maps to no track
+    this.startTime = Math.min(this.overallCurrentTime + value * this.playbackRate, Math.max(this.overallCurrentTime, this.totalDuration - 2))
     this.playWhenReady = this.playerPlaying
     this.loadCurrentTrack()
   }
 
   // PluginMethod
   seekBackward({ value }) {
-    this.startTime = Math.max(0, this.overallCurrentTime - value)
+    this.startTime = Math.max(0, this.overallCurrentTime - value * this.playbackRate)
     this.playWhenReady = this.playerPlaying
     this.loadCurrentTrack()
   }

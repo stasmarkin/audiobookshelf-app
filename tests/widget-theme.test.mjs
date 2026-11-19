@@ -414,8 +414,10 @@ test('Gate F freeze: standard widget layouts, sizing, artwork planning, provider
     // updateAppWidget takes a whole State; layouts, ids, actions, sizing and artwork bounds are unchanged.
     // Offline-first 7: the fallback state starts the cover cache (a launcher-started process has no sync runtime);
     // layouts, ids, actions, sizing and artwork bounds are unchanged.
-    'widget/WidgetRenderer.kt': '430857cd6b8f2d165506c5463117167fd8f522ee5ccb6f3fb5bd023dd298d231',
-    'MediaPlayerWidget.kt': '7da12e737c8c666b4e9c5be96125eb6dfa4ef1acbbfb876282d33596bc7033e8'
+    // Speed-aware time: the state carries the playback speed and the snapshot draws listening time at it (the live
+    // player's speed, else the saved one); layouts, ids, actions, sizing and artwork are unchanged.
+    'widget/WidgetRenderer.kt': 'fcb4ac5c28534c5b154ca237037e707a13ae78a7dc072a44b1bfc4fb16e957ca',
+    'MediaPlayerWidget.kt': '4d58b12e3bdd2709859761af823beed6fa3044d41e08bc85749cba6cfacef20a'
   }
   for (const [file, hash] of Object.entries(code)) assert.equal(await sha256(WIDGET_SRC + file), hash, `${file} changed`)
 })

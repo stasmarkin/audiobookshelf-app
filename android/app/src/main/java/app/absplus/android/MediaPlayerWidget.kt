@@ -1,5 +1,6 @@
 package app.absplus.android
 
+import app.absplus.android.media.readSavedPlaybackRate
 import app.absplus.android.diagnostics.DLog
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -49,9 +50,12 @@ class MediaPlayerWidget : AppWidgetProvider() {
  * @param showControls true when there is a live session or a resumable one (Play restores it);
  *   false only when nothing can be played, e.g. after the user explicitly closed playback
  * @param positionMs / durationMs the known position and length for the progress snapshot, when available
+ * @param speed the live player's speed for the snapshot times, when there is one
  */
-internal fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, playbackSession: PlaybackSession?, isPlaying: Boolean, showControls: Boolean, positionMs: Long? = null, durationMs: Long? = null) {
-  updateAppWidget(context, appWidgetManager, appWidgetId, widgetStateOf(playbackSession, isPlaying, showControls, positionMs, durationMs))
+internal fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, playbackSession: PlaybackSession?, isPlaying: Boolean, showControls: Boolean, positionMs: Long? = null, durationMs: Long? = null, speed: Float? = null) {
+  // Without a live player, the speed the user last chose
+  val rate = speed ?: readSavedPlaybackRate(context) ?: 1f
+  updateAppWidget(context, appWidgetManager, appWidgetId, widgetStateOf(playbackSession, isPlaying, showControls, positionMs, durationMs, rate))
 }
 
 internal fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, state: WidgetRenderer.State) {
@@ -60,8 +64,8 @@ internal fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManage
 }
 
 /** The widget's state; without a known position or length, the session's saved ones. */
-internal fun widgetStateOf(playbackSession: PlaybackSession?, isPlaying: Boolean, showControls: Boolean, positionMs: Long? = null, durationMs: Long? = null): WidgetRenderer.State {
+internal fun widgetStateOf(playbackSession: PlaybackSession?, isPlaying: Boolean, showControls: Boolean, positionMs: Long? = null, durationMs: Long? = null, speed: Float = 1f): WidgetRenderer.State {
   val position = positionMs ?: playbackSession?.let { (it.currentTime * 1000).toLong() }
   val duration = durationMs ?: playbackSession?.let { (it.duration * 1000).toLong() }
-  return WidgetRenderer.State(playbackSession, isPlaying, showControls, position, duration)
+  return WidgetRenderer.State(playbackSession, isPlaying, showControls, position, duration, speed = speed)
 }

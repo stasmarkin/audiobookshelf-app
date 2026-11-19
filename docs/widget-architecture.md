@@ -32,9 +32,9 @@ Unchanged: play/pause, rewind (jump backward) and fast-forward (jump forward) th
 
 ## Progress and time (FULL only)
 
-A **snapshot**: the progress bar, elapsed and remaining time are exactly what they were at the last widget update. They do not advance while playing.
+A **snapshot**: the progress bar, elapsed and remaining time are exactly what they were at the last widget update. They do not advance while playing. Elapsed and remaining are listening time at the playback speed, as in the app (at 2×, an hour of the book reads 30:00); the bar is the share of the book. Without a live player the widget uses the speed the user last chose. See [speed-aware time](speed-aware-time.md).
 
-A `Chronometer` was considered and rejected: it counts wall-clock time at 1×, so it drifts at other playback speeds and after seeks, and seeks and speed changes don't trigger a widget update. No periodic updates were added (per Gate 3). A live time would need widget refresh calls on seek and speed changes inside playback code, which needs separate authorization.
+A `Chronometer` was considered and rejected: it counts wall-clock time at 1×, so it drifts at other playback speeds and after seeks, and seeks and speed changes don't trigger a widget update. No periodic updates were added (per Gate 3). A live time would need widget refresh calls on seek changes inside playback code, which needs separate authorization. A speed change does redraw the widget (`PlayerNotificationService.setPlaybackSpeed`), so the snapshot is never drawn at a stale speed.
 
 ## Theme
 

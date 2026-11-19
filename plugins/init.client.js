@@ -8,6 +8,7 @@ import { Clipboard } from '@capacitor/clipboard'
 import { Capacitor } from '@capacitor/core'
 import { formatDistance, format, addDays, isDate, setDefaultOptions } from 'date-fns'
 import * as locale from 'date-fns/locale'
+import { listeningSeconds } from '@/utils/playbackRate'
 
 Vue.directive('click-outside', vClickOutside.directive)
 
@@ -113,6 +114,13 @@ Vue.prototype.$elapsedPrettyExtended = (seconds, useDays = true, showSeconds = t
   if (minutes) strs.push(`${minutes}m`)
   if (seconds && showSeconds) strs.push(`${seconds}s`)
   return strs.join(' ')
+}
+
+// Book seconds at the user's playback speed. Not an arrow function: it reads this component's store. Bookshelf cards are
+// mounted without a store, so they fall back to the app's
+Vue.prototype.$listeningSeconds = function (seconds) {
+  const store = this.$store || this.$nuxt.$store
+  return listeningSeconds(seconds, store.getters['user/getUserSetting']('playbackRate'))
 }
 
 Vue.prototype.$secondsToTimestamp = (seconds) => {

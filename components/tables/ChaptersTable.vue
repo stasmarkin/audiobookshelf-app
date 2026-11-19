@@ -22,10 +22,10 @@
             {{ chapter.title }}
           </td>
           <td class="font-mono text-center underline w-16" @click.stop="goToTimestamp(chapter.start)">
-            {{ $secondsToTimestamp(chapter.start) }}
+            {{ $secondsToTimestamp(Math.round($listeningSeconds(chapter.start))) }}
           </td>
           <td class="font-mono text-center">
-            {{ $secondsToTimestamp(Math.max(0, chapter.end - chapter.start)) }}
+            {{ $secondsToTimestamp(Math.round($listeningSeconds(Math.max(0, chapter.end - chapter.start)))) }}
           </td>
         </tr>
       </table>
