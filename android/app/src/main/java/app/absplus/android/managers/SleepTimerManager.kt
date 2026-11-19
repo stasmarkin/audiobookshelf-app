@@ -168,6 +168,7 @@ constructor(private val playerNotificationService: PlayerNotificationService) {
 
                   if (sleepTimeSecondsRemaining <= 0) {
                     DLog.d(tag, "Sleep Timer Pausing Player on Chapter")
+                    playerNotificationService.mediaProgressSyncer.markNextPauseAsSleepTimer()
                     pause()
 
                     playerNotificationService.clientEventEmitter?.onSleepTimerEnded(

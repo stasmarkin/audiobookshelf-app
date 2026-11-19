@@ -862,7 +862,7 @@ class ApiHandler(var ctx:Context) {
           playbackSessions.find { ps -> ps.id == localSessionSyncResult.id }?.let { session ->
             if (localSessionSyncResult.progressSynced == true) {
               val syncResult = SyncResult(true, true, "Progress synced on server")
-              MediaEventManager.saveEvent(session, syncResult)
+              MediaEventManager.recordSessionSave(session, syncResult)
 
               AbsLogger.info("ApiHandler", "sendSyncLocalSessions: Synced session \"${session.displayTitle}\" with server, server progress was updated for item ${session.mediaItemId}")
             } else if (!localSessionSyncResult.success && LocalSessionsCleanup.isItemGone(localSessionSyncResult.error)) {

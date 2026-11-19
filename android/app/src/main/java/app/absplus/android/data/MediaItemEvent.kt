@@ -11,5 +11,6 @@ class MediaItemEvent(
   var serverSyncAttempted:Boolean?,
   var serverSyncSuccess:Boolean?,
   var serverSyncMessage:String?,
-  var timestamp: Long
+  var timestamp: Long,
+  var id: String? = null // null on events written before ids existed
 )
