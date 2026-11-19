@@ -85,7 +85,7 @@ test('book durations, remaining times and positions outside the player are shown
     for (const pattern of patterns) assert.match(source, pattern, path)
   }
   // The history row still seeks to the book position, not the scaled one
-  assert.match(await read('../pages/media/_id/history.vue'), /@click="clickPlaybackTime\(evt\.currentTime\)"/)
+  assert.match(await read('../pages/media/_id/history.vue'), /@click="clickPlaybackTime\((?:row\.)?evt\.currentTime\)"/)
   // File durations, real-time sleep remaining and listening statistics are not book time at a speed
   for (const path of ['../components/tables/TracksTable.vue', '../components/modals/SleepTimerModal.vue', '../pages/stats.vue']) {
     assert.doesNotMatch(await read(path), /\$listeningSeconds/, path)
